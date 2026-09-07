@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Proprietary Broadcom/VMware WMKS SDK files - not ours to redistribute,
+# each developer/deploy downloads their own copy. See
+# spikes/webmks/README.md.
+wmks.min.js
+wmks-all.css
+wmks.js

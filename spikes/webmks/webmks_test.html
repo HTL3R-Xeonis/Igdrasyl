@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMKS spike</title>
+
+<!-- jQuery/jQuery UI: the WMKS SDK's own declared dependencies -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+
+<!--
+  WMKS SDK files - NOT included here, download separately from Broadcom
+  (see README.md) and place wmks.min.js / wmks-all.css next to this file.
+-->
+<link rel="stylesheet" href="./wmks-all.css">
+<script src="./wmks.min.js"></script>
+
+<style>
+  body { font-family: sans-serif; margin: 1.5rem; }
+  #url { width: 520px; font-family: monospace; }
+  #console { width: 800px; height: 600px; margin-top: 1rem; border: 1px solid #444; background: #000; }
+  #status { font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>WebMKS spike</h1>
+<p>Run <code>webmks_spike.py</code>, paste the printed WebSocket URL below, then click Connect.</p>
+
+<input id="url" type="text" placeholder="wss://10.20.20.202:443/ticket/...">
+<button onclick="connect()">Connect</button>
+<p id="status">Not connected.</p>
+<div id="console"></div>
+
+<script>
+  let wmks = null;
+
+  function connect() {
+    const url = document.getElementById("url").value.trim();
+    if (!url) return;
+
+    if (wmks) {
+      wmks.disconnect();
+      wmks.destroy();
+      wmks = null;
+    }
+
+    wmks = WMKS.createWMKS("console", {}).register(
+      WMKS.CONST.Events.CONNECTION_STATE_CHANGE,
+      (event, data) => {
+        document.getElementById("status").textContent =
+          "State: " + data.state + (data.error ? " (" + data.error + ")" : "");
+      }
+    );
+
+    wmks.connect(url);
+  }
+</script>
+</body>
+</html>
