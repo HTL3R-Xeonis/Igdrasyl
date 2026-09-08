@@ -36,15 +36,31 @@ friction, unlike VMware's SDK).
 compatibility snag on this specific ESXi version - try `novnc_test.html`
 first.
 
+## Important: acquire the ticket from vCenter if the host has one
+
+**Check this first** - Host Client's own "About" panel (top of the host
+summary page) shows whether the host is vCenter-managed
+("State: Normal (connected to vCenter Server at ...)"). If it is,
+`--host` below MUST point at vCenter's own address, not the ESXi host
+directly - acquiring a ticket straight from a vCenter-managed host's own
+`hostd` produced a real, reproduced failure here: the TLS handshake
+succeeds, but `rhttpproxy` never sends back any HTTP response at all for
+the ticket path (confirmed via `raw_http_test.py`, 0 bytes received).
+`ticket.host` also came back empty in that case - a properly
+vCenter-brokered ticket normally fills that field in with the real ESXi
+host to actually open the console on (which can differ from vCenter's
+own address), so `webmks_spike.py` prefers `ticket.host` when present
+rather than always overriding it.
+
 ## Running it
 
 ```bash
 pip install -r requirements.txt
-python webmks_spike.py --host 10.20.20.202 --user root --password '<esxi password>' --vm <any already-running VM name>
+python webmks_spike.py --host <vCenter address if this host has one, else the ESXi host> --user root --password '<password>' --vm <any already-running VM name>
 ```
 
 It doesn't need to be a TopologyBuilder-deployed VM - any powered-on VM
-on the host works, this only tests whether WebMKS itself functions here.
+works, this only tests whether WebMKS itself functions here.
 
 Copy the printed `wss://...` URL, open `novnc_test.html` in a browser,
 paste the URL into the input field, and click Connect.

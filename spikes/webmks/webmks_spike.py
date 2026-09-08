@@ -75,17 +75,22 @@ def main() -> int:
 
         ticket = vm.AcquireTicket(ticketType="webmks")
 
-        # Known gotcha: ticket.host can come back wrong/unreachable on a
-        # standalone ESXi host - use the host we actually connected to
-        # instead of trusting that field.
-        ws_url = f"wss://{args.host}:{ticket.port}/ticket/{ticket.ticket}"
+        # ticket.host can come back empty when talking directly to a
+        # standalone ESXi host - fall back to the host we connected to in
+        # that case. But when going through vCenter (this host reported
+        # itself as vCenter-managed), ticket.host is the correct, real
+        # ESXi host to open the console on - which can genuinely differ
+        # from vCenter's own address, so it must NOT be overridden here.
+        ticket_host = ticket.host if ticket.host else args.host
+        ws_url = f"wss://{ticket_host}:{ticket.port}/ticket/{ticket.ticket}"
 
         print("WebMKS ticket acquired successfully.\n")
-        print(f"  ticket.host (as returned by ESXi, may be wrong): {getattr(ticket, 'host', None)}")
+        print(f"  ticket.host (as returned): {getattr(ticket, 'host', None)!r}")
         print(f"  ticket.port: {ticket.port}")
         print(f"  ticket.ticket: {ticket.ticket}")
+        print(f"  host used in the URL: {ticket_host}")
         print(f"\n  WebSocket URL to use: {ws_url}\n")
-        print("Paste that URL into webmks_test.html's input field and click Connect.")
+        print("Paste that URL into novnc_test.html's input field and click Connect.")
         return 0
     finally:
         Disconnect(service_instance)
