@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMKS spike (noVNC, no downloads required)</title>
+
+<style>
+  body { font-family: sans-serif; margin: 1.5rem; }
+  #url { width: 520px; font-family: monospace; }
+  #screen { width: 800px; height: 600px; margin-top: 1rem; border: 1px solid #444; background: #000; }
+  #status { font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>WebMKS spike - via open-source noVNC</h1>
+<p>
+  Paste the WebSocket URL printed by <code>webmks_spike.py</code>, then click
+  Connect. Unlike <code>webmks_test.html</code>, this needs nothing
+  downloaded - noVNC's <code>rfb.js</code> loads straight from a CDN,
+  because on vSphere/ESXi 6+ WebMKS's actual wire protocol is standard
+  RFB-over-WebSocket, so a stock, fully open-source VNC client works
+  directly - no proprietary VMware SDK involved at all. (Confirmed via
+  <a href="https://github.com/rgerganov/mks/blob/master/mks.py">rgerganov/mks</a>'s
+  own source, which does exactly this.)
+</p>
+
+<input id="url" type="text" placeholder="wss://10.20.20.202:443/ticket/...">
+<button id="connectBtn">Connect</button>
+<p id="status">Not connected.</p>
+<div id="screen"></div>
+
+<script type="module">
+  import RFB from "https://cdn.jsdelivr.net/gh/novnc/noVNC@v1.7.0/core/rfb.js";
+
+  let rfb = null;
+  const statusEl = document.getElementById("status");
+
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
+
+  document.getElementById("connectBtn").addEventListener("click", () => {
+    const url = document.getElementById("url").value.trim();
+    if (!url) return;
+
+    if (rfb) {
+      rfb.disconnect();
+      rfb = null;
+    }
+
+    setStatus("Connecting...");
+
+    rfb = new RFB(document.getElementById("screen"), url, {
+      // The webmks ticket itself is the credential - no VNC password.
+      credentials: { password: "" },
+    });
+
+    rfb.addEventListener("connect", () => setStatus("Connected."));
+    rfb.addEventListener("disconnect", (e) =>
+      setStatus("Disconnected" + (e.detail.clean ? "" : " (unexpectedly)"))
+    );
+    rfb.addEventListener("securityfailure", (e) =>
+      setStatus("Security failure: " + e.detail.reason)
+    );
+    rfb.addEventListener("credentialsrequired", () =>
+      setStatus("Server unexpectedly asked for credentials - not expected for a ticket-based connection")
+    );
+  });
+</script>
+</body>
+</html>

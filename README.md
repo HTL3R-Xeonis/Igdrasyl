@@ -15,8 +15,10 @@ if picking this up fresh.
 ## Planned architecture
 
 - Web app (FastAPI backend + plain frontend - `xterm.js` for GNS3
-  console, VMware's WebMKS for embedded VM screens), not a native
-  desktop app - forced by WebMKS being fundamentally browser technology.
+  console, embedded VM screens via WebMKS tickets rendered with
+  open-source `noVNC`, not VMware's proprietary SDK - see
+  `spikes/webmks/README.md`), not a native desktop app - forced by
+  WebMKS being fundamentally browser technology.
 - Depends on TopologyBuilder as an installed library
   (`ESXiConnection`/`GNS3Connection`/`Settings`/`Graph`), not a copy of
   its code.
