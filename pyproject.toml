@@ -18,5 +18,11 @@ dependencies = [
     "netmiko==4.7.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest==9.1.1", "httpx==0.28.1"]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

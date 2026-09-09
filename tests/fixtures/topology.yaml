@@ -1,0 +1,12 @@
+nodes:
+  - names: [R1]
+    role: ROUTER
+    image: Cisco IOSv 15.6(1)T
+  - names: [SW1]
+    role: SWITCH
+    image: VPCS
+  - names: [VM1]
+    role: VM
+    image: debian
+edges:
+  - [R1, gi0/0, SW1, Ethernet0]
