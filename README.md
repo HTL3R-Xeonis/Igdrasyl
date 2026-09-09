@@ -7,10 +7,9 @@ automated per-device configuration push from a second config file. A
 separate tool from TopologyBuilder itself, depending on it as a library
 rather than duplicating its ESXi/GNS3 connection code.
 
-**Status: design/scoping only, nothing built yet beyond the spike
-below.** See the full architecture design in this project's memory
-(`project_operator_tool_design.md` in TopologyBuilder's session memory)
-if picking this up fresh.
+**Status: Phase 0/1 FastAPI backend skeleton exists (read-only), plus
+the WebMKS spike below.** See `HANDOFF.md` for the full history and
+design rationale if picking this up fresh.
 
 ## Planned architecture
 
@@ -30,9 +29,19 @@ if picking this up fresh.
 
 ## Current state
 
+- `app/` - the real FastAPI backend, Phase 0/1: read-only only so far.
+  Depends on TopologyBuilder as a library (see `pyproject.toml`, pinned
+  to its `dev` branch), reusing its `Settings`/`Graph`/`ESXiConnection`/
+  `GNS3Connection` wholesale rather than duplicating any connection
+  code. Copy `settings.example.yml` to `settings.yml` and
+  `.env.example` to `.env`, point `TOPOLOGYOPERATOR_SETTINGS` at the
+  former, then `uvicorn app.main:app --reload`. Endpoints so far:
+  `/health`, `/topology` (the topology file's own structure, no live
+  state), `/nodes` (topology nodes merged with live GNS3 status/console
+  port+type - not yet tested against real infrastructure, see
+  `HANDOFF.md`). No frontend, no GNS3 console proxy, no config-push
+  engine, no VM guest-ops yet.
 - `spikes/webmks/` - a standalone, throwaway proof of concept testing
   whether WebMKS console embedding actually works against this project's
-  real ESXi infrastructure. This is the least-proven, highest-risk piece
-  of the design, so it's being tested in isolation before any of the
-  actual application (FastAPI backend, frontend, GNS3 console proxy,
-  guest-exec, config push) gets built. See `spikes/webmks/README.md`.
+  real ESXi infrastructure. Currently blocked (see `HANDOFF.md`) -
+  parked, not gating the rest of the app. See `spikes/webmks/README.md`.

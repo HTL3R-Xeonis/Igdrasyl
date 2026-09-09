@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+*.egg-info/
+
+settings.yml
+.env
+logs/
 
 # Proprietary Broadcom/VMware WMKS SDK files - not ours to redistribute,
 # each developer/deploy downloads their own copy. See

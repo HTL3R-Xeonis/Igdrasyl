@@ -1,0 +1,33 @@
+# Optional settings overrides for TopologyOperator, loaded via the
+# TOPOLOGYOPERATOR_SETTINGS env var (defaults to ./settings.yml).
+# Copy this file to settings.yml (git-ignored) and fill in your own values.
+#
+# This reuses TopologyBuilder's own Settings class/YAML schema wholesale -
+# TopologyOperator doesn't have a config format of its own, it just needs
+# to point at the SAME topology file and infrastructure a TopologyBuilder
+# deploy already used, so it can look up what's actually running.
+# Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
+# GNS3_PASSWORD environment variables instead (a .env file works too, see
+# .env.example).
+
+# Path to the SAME topology YAML file a `topologybuilder deploy` already
+# used - this is what TopologyOperator reads to know what nodes/edges
+# should exist, before cross-referencing live GNS3/ESXi state.
+topology_file: ./topology_example.yaml
+
+esxi:
+  ip: 10.20.20.202
+  username: root
+  gns3_vm_name: GNS3-VM (1)
+
+gns3:
+  username: gns3
+  # Must match the project name that deploy actually used - omit (or
+  # comment out) to default to the topology file's own stem, same rule
+  # TopologyBuilder itself uses.
+  # project_name: tb_gns3_project
+  port: 80
+
+api:
+  esxi_template_server_url: http://10.20.20.171:8000
+  gns3_template_server_url: http://10.20.20.171:8001
