@@ -102,12 +102,58 @@
   }
   #terminal { flex: 1; padding: 8px; min-height: 0; }
   #terminal:empty { display: none; }
+  header button.tab-btn {
+    font-size: 12px;
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    margin-left: auto;
+  }
+  header button.tab-btn.active { color: var(--text); border-color: var(--accent); }
+  #push-area { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
+  #push-area textarea {
+    width: 100%;
+    height: 140px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+  #push-area button.push-btn {
+    align-self: flex-start;
+    margin-top: 8px;
+    font-size: 13px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  #push-results { margin-top: 16px; font-size: 13px; }
+  .device-result { border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; overflow: hidden; }
+  .device-result-header { padding: 6px 10px; display: flex; justify-content: space-between; background: var(--panel); }
+  .device-result-header.ok { border-left: 3px solid var(--ok); }
+  .device-result-header.fail { border-left: 3px solid var(--bad); }
+  .device-result table { font-size: 12px; }
+  .device-result td { border-bottom: 1px solid var(--border); }
+  .cmd-ok { color: var(--ok); }
+  .cmd-fail { color: var(--bad); }
 </style>
 </head>
 <body>
 <header>
   <h1>TopologyOperator</h1>
   <span class="meta" id="project-meta"></span>
+  <button class="tab-btn active" id="tab-console">Console</button>
+  <button class="tab-btn" id="tab-push">Config Push</button>
 </header>
 <div id="warning-banner"></div>
 <main>
@@ -126,6 +172,18 @@
     </div>
     <div id="console-placeholder">Select a node's Console button to open it here.</div>
     <div id="terminal"></div>
+  </div>
+  <div id="push-area" hidden>
+    <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
+      Paste a devices object (device name → list of raw commands, sent
+      verbatim - same shape as the project's config-push YAML file's
+      <code>devices:</code> key, as JSON here) and push.
+    </p>
+    <textarea id="push-input">{
+  "R1": ["show version"]
+}</textarea>
+    <button class="push-btn" id="push-btn">Push</button>
+    <div id="push-results"></div>
   </div>
 </main>
 
@@ -209,6 +267,75 @@ function openConsole(nodeName) {
     }
   });
 }
+
+document.getElementById("tab-console").addEventListener("click", () => showTab("console"));
+document.getElementById("tab-push").addEventListener("click", () => showTab("push"));
+
+function showTab(name) {
+  document.getElementById("console-area").hidden = name !== "console";
+  document.getElementById("push-area").hidden = name !== "push";
+  document.getElementById("tab-console").classList.toggle("active", name === "console");
+  document.getElementById("tab-push").classList.toggle("active", name === "push");
+}
+
+document.getElementById("push-btn").addEventListener("click", async () => {
+  const resultsEl = document.getElementById("push-results");
+  let devices;
+  try {
+    devices = JSON.parse(document.getElementById("push-input").value);
+  } catch (err) {
+    resultsEl.textContent = `Invalid JSON: ${err}`;
+    return;
+  }
+  resultsEl.textContent = "Pushing…";
+
+  let deviceResults;
+  try {
+    const resp = await fetch("/config-push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ devices }),
+    });
+    if (!resp.ok) {
+      resultsEl.textContent = `Request failed: HTTP ${resp.status}`;
+      return;
+    }
+    deviceResults = await resp.json();
+  } catch (err) {
+    resultsEl.textContent = `Request failed: ${err}`;
+    return;
+  }
+
+  resultsEl.innerHTML = "";
+  for (const result of deviceResults) {
+    const box = document.createElement("div");
+    box.className = "device-result";
+    const header = document.createElement("div");
+    header.className = `device-result-header ${result.ok ? "ok" : "fail"}`;
+    header.innerHTML = `<span>${result.device} <span class="env-tag">${result.transport}</span></span><span>${result.ok ? "ok" : "failed"}</span>`;
+    box.appendChild(header);
+
+    if (result.error) {
+      const err = document.createElement("div");
+      err.style.padding = "6px 10px";
+      err.style.color = "var(--bad)";
+      err.textContent = result.error;
+      box.appendChild(err);
+    }
+    if (result.commands && result.commands.length) {
+      const table = document.createElement("table");
+      table.innerHTML = result.commands.map(c => `
+        <tr>
+          <td class="${c.ok ? "cmd-ok" : "cmd-fail"}">${c.ok ? "✓" : "✗"}</td>
+          <td>${c.command}</td>
+          <td style="color: var(--dim)">${(c.output || "").slice(0, 200)}</td>
+        </tr>
+      `).join("");
+      box.appendChild(table);
+    }
+    resultsEl.appendChild(box);
+  }
+});
 
 loadNodes().catch((err) => {
   document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;

@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from pydantic import BaseModel
 
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
@@ -25,6 +26,7 @@ from src.graph.environment import Environment
 from src.settings import Settings
 
 from app import console
+from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.topology import load_graph, resolve_project_name
 
@@ -162,6 +164,24 @@ def nodes() -> list[dict[str, Any]]:
             entry["status"] = None
         result.append(entry)
     return result
+
+
+class PushRequest(BaseModel):
+    devices: dict[str, list[str]]
+
+
+@app.post("/config-push")
+def config_push(request: PushRequest) -> list[DeviceResult]:
+    """
+    Pushes each device's raw command list over its auto-selected
+    transport (Netmiko for GNS3 console devices, guest-ops for ESXi
+    VMs). Stops a device's remaining commands on its first failure, but
+    always processes every device in the request - see app/config_push.py.
+    Synchronous on purpose: FastAPI runs a plain `def` route in its
+    threadpool, so this doesn't block the event loop the console
+    WebSocket proxy also needs.
+    """
+    return push_all(request.devices, app)
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in

@@ -15,6 +15,7 @@ dependencies = [
     "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@dev",
     "fastapi==0.121.2",
     "uvicorn[standard]==0.38.0",
+    "netmiko==4.7.0",
 ]
 
 [tool.setuptools.packages.find]
