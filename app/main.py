@@ -28,6 +28,7 @@ from src.settings import Settings
 from app import console, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
+from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -169,6 +170,31 @@ def nodes() -> list[dict[str, Any]]:
             entry["status"] = str(vm.runtime.powerState) if vm is not None else None
         result.append(entry)
     return result
+
+
+@app.get("/layout")
+def layout() -> dict[str, dict[str, float]]:
+    """
+    Every node's canvas position - saved (from a prior drag) where
+    available, otherwise a computed force-directed default, so the
+    frontend always gets a full layout even before anyone has dragged
+    anything. See app/layout.py.
+    """
+    return load_layout(app.state.graph.nodes)
+
+
+class LayoutUpdate(BaseModel):
+    name: str
+    x: float
+    y: float
+
+
+@app.post("/layout")
+def update_layout(update: LayoutUpdate) -> dict[str, str]:
+    if update.name not in app.state.graph.nodes:
+        raise HTTPException(404, f"no node named {update.name!r}")
+    save_position(update.name, update.x, update.y)
+    return {"status": "ok"}
 
 
 class PushRequest(BaseModel):

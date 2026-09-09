@@ -23,6 +23,12 @@
     --bad: #e05a5a;
   }
   * { box-sizing: border-box; }
+  /* Without this, an element with an ID-selector display rule (flex,
+     block, ...) stays visible despite the `hidden` attribute - the
+     browser's own [hidden] default rule loses the specificity fight
+     against any #id{display:...} rule. Hit both #node-actions and
+     #console-header this session. */
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     background: var(--bg);
@@ -54,17 +60,25 @@
     display: flex;
     min-height: 0;
   }
-  #node-list {
-    width: 420px;
-    overflow-y: auto;
+  #canvas-area {
+    width: 62%;
     border-right: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
   }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-  th { color: var(--dim); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
-  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .status-started, .status-poweredOn { background: var(--ok); }
-  .status-stopped, .status-poweredOff, .status-suspended, .status-none { background: var(--dim); }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #canvas.panning { cursor: grabbing; }
+  .node-shape { cursor: pointer; }
+  .node-shape rect { stroke-width: 1.5; fill: var(--panel); }
+  .node-shape.selected rect { stroke-width: 3; }
+  .node-shape text { fill: var(--text); font-size: 11px; pointer-events: none; user-select: none; }
+  .node-shape .role-badge { fill: var(--dim); font-size: 9px; }
+  .role-ROUTER rect { stroke: #4f8cff; }
+  .role-SWITCH rect { stroke: #3ecf8e; }
+  .role-PC rect { stroke: #8b93a7; }
+  .role-FW rect { stroke: #e05a5a; }
+  .role-VM rect { stroke: #b06fe0; stroke-dasharray: 4 2; }
+  .link-line { stroke: var(--border); stroke-width: 1.5; }
   .env-tag {
     font-size: 11px;
     color: var(--dim);
@@ -82,6 +96,14 @@
     cursor: pointer;
   }
   button.console-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; }
+  #node-actions {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
   #console-area {
     flex: 1;
     display: flex;
@@ -163,20 +185,24 @@
 </header>
 <div id="warning-banner"></div>
 <main>
-  <div id="node-list">
-    <table>
-      <thead>
-        <tr><th>Node</th><th>Role</th><th>Env</th><th></th></tr>
-      </thead>
-      <tbody id="node-rows"></tbody>
-    </table>
+  <div id="canvas-area">
+    <svg id="canvas" viewBox="0 0 1600 900">
+      <g id="links-layer"></g>
+      <g id="nodes-layer"></g>
+    </svg>
   </div>
   <div id="console-area">
+    <div id="node-actions" hidden>
+      <span class="env-tag" id="selected-role"></span>
+      <strong id="selected-name"></strong>
+      <span id="selected-status" style="color: var(--dim);"></span>
+      <button class="console-btn" id="selected-action-btn" style="margin-left: auto;"></button>
+    </div>
     <div id="console-header" hidden>
       <span id="console-title"></span>
       <span id="console-status"></span>
     </div>
-    <div id="console-placeholder">Select a node's Console/Screen button to open it here.</div>
+    <div id="console-placeholder">Click a node on the canvas to see its details here.</div>
     <div id="terminal"></div>
     <div id="vm-screen-container"></div>
   </div>
@@ -206,11 +232,19 @@ function closeViewers() {
   document.getElementById("vm-screen-container").style.display = "none";
 }
 
-async function loadNodes() {
-  const [health, topology, nodesResult] = await Promise.all([
+const NODE_W = 70;
+const NODE_H = 44;
+const ROLE_BADGES = { ROUTER: "RT", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" };
+
+let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
+let selectedName = null;
+
+async function loadCanvas() {
+  const [health, topology, nodesResult, positions] = await Promise.all([
     fetch("/health").then(r => r.json()),
     fetch("/topology").then(r => r.json()),
     fetch("/nodes").then(r => r.ok ? r.json() : null),
+    fetch("/layout").then(r => r.json()),
   ]);
 
   document.getElementById("project-meta").textContent =
@@ -218,35 +252,205 @@ async function loadNodes() {
   document.getElementById("warning-banner").textContent = health.warning || "";
 
   const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
-  const rows = document.getElementById("node-rows");
-  rows.innerHTML = "";
-
+  nodesData = {};
   for (const node of topology) {
-    const live = liveByName.get(node.name);
-    const status = live && live.status ? live.status : "none";
-    const isVM = node.environment === "ON_ESXI";
-    const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
-    const canScreen = isVM && live && live.status === "poweredOn";
-
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="status-dot status-${status}"></span>${node.name}</td>
-      <td>${node.role}</td>
-      <td><span class="env-tag">${node.environment.replace("ON_", "")}</span></td>
-      <td></td>
-    `;
-    const cell = tr.querySelector("td:last-child");
-    const btn = document.createElement("button");
-    btn.className = "console-btn";
-    btn.textContent = isVM ? "Screen" : "Console";
-    btn.disabled = isVM ? !canScreen : !canConsole;
-    btn.title = isVM
-      ? (canScreen ? "Open this VM's screen" : `VM status: ${status}`)
-      : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
-    btn.addEventListener("click", () => isVM ? openScreen(node.name) : openConsole(node.name));
-    cell.appendChild(btn);
-    rows.appendChild(tr);
+    const pos = positions[node.name] || { x: 100, y: 100 };
+    nodesData[node.name] = { ...node, live: liveByName.get(node.name) || null, x: pos.x, y: pos.y };
   }
+  renderCanvas();
+}
+
+function renderCanvas() {
+  const linksLayer = document.getElementById("links-layer");
+  const nodesLayer = document.getElementById("nodes-layer");
+  linksLayer.innerHTML = "";
+  nodesLayer.innerHTML = "";
+
+  const drawnPairs = new Set();
+  for (const node of Object.values(nodesData)) {
+    for (const neighbourName of Object.values(node.interfaces)) {
+      if (!neighbourName || !nodesData[neighbourName]) continue;
+      const pairKey = [node.name, neighbourName].sort().join("|");
+      if (drawnPairs.has(pairKey)) continue;
+      drawnPairs.add(pairKey);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "link-line");
+      line.dataset.pair = pairKey;
+      setLineEndpoints(line, node, nodesData[neighbourName]);
+      linksLayer.appendChild(line);
+    }
+  }
+
+  for (const node of Object.values(nodesData)) {
+    nodesLayer.appendChild(buildNodeShape(node));
+  }
+}
+
+function setLineEndpoints(line, a, b) {
+  line.setAttribute("x1", a.x);
+  line.setAttribute("y1", a.y);
+  line.setAttribute("x2", b.x);
+  line.setAttribute("y2", b.y);
+}
+
+function buildNodeShape(node) {
+  const isVM = node.environment === "ON_ESXI";
+  const roleClass = isVM ? "role-VM" : `role-${node.role}`;
+  const status = node.live && node.live.status ? node.live.status : "none";
+  const running = status === "started" || status === "poweredOn";
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("class", `node-shape ${roleClass}${node.name === selectedName ? " selected" : ""}`);
+  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`);
+  g.dataset.name = node.name;
+
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("width", NODE_W);
+  rect.setAttribute("height", NODE_H);
+  rect.setAttribute("rx", 6);
+  rect.setAttribute("fill", running ? "#1c3d2e" : "var(--panel)");
+  g.appendChild(rect);
+
+  const badge = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  badge.setAttribute("class", "role-badge");
+  badge.setAttribute("x", 6);
+  badge.setAttribute("y", 14);
+  badge.textContent = ROLE_BADGES[node.role] || node.role.slice(0, 2).toUpperCase();
+  g.appendChild(badge);
+
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", NODE_W / 2);
+  label.setAttribute("y", NODE_H - 8);
+  label.setAttribute("text-anchor", "middle");
+  label.textContent = node.name;
+  g.appendChild(label);
+
+  g.addEventListener("pointerdown", (evt) => startNodeDrag(evt, node.name));
+  return g;
+}
+
+const svg = document.getElementById("canvas");
+let viewBoxState = { x: 0, y: 0, w: 1600, h: 900 };
+
+function applyViewBox() {
+  svg.setAttribute("viewBox", `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
+}
+
+function svgPoint(evt) {
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+let dragState = null;
+
+function startNodeDrag(evt, name) {
+  evt.stopPropagation();
+  const node = nodesData[name];
+  const p = svgPoint(evt);
+  dragState = { name, offsetX: p.x - node.x, offsetY: p.y - node.y, moved: false };
+  selectNode(name);
+  window.addEventListener("pointermove", onNodeDrag);
+  window.addEventListener("pointerup", endNodeDrag);
+}
+
+function onNodeDrag(evt) {
+  if (!dragState) return;
+  dragState.moved = true;
+  const p = svgPoint(evt);
+  const node = nodesData[dragState.name];
+  node.x = p.x - dragState.offsetX;
+  node.y = p.y - dragState.offsetY;
+
+  const g = document.querySelector(`.node-shape[data-name="${dragState.name}"]`);
+  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`);
+
+  document.querySelectorAll(".link-line").forEach((line) => {
+    const [a, b] = line.dataset.pair.split("|");
+    if (a !== dragState.name && b !== dragState.name) return;
+    const other = a === dragState.name ? b : a;
+    setLineEndpoints(line, node, nodesData[other]);
+  });
+}
+
+function endNodeDrag() {
+  window.removeEventListener("pointermove", onNodeDrag);
+  window.removeEventListener("pointerup", endNodeDrag);
+  if (dragState && dragState.moved) {
+    const node = nodesData[dragState.name];
+    fetch("/layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: dragState.name, x: node.x, y: node.y }),
+    });
+  }
+  dragState = null;
+}
+
+svg.addEventListener("wheel", (evt) => {
+  evt.preventDefault();
+  const p = svgPoint(evt);
+  const scale = evt.deltaY > 0 ? 1.1 : 0.9;
+  viewBoxState.x = p.x - (p.x - viewBoxState.x) * scale;
+  viewBoxState.y = p.y - (p.y - viewBoxState.y) * scale;
+  viewBoxState.w *= scale;
+  viewBoxState.h *= scale;
+  applyViewBox();
+});
+
+let panState = null;
+svg.addEventListener("pointerdown", (evt) => {
+  if (evt.target !== svg) return;
+  panState = { startX: evt.clientX, startY: evt.clientY, startVB: { ...viewBoxState } };
+  svg.classList.add("panning");
+});
+window.addEventListener("pointermove", (evt) => {
+  if (!panState) return;
+  const dx = (evt.clientX - panState.startX) * (viewBoxState.w / svg.clientWidth);
+  const dy = (evt.clientY - panState.startY) * (viewBoxState.h / svg.clientHeight);
+  viewBoxState.x = panState.startVB.x - dx;
+  viewBoxState.y = panState.startVB.y - dy;
+  applyViewBox();
+});
+window.addEventListener("pointerup", () => {
+  if (panState) {
+    panState = null;
+    svg.classList.remove("panning");
+  }
+});
+
+function selectNode(name) {
+  selectedName = name;
+  document.querySelectorAll(".node-shape").forEach((g) => {
+    g.classList.toggle("selected", g.dataset.name === name);
+  });
+  showNodeActions(name);
+}
+
+function showNodeActions(name) {
+  const node = nodesData[name];
+  const isVM = node.environment === "ON_ESXI";
+  const live = node.live;
+  const status = live && live.status ? live.status : "none";
+
+  document.getElementById("console-placeholder").style.display = "none";
+  document.getElementById("node-actions").hidden = false;
+  document.getElementById("selected-role").textContent = node.environment.replace("ON_", "");
+  document.getElementById("selected-name").textContent = node.name;
+  document.getElementById("selected-status").textContent = `(${node.role}, ${status})`;
+
+  const btn = document.getElementById("selected-action-btn");
+  const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
+  const canScreen = isVM && live && live.status === "poweredOn";
+  btn.textContent = isVM ? "Screen" : "Console";
+  btn.disabled = isVM ? !canScreen : !canConsole;
+  btn.title = isVM
+    ? (canScreen ? "Open this VM's screen" : `VM status: ${status}`)
+    : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
+  btn.onclick = () => (isVM ? openScreen(name) : openConsole(name));
+
+  showTab("console");
 }
 
 function openConsole(nodeName) {
@@ -394,7 +598,7 @@ document.getElementById("push-btn").addEventListener("click", async () => {
   }
 });
 
-loadNodes().catch((err) => {
+loadCanvas().catch((err) => {
   document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
 });
 </script>

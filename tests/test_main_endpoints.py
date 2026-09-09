@@ -63,3 +63,25 @@ def test_nodes_esxi_status_none_when_vm_not_found(client, app_state):
     assert resp.status_code == 200
     by_name = {n["name"]: n for n in resp.json()}
     assert by_name["VM1"]["status"] is None
+
+
+def test_layout_get_returns_a_position_for_every_node(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    resp = client.get("/layout")
+    assert resp.status_code == 200
+    assert set(resp.json()) == {"R1", "SW1", "VM1"}
+
+
+def test_layout_post_then_get_round_trips(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    resp = client.post("/layout", json={"name": "R1", "x": 10, "y": 20})
+    assert resp.status_code == 200
+
+    resp = client.get("/layout")
+    assert resp.json()["R1"] == {"x": 10, "y": 20}
+
+
+def test_layout_post_rejects_unknown_node(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    resp = client.post("/layout", json={"name": "GHOST", "x": 0, "y": 0})
+    assert resp.status_code == 404

@@ -7,6 +7,7 @@ venv/
 settings.yml
 .env
 logs/
+layout.json
 
 # Proprietary Broadcom/VMware WMKS SDK files - not ours to redistribute,
 # each developer/deploy downloads their own copy. See
