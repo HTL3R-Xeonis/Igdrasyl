@@ -78,7 +78,53 @@
   .role-PC rect { stroke: #8b93a7; }
   .role-FW rect { stroke: #e05a5a; }
   .role-VM rect { stroke: #b06fe0; stroke-dasharray: 4 2; }
-  .link-line { stroke: var(--border); stroke-width: 1.5; }
+  .link-line { stroke: var(--border); stroke-width: 1.5; cursor: pointer; }
+  .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
+  #canvas-toolbar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 5;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  button.toolbar-btn {
+    font-size: 12px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  button.toolbar-btn:hover { border-color: var(--accent); }
+  button.toolbar-btn.active { border-color: var(--accent); color: var(--accent); }
+  button.toolbar-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #link-mode-hint { font-size: 12px; color: var(--warn); }
+  #add-node-form {
+    position: absolute;
+    top: 48px;
+    left: 10px;
+    z-index: 5;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    width: 320px;
+  }
+  #add-node-form .form-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  #add-node-form label { display: flex; flex-direction: column; font-size: 11px; color: var(--dim); gap: 3px; flex: 1; min-width: 90px; }
+  #add-node-form input, #add-node-form select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  .form-caveat { font-size: 11px; color: var(--warn); margin: 4px 0 8px; }
+  #add-node-status { font-size: 12px; color: var(--dim); }
   .env-tag {
     font-size: 11px;
     color: var(--dim);
@@ -186,6 +232,32 @@
 <div id="warning-banner"></div>
 <main>
   <div id="canvas-area">
+    <div id="canvas-toolbar">
+      <button class="toolbar-btn" id="add-node-btn">+ Node</button>
+      <button class="toolbar-btn" id="link-mode-btn">Link</button>
+      <span id="link-mode-hint" hidden>Click two nodes to connect them (Esc to cancel)</span>
+    </div>
+    <div id="add-node-form" hidden>
+      <div class="form-row">
+        <label>Name <input type="text" id="new-node-name"></label>
+        <label>Role
+          <select id="new-node-role">
+            <option value="ROUTER">ROUTER</option>
+            <option value="SWITCH">SWITCH</option>
+            <option value="PC">PC</option>
+            <option value="FW">FW</option>
+            <option value="VM">VM</option>
+          </select>
+        </label>
+        <label>Image <select id="new-node-image"><option value="">(loading templates…)</option></select></label>
+      </div>
+      <p class="form-caveat">Adding a node briefly disrupts every already-running ESXi-bridged Cloud connection, even just for this one node.</p>
+      <div class="form-row">
+        <button class="toolbar-btn primary" id="add-node-submit">Add</button>
+        <button class="toolbar-btn" id="add-node-cancel">Cancel</button>
+        <span id="add-node-status"></span>
+      </div>
+    </div>
     <svg id="canvas" viewBox="0 0 1600 900">
       <g id="links-layer"></g>
       <g id="nodes-layer"></g>
@@ -197,6 +269,7 @@
       <strong id="selected-name"></strong>
       <span id="selected-status" style="color: var(--dim);"></span>
       <button class="console-btn" id="selected-action-btn" style="margin-left: auto;"></button>
+      <button class="console-btn" id="selected-delete-btn" style="background: var(--bad);">Delete</button>
     </div>
     <div id="console-header" hidden>
       <span id="console-title"></span>
@@ -238,6 +311,9 @@ const ROLE_BADGES = { ROUTER: "RT", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" }
 
 let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
 let selectedName = null;
+let linkMode = false;
+let linkFirstNode = null;
+let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 
 async function loadCanvas() {
   const [health, topology, nodesResult, positions] = await Promise.all([
@@ -277,6 +353,12 @@ function renderCanvas() {
       line.setAttribute("class", "link-line");
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, nodesData[neighbourName]);
+      line.addEventListener("pointerdown", (evt) => {
+        evt.stopPropagation();
+        if (linkMode) return;
+        const [a, b] = line.dataset.pair.split("|");
+        if (confirm(`Delete link between ${a} and ${b}?`)) deleteLink(a, b);
+      });
       linksLayer.appendChild(line);
     }
   }
@@ -347,6 +429,10 @@ let dragState = null;
 
 function startNodeDrag(evt, name) {
   evt.stopPropagation();
+  if (linkMode) {
+    handleLinkModeClick(name);
+    return;
+  }
   const node = nodesData[name];
   const p = svgPoint(evt);
   dragState = { name, offsetX: p.x - node.x, offsetY: p.y - node.y, moved: false };
@@ -452,6 +538,192 @@ function showNodeActions(name) {
 
   showTab("console");
 }
+
+document.getElementById("selected-delete-btn").addEventListener("click", async () => {
+  const name = selectedName;
+  if (!name) return;
+  if (!confirm(`Delete node "${name}"? This removes its live GNS3/ESXi instance and any links to it.`)) return;
+  try {
+    const resp = await fetch(`/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!resp.ok) {
+      alert(`Failed to delete node: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    closeViewers();
+    selectedName = null;
+    document.getElementById("node-actions").hidden = true;
+    document.getElementById("console-header").hidden = true;
+    document.getElementById("console-placeholder").style.display = "";
+    await loadCanvas();
+  } catch (err) {
+    alert(`Failed to delete node: ${err}`);
+  }
+});
+
+function handleLinkModeClick(name) {
+  if (!linkFirstNode) {
+    linkFirstNode = name;
+    document.getElementById("link-mode-hint").textContent =
+      `Click the node to connect ${name} to (Esc to cancel)`;
+    return;
+  }
+  const node1 = linkFirstNode;
+  const node2 = name;
+  linkFirstNode = null;
+  if (node1 === node2) return;
+
+  const if1 = prompt(`Interface name on ${node1}:`);
+  if (!if1) { exitLinkMode(); return; }
+  const if2 = prompt(`Interface name on ${node2}:`);
+  if (!if2) { exitLinkMode(); return; }
+  if (!confirm(
+    `Connect ${node1}:${if1} <-> ${node2}:${if2}?\n\nThis briefly disrupts every ` +
+    `already-running ESXi-bridged Cloud connection, even for just this one link.`
+  )) {
+    exitLinkMode();
+    return;
+  }
+  createLink(node1, if1, node2, if2);
+}
+
+async function createLink(node1, if1, node2, if2) {
+  exitLinkMode();
+  try {
+    const resp = await fetch("/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node1, if1, node2, if2 }),
+    });
+    if (!resp.ok) {
+      alert(`Failed to add link: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await loadCanvas();
+  } catch (err) {
+    alert(`Failed to add link: ${err}`);
+  }
+}
+
+async function deleteLink(node1, node2) {
+  try {
+    const resp = await fetch(
+      `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}`,
+      { method: "DELETE" }
+    );
+    if (!resp.ok) {
+      alert(`Failed to delete link: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await loadCanvas();
+  } catch (err) {
+    alert(`Failed to delete link: ${err}`);
+  }
+}
+
+function exitLinkMode() {
+  linkMode = false;
+  linkFirstNode = null;
+  document.getElementById("link-mode-btn").classList.remove("active");
+  document.getElementById("link-mode-hint").hidden = true;
+}
+
+document.getElementById("link-mode-btn").addEventListener("click", () => {
+  linkMode = !linkMode;
+  linkFirstNode = null;
+  document.getElementById("link-mode-btn").classList.toggle("active", linkMode);
+  const hint = document.getElementById("link-mode-hint");
+  hint.hidden = !linkMode;
+  hint.textContent = "Click two nodes to connect them (Esc to cancel)";
+});
+
+window.addEventListener("keydown", (evt) => {
+  if (evt.key === "Escape" && linkMode) exitLinkMode();
+});
+
+async function populateTemplateOptions() {
+  const select = document.getElementById("new-node-image");
+  if (availableTemplates) {
+    renderTemplateOptions(select, availableTemplates);
+    return;
+  }
+  select.innerHTML = `<option value="">(loading templates…)</option>`;
+  try {
+    const resp = await fetch("/templates");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    availableTemplates = await resp.json();
+    renderTemplateOptions(select, availableTemplates);
+  } catch (err) {
+    select.innerHTML = `<option value="">(failed to load: ${err})</option>`;
+  }
+}
+
+function renderTemplateOptions(select, templates) {
+  select.innerHTML = "";
+  for (const [label, names] of [["GNS3", templates.gns3], ["ESXi", templates.esxi]]) {
+    if (!names.length) continue;
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const name of names) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      group.appendChild(opt);
+    }
+    select.appendChild(group);
+  }
+}
+
+document.getElementById("add-node-btn").addEventListener("click", async () => {
+  const form = document.getElementById("add-node-form");
+  const opening = form.hidden;
+  form.hidden = !opening;
+  if (opening) await populateTemplateOptions();
+});
+
+document.getElementById("add-node-cancel").addEventListener("click", () => {
+  document.getElementById("add-node-form").hidden = true;
+});
+
+document.getElementById("add-node-submit").addEventListener("click", async () => {
+  const name = document.getElementById("new-node-name").value.trim();
+  const role = document.getElementById("new-node-role").value;
+  const image = document.getElementById("new-node-image").value;
+  const statusEl = document.getElementById("add-node-status");
+  if (!name || !image) {
+    statusEl.textContent = "Name and image are required.";
+    return;
+  }
+  if (!confirm(
+    `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
+    `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
+    `and may take a while.`
+  )) {
+    return;
+  }
+
+  const submitBtn = document.getElementById("add-node-submit");
+  submitBtn.disabled = true;
+  statusEl.textContent = "Adding node (deploying live, may take a while)…";
+  try {
+    const resp = await fetch("/nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, role, image }),
+    });
+    if (!resp.ok) {
+      statusEl.textContent = (await resp.json()).detail || `HTTP ${resp.status}`;
+      return;
+    }
+    document.getElementById("add-node-form").hidden = true;
+    document.getElementById("new-node-name").value = "";
+    statusEl.textContent = "";
+    await loadCanvas();
+  } catch (err) {
+    statusEl.textContent = `${err}`;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
 
 function openConsole(nodeName) {
   closeViewers();

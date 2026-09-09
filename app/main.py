@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, vm_screen
+from app import console, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.layout import load_layout, save_position
@@ -194,6 +194,86 @@ def update_layout(update: LayoutUpdate) -> dict[str, str]:
     if update.name not in app.state.graph.nodes:
         raise HTTPException(404, f"no node named {update.name!r}")
     save_position(update.name, update.x, update.y)
+    return {"status": "ok"}
+
+
+@app.get("/templates")
+def templates() -> dict[str, list[str]]:
+    """
+    Valid `image` names for POST /nodes, grouped by which backend they
+    deploy to (GNS3 vs ESXi - see app/topology_write.py's own docstring:
+    this is what actually decides a new node's environment, not its role).
+    """
+    try:
+        return topology_write.list_templates()
+    except TimeoutError as exc:
+        raise HTTPException(503, str(exc))
+
+
+class AddNodeRequest(BaseModel):
+    name: str
+    role: str
+    image: str
+
+
+@app.post("/nodes")
+def add_node(request: AddNodeRequest) -> dict[str, str]:
+    """
+    Adds a node to the topology YAML and deploys it live. Slow (a real
+    deploy call) and disruptive - briefly interrupts every already-
+    running ESXi-bridged Cloud connection, even for this one node (see
+    TopologyBackend.add_node's own docstring) - the frontend confirms
+    this with the user before calling here.
+    """
+    try:
+        topology_write.add_node(app, request.name, request.role, request.image)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.delete("/nodes/{name}")
+def remove_node(name: str) -> dict[str, str]:
+    try:
+        topology_write.remove_node(app, name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+class AddLinkRequest(BaseModel):
+    node1: str
+    if1: str
+    node2: str
+    if2: str
+
+
+@app.post("/links")
+def add_link(request: AddLinkRequest) -> dict[str, str]:
+    """Same deploy/disruption caveat as POST /nodes - see there."""
+    try:
+        topology_write.add_link(
+            app, request.node1, request.if1, request.node2, request.if2
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.delete("/links/{node1}/{node2}")
+def remove_link(node1: str, node2: str) -> dict[str, str]:
+    try:
+        topology_write.remove_link(app, node1, node2)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
 
