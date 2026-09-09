@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from src.connections.esxi_connection import ESXiConnection
@@ -23,7 +24,11 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
+from app import console
+from app.gns3_state import NoLiveProject, list_live_nodes
 from app.topology import load_graph, resolve_project_name
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 _SETTINGS_ENV_VAR = "TOPOLOGYOPERATOR_SETTINGS"
 
@@ -88,6 +93,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
+app.include_router(console.router)
 
 
 @app.get("/health")
@@ -130,18 +136,10 @@ def nodes() -> list[dict[str, Any]]:
     included with only their static info for now - live VM power state/
     guest info isn't wired up yet, that's a separate piece of work.
     """
-    if app.state.project_id is None:
-        raise HTTPException(
-            status_code=503,
-            detail=f"No live GNS3 project resolved: {app.state.startup_warning}",
-        )
-
-    live_by_name = {
-        n["name"]: n
-        for n in GNS3Connection.list_project_nodes(
-            app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
-        )
-    }
+    try:
+        live_by_name = {n["name"]: n for n in list_live_nodes(app)}
+    except NoLiveProject as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
     result = []
     for node in app.state.graph.nodes.values():
@@ -164,3 +162,10 @@ def nodes() -> list[dict[str, Any]]:
             entry["status"] = None
         result.append(entry)
     return result
+
+
+# Mounted last, deliberately - Starlette tries explicit routes (above) in
+# registration order before falling through to a mount, so this catch-all
+# for "/" can't shadow the API/WS routes as long as it's registered after
+# them.
+app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="frontend")

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TopologyOperator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --panel: #161923;
+    --border: #2a2f3d;
+    --text: #e4e6eb;
+    --dim: #8b93a7;
+    --accent: #4f8cff;
+    --ok: #3ecf8e;
+    --warn: #e0a63e;
+    --bad: #e05a5a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  header .meta { font-size: 12px; color: var(--dim); }
+  #warning-banner {
+    padding: 8px 20px;
+    background: #3a2c14;
+    color: var(--warn);
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  #warning-banner:empty { display: none; }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  #node-list {
+    width: 420px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--dim); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status-started { background: var(--ok); }
+  .status-stopped, .status-none { background: var(--dim); }
+  .env-tag {
+    font-size: 11px;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  button.console-btn {
+    font-size: 12px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button.console-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; }
+  #console-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #console-header {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  #console-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dim);
+    font-size: 13px;
+  }
+  #terminal { flex: 1; padding: 8px; min-height: 0; }
+  #terminal:empty { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TopologyOperator</h1>
+  <span class="meta" id="project-meta"></span>
+</header>
+<div id="warning-banner"></div>
+<main>
+  <div id="node-list">
+    <table>
+      <thead>
+        <tr><th>Node</th><th>Role</th><th>Env</th><th></th></tr>
+      </thead>
+      <tbody id="node-rows"></tbody>
+    </table>
+  </div>
+  <div id="console-area">
+    <div id="console-header" hidden>
+      <span id="console-title"></span>
+      <span id="console-status"></span>
+    </div>
+    <div id="console-placeholder">Select a node's Console button to open it here.</div>
+    <div id="terminal"></div>
+  </div>
+</main>
+
+<script>
+let term = null;
+let ws = null;
+
+async function loadNodes() {
+  const [health, topology, nodesResult] = await Promise.all([
+    fetch("/health").then(r => r.json()),
+    fetch("/topology").then(r => r.json()),
+    fetch("/nodes").then(r => r.ok ? r.json() : null),
+  ]);
+
+  document.getElementById("project-meta").textContent =
+    `${health.gns3_project_name} @ ${health.esxi_ip}`;
+  document.getElementById("warning-banner").textContent = health.warning || "";
+
+  const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
+  const rows = document.getElementById("node-rows");
+  rows.innerHTML = "";
+
+  for (const node of topology) {
+    const live = liveByName.get(node.name);
+    const status = live && live.status ? live.status : "none";
+    const canConsole = live && live.console_type === "telnet" && live.status === "started";
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="status-dot status-${status}"></span>${node.name}</td>
+      <td>${node.role}</td>
+      <td><span class="env-tag">${node.environment.replace("ON_", "")}</span></td>
+      <td></td>
+    `;
+    const cell = tr.querySelector("td:last-child");
+    const btn = document.createElement("button");
+    btn.className = "console-btn";
+    btn.textContent = "Console";
+    btn.disabled = !canConsole;
+    btn.title = canConsole
+      ? "Open this node's console"
+      : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data");
+    btn.addEventListener("click", () => openConsole(node.name));
+    cell.appendChild(btn);
+    rows.appendChild(tr);
+  }
+}
+
+function openConsole(nodeName) {
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  document.getElementById("console-placeholder").style.display = "none";
+  const header = document.getElementById("console-header");
+  header.hidden = false;
+  document.getElementById("console-title").textContent = nodeName;
+  const statusEl = document.getElementById("console-status");
+  statusEl.textContent = "connecting…";
+
+  const termEl = document.getElementById("terminal");
+  termEl.innerHTML = "";
+  if (term) term.dispose();
+  term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#0f1115" } });
+  term.open(termEl);
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => { statusEl.textContent = "connected"; };
+  ws.onmessage = (event) => { term.write(new Uint8Array(event.data)); };
+  ws.onclose = (event) => {
+    statusEl.textContent = event.reason ? `closed: ${event.reason}` : "closed";
+  };
+  ws.onerror = () => { statusEl.textContent = "error"; };
+
+  term.onData((data) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(new TextEncoder().encode(data));
+    }
+  });
+}
+
+loadNodes().catch((err) => {
+  document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
+});
+</script>
+</body>
+</html>
