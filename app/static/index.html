@@ -5,6 +5,10 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
+<script type="module">
+  import RFB from "https://cdn.jsdelivr.net/gh/novnc/noVNC@v1.7.0/core/rfb.js";
+  window.RFB = RFB;
+</script>
 <style>
   :root {
     color-scheme: light dark;
@@ -59,8 +63,8 @@
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
   th { color: var(--dim); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .status-started { background: var(--ok); }
-  .status-stopped, .status-none { background: var(--dim); }
+  .status-started, .status-poweredOn { background: var(--ok); }
+  .status-stopped, .status-poweredOff, .status-suspended, .status-none { background: var(--dim); }
   .env-tag {
     font-size: 11px;
     color: var(--dim);
@@ -102,6 +106,8 @@
   }
   #terminal { flex: 1; padding: 8px; min-height: 0; }
   #terminal:empty { display: none; }
+  #vm-screen-container { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; }
+  #vm-screen-container canvas { max-width: 100%; }
   header button.tab-btn {
     font-size: 12px;
     background: none;
@@ -170,8 +176,9 @@
       <span id="console-title"></span>
       <span id="console-status"></span>
     </div>
-    <div id="console-placeholder">Select a node's Console button to open it here.</div>
+    <div id="console-placeholder">Select a node's Console/Screen button to open it here.</div>
     <div id="terminal"></div>
+    <div id="vm-screen-container"></div>
   </div>
   <div id="push-area" hidden>
     <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
@@ -190,6 +197,14 @@
 <script>
 let term = null;
 let ws = null;
+let rfb = null;
+
+function closeViewers() {
+  if (ws) { ws.close(); ws = null; }
+  if (rfb) { rfb.disconnect(); rfb = null; }
+  document.getElementById("terminal").style.display = "none";
+  document.getElementById("vm-screen-container").style.display = "none";
+}
 
 async function loadNodes() {
   const [health, topology, nodesResult] = await Promise.all([
@@ -209,7 +224,9 @@ async function loadNodes() {
   for (const node of topology) {
     const live = liveByName.get(node.name);
     const status = live && live.status ? live.status : "none";
-    const canConsole = live && live.console_type === "telnet" && live.status === "started";
+    const isVM = node.environment === "ON_ESXI";
+    const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
+    const canScreen = isVM && live && live.status === "poweredOn";
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -221,22 +238,19 @@ async function loadNodes() {
     const cell = tr.querySelector("td:last-child");
     const btn = document.createElement("button");
     btn.className = "console-btn";
-    btn.textContent = "Console";
-    btn.disabled = !canConsole;
-    btn.title = canConsole
-      ? "Open this node's console"
-      : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data");
-    btn.addEventListener("click", () => openConsole(node.name));
+    btn.textContent = isVM ? "Screen" : "Console";
+    btn.disabled = isVM ? !canScreen : !canConsole;
+    btn.title = isVM
+      ? (canScreen ? "Open this VM's screen" : `VM status: ${status}`)
+      : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
+    btn.addEventListener("click", () => isVM ? openScreen(node.name) : openConsole(node.name));
     cell.appendChild(btn);
     rows.appendChild(tr);
   }
 }
 
 function openConsole(nodeName) {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
+  closeViewers();
   document.getElementById("console-placeholder").style.display = "none";
   const header = document.getElementById("console-header");
   header.hidden = false;
@@ -245,6 +259,7 @@ function openConsole(nodeName) {
   statusEl.textContent = "connecting…";
 
   const termEl = document.getElementById("terminal");
+  termEl.style.display = "block";
   termEl.innerHTML = "";
   if (term) term.dispose();
   term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#0f1115" } });
@@ -265,6 +280,48 @@ function openConsole(nodeName) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(new TextEncoder().encode(data));
     }
+  });
+}
+
+async function openScreen(nodeName) {
+  closeViewers();
+  document.getElementById("console-placeholder").style.display = "none";
+  const header = document.getElementById("console-header");
+  header.hidden = false;
+  document.getElementById("console-title").textContent = nodeName;
+  const statusEl = document.getElementById("console-status");
+  statusEl.textContent = "preparing (may power-cycle the VM on first use)…";
+
+  const screenEl = document.getElementById("vm-screen-container");
+  screenEl.style.display = "flex";
+  screenEl.innerHTML = "";
+
+  let password;
+  try {
+    const resp = await fetch(`/vm-screen/${encodeURIComponent(nodeName)}/prepare`, { method: "POST" });
+    if (!resp.ok) {
+      statusEl.textContent = `prepare failed: HTTP ${resp.status} ${await resp.text()}`;
+      return;
+    }
+    const data = await resp.json();
+    password = data.password;
+    if (data.power_cycled) {
+      statusEl.textContent = "VM was power-cycled to enable its screen, connecting…";
+    }
+  } catch (err) {
+    statusEl.textContent = `prepare failed: ${err}`;
+    return;
+  }
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/ws/vm-screen/${encodeURIComponent(nodeName)}`;
+  rfb = new RFB(screenEl, url, { credentials: { password } });
+  rfb.addEventListener("connect", () => { statusEl.textContent = "connected"; });
+  rfb.addEventListener("disconnect", (e) => {
+    statusEl.textContent = e.detail.clean ? "closed" : "connection lost";
+  });
+  rfb.addEventListener("securityfailure", (e) => {
+    statusEl.textContent = `auth failed: ${e.detail.reason || e.detail.status}`;
   });
 }
 

@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console
+from app import console, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.topology import load_graph, resolve_project_name
@@ -58,6 +58,9 @@ async def lifespan(app: FastAPI):
     # not resolved yet, project not deployed yet).
     app.state.graph = load_graph()
     app.state.project_name = resolve_project_name()
+    # vm_name -> assigned VNC port, in-memory for this process's
+    # lifetime - see app/vm_screen.py.
+    app.state.vnc_assignments = {}
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
@@ -96,6 +99,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
 app.include_router(console.router)
+app.include_router(vm_screen.router)
 
 
 @app.get("/health")
@@ -132,16 +136,16 @@ def topology() -> list[dict[str, Any]]:
 @app.get("/nodes")
 def nodes() -> list[dict[str, Any]]:
     """
-    Topology nodes merged with live GNS3 state (status, console port/
-    type - GNS3's node API already returns these on every call, just
-    never surfaced anywhere until now). ESXi-hosted VM nodes are
-    included with only their static info for now - live VM power state/
-    guest info isn't wired up yet, that's a separate piece of work.
+    Topology nodes merged with live state: GNS3 status/console port+
+    type for ON_GNS3 nodes, ESXi VM power state for ON_ESXI ones - two
+    independent live sources, so a missing GNS3 project (see /health's
+    own warning for that) no longer blocks ESXi status from coming
+    back, unlike this endpoint's very first version.
     """
     try:
         live_by_name = {n["name"]: n for n in list_live_nodes(app)}
-    except NoLiveProject as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+    except NoLiveProject:
+        live_by_name = {}
 
     result = []
     for node in app.state.graph.nodes.values():
@@ -161,7 +165,8 @@ def nodes() -> list[dict[str, Any]]:
                 }
             )
         elif node.env == Environment.ON_ESXI:
-            entry["status"] = None
+            vm = app.state.esxi_connection.get_vm(node.name)
+            entry["status"] = str(vm.runtime.powerState) if vm is not None else None
         result.append(entry)
     return result
 
@@ -182,6 +187,32 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     WebSocket proxy also needs.
     """
     return push_all(request.devices, app)
+
+
+@app.post("/vm-screen/{node_name}/prepare")
+def prepare_vm_screen(node_name: str) -> dict[str, Any]:
+    """
+    Ensures VNC is enabled on this ESXi VM node and returns its
+    password (needed for the frontend's noVNC client to complete RFB
+    auth - this backend's WebSocket proxy is a dumb byte-pipe, it never
+    participates in the RFB handshake itself). The first call for a
+    given VM can take up to ~60s and power-cycles it - see
+    app/vm_screen.py. Call this before opening /ws/vm-screen/{name};
+    that endpoint refuses to connect until this has run at least once.
+    """
+    node = app.state.graph.nodes.get(node_name)
+    if node is None or node.env != Environment.ON_ESXI:
+        raise HTTPException(404, f"no ESXi VM node named {node_name!r}")
+    vm = app.state.esxi_connection.get_vm(node_name)
+    if vm is None:
+        raise HTTPException(404, f"VM {node_name!r} not found on ESXi")
+    try:
+        port, password, just_enabled = vm_screen.ensure_vnc_enabled(
+            vm, app.state.vnc_assignments
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    return {"password": password, "power_cycled": just_enabled}
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in
