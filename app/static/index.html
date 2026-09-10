@@ -5,10 +5,6 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<script type="module">
-  import RFB from "https://cdn.jsdelivr.net/gh/novnc/noVNC@v1.7.0/core/rfb.js";
-  window.RFB = RFB;
-</script>
 <style>
   :root {
     color-scheme: light dark;
@@ -174,8 +170,6 @@
   }
   #terminal { flex: 1; padding: 8px; min-height: 0; }
   #terminal:empty { display: none; }
-  #vm-screen-container { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; }
-  #vm-screen-container canvas { max-width: 100%; }
   header button.tab-btn {
     font-size: 12px;
     background: none;
@@ -280,7 +274,6 @@
     </div>
     <div id="console-placeholder">Click a node on the canvas to see its details here.</div>
     <div id="terminal"></div>
-    <div id="vm-screen-container"></div>
   </div>
   <div id="push-area" hidden>
     <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
@@ -299,13 +292,10 @@
 <script>
 let term = null;
 let ws = null;
-let rfb = null;
 
 function closeViewers() {
   if (ws) { ws.close(); ws = null; }
-  if (rfb) { rfb.disconnect(); rfb = null; }
   document.getElementById("terminal").style.display = "none";
-  document.getElementById("vm-screen-container").style.display = "none";
 }
 
 const NODE_W = 70;
@@ -531,13 +521,13 @@ function showNodeActions(name) {
 
   const btn = document.getElementById("selected-action-btn");
   const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
-  const canScreen = isVM && live && live.status === "poweredOn";
-  btn.textContent = isVM ? "Screen" : "Console";
-  btn.disabled = isVM ? !canScreen : !canConsole;
+  const canVmConsole = isVM && live && live.status === "poweredOn";
+  btn.textContent = "Console";
+  btn.disabled = isVM ? !canVmConsole : !canConsole;
   btn.title = isVM
-    ? (canScreen ? "Open this VM's screen" : `VM status: ${status}`)
+    ? (canVmConsole ? "Open this VM's console" : `VM status: ${status}`)
     : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
-  btn.onclick = () => (isVM ? openScreen(name) : openConsole(name));
+  btn.onclick = () => (isVM ? openVmConsole(name) : openConsole(name));
 
   const running = status === "started" || status === "poweredOn";
   const stopped = status === "stopped" || status === "poweredOff";
@@ -763,15 +753,7 @@ document.getElementById("add-node-submit").addEventListener("click", async () =>
   }
 });
 
-function openConsole(nodeName) {
-  closeViewers();
-  document.getElementById("console-placeholder").style.display = "none";
-  const header = document.getElementById("console-header");
-  header.hidden = false;
-  document.getElementById("console-title").textContent = nodeName;
-  const statusEl = document.getElementById("console-status");
-  statusEl.textContent = "connecting…";
-
+function openTerminalWebSocket(nodeName, wsUrl, statusEl) {
   const termEl = document.getElementById("terminal");
   termEl.style.display = "block";
   termEl.innerHTML = "";
@@ -779,8 +761,7 @@ function openConsole(nodeName) {
   term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#0f1115" } });
   term.open(termEl);
 
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`);
+  ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => { statusEl.textContent = "connected"; };
@@ -797,7 +778,22 @@ function openConsole(nodeName) {
   });
 }
 
-async function openScreen(nodeName) {
+function openConsole(nodeName) {
+  closeViewers();
+  document.getElementById("console-placeholder").style.display = "none";
+  const header = document.getElementById("console-header");
+  header.hidden = false;
+  document.getElementById("console-title").textContent = nodeName;
+  const statusEl = document.getElementById("console-status");
+  statusEl.textContent = "connecting…";
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  openTerminalWebSocket(
+    nodeName, `${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`, statusEl
+  );
+}
+
+async function openVmConsole(nodeName) {
   closeViewers();
   document.getElementById("console-placeholder").style.display = "none";
   const header = document.getElementById("console-header");
@@ -806,21 +802,15 @@ async function openScreen(nodeName) {
   const statusEl = document.getElementById("console-status");
   statusEl.textContent = "preparing (may power-cycle the VM on first use)…";
 
-  const screenEl = document.getElementById("vm-screen-container");
-  screenEl.style.display = "flex";
-  screenEl.innerHTML = "";
-
-  let password;
   try {
-    const resp = await fetch(`/vm-screen/${encodeURIComponent(nodeName)}/prepare`, { method: "POST" });
+    const resp = await fetch(`/vm-console/${encodeURIComponent(nodeName)}/prepare`, { method: "POST" });
     if (!resp.ok) {
       statusEl.textContent = `prepare failed: HTTP ${resp.status} ${await resp.text()}`;
       return;
     }
     const data = await resp.json();
-    password = data.password;
     if (data.power_cycled) {
-      statusEl.textContent = "VM was power-cycled to enable its screen, connecting…";
+      statusEl.textContent = "VM was power-cycled to enable its console, connecting…";
     }
   } catch (err) {
     statusEl.textContent = `prepare failed: ${err}`;
@@ -828,15 +818,9 @@ async function openScreen(nodeName) {
   }
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${proto}//${location.host}/ws/vm-screen/${encodeURIComponent(nodeName)}`;
-  rfb = new RFB(screenEl, url, { credentials: { password } });
-  rfb.addEventListener("connect", () => { statusEl.textContent = "connected"; });
-  rfb.addEventListener("disconnect", (e) => {
-    statusEl.textContent = e.detail.clean ? "closed" : "connection lost";
-  });
-  rfb.addEventListener("securityfailure", (e) => {
-    statusEl.textContent = `auth failed: ${e.detail.reason || e.detail.status}`;
-  });
+  openTerminalWebSocket(
+    nodeName, `${proto}//${location.host}/ws/vm-console/${encodeURIComponent(nodeName)}`, statusEl
+  );
 }
 
 document.getElementById("tab-console").addEventListener("click", () => showTab("console"));

@@ -1,6 +1,6 @@
 """
 TopologyOperator's FastAPI backend - Phase 0/1 read-only foundation.
-Everything else (GNS3 console proxy, config push, embedded VM screens)
+Everything else (GNS3 console proxy, config push, embedded VM consoles)
 plugs into the connections/graph this module resolves once at startup.
 
 Run with: uvicorn app.main:app --reload
@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, lifecycle, topology_write, vm_screen
+from app import console, lifecycle, topology_write, vm_console
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.layout import load_layout, save_position
@@ -59,9 +59,9 @@ async def lifespan(app: FastAPI):
     # not resolved yet, project not deployed yet).
     app.state.graph = load_graph()
     app.state.project_name = resolve_project_name()
-    # vm_name -> assigned VNC port, in-memory for this process's
-    # lifetime - see app/vm_screen.py.
-    app.state.vnc_assignments = {}
+    # vm_name -> assigned serial console port, in-memory for this
+    # process's lifetime - see app/vm_console.py.
+    app.state.vm_console_ports = {}
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
 app.include_router(console.router)
-app.include_router(vm_screen.router)
+app.include_router(vm_console.router)
 
 
 @app.get("/health")
@@ -328,16 +328,14 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     return push_all(request.devices, app)
 
 
-@app.post("/vm-screen/{node_name}/prepare")
-def prepare_vm_screen(node_name: str) -> dict[str, Any]:
+@app.post("/vm-console/{node_name}/prepare")
+def prepare_vm_console(node_name: str) -> dict[str, Any]:
     """
-    Ensures VNC is enabled on this ESXi VM node and returns its
-    password (needed for the frontend's noVNC client to complete RFB
-    auth - this backend's WebSocket proxy is a dumb byte-pipe, it never
-    participates in the RFB handshake itself). The first call for a
-    given VM can take up to ~60s and power-cycles it - see
-    app/vm_screen.py. Call this before opening /ws/vm-screen/{name};
-    that endpoint refuses to connect until this has run at least once.
+    Ensures a network-backed serial console is added on this ESXi VM
+    node. The first call for a given VM can take up to ~60s and power-
+    cycles it - see app/vm_console.py. Call this before opening
+    /ws/vm-console/{name}; that endpoint refuses to connect until this
+    has run at least once.
     """
     node = app.state.graph.nodes.get(node_name)
     if node is None or node.env != Environment.ON_ESXI:
@@ -346,12 +344,12 @@ def prepare_vm_screen(node_name: str) -> dict[str, Any]:
     if vm is None:
         raise HTTPException(404, f"VM {node_name!r} not found on ESXi")
     try:
-        port, password, just_enabled = vm_screen.ensure_vnc_enabled(
-            vm, app.state.vnc_assignments
+        _port, just_enabled = vm_console.ensure_serial_console(
+            vm, app.state.vm_console_ports
         )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
-    return {"password": password, "power_cycled": just_enabled}
+    return {"power_cycled": just_enabled}
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in

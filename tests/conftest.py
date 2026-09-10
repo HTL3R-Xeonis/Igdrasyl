@@ -52,7 +52,7 @@ def app_state(graph):
     app.state.graph = graph
     app.state.project_name = resolve_project_name()
     app.state.esxi_connection = MagicMock()
-    app.state.vnc_assignments = {}
+    app.state.vm_console_ports = {}
     app.state.gns3_vm_ip = "127.0.0.1"
     app.state.project_id = None
     app.state.startup_warning = None
@@ -105,7 +105,7 @@ def fake_tcp_server():
     Starts a real local asyncio TCP server for a test-provided per-
     connection handler `async def handler(reader, writer)`. Returns the
     bound port. Used to test the real TCP<->WebSocket byte-pumping in
-    console.py/vm_screen.py and Netmiko's actual wire protocol in
+    console.py/vm_console.py and Netmiko's actual wire protocol in
     config_push.py, against real sockets rather than mocks.
     """
     stoppers = []

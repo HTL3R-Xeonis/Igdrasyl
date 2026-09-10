@@ -12,33 +12,11 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, WebSocket
-from loguru import logger
 
 from app.gns3_state import NoLiveProject, list_live_nodes
+from app.tcp_bridge import bridge
 
 router = APIRouter()
-
-_READ_CHUNK_SIZE = 4096
-
-# Swallowed silently when a pump task ends with one of these - they're the
-# expected shape of "the other side hung up", not a real failure worth
-# logging.
-_EXPECTED_PUMP_EXCEPTIONS = (ConnectionResetError, ConnectionAbortedError)
-
-
-async def _pump_tcp_to_ws(reader: asyncio.StreamReader, websocket: WebSocket) -> None:
-    while True:
-        data = await reader.read(_READ_CHUNK_SIZE)
-        if not data:
-            return
-        await websocket.send_bytes(data)
-
-
-async def _pump_ws_to_tcp(websocket: WebSocket, writer: asyncio.StreamWriter) -> None:
-    while True:
-        data = await websocket.receive_bytes()
-        writer.write(data)
-        await writer.drain()
 
 
 @router.websocket("/ws/console/{node_name}")
@@ -80,26 +58,4 @@ async def console_proxy(websocket: WebSocket, node_name: str) -> None:
         await websocket.close(code=1011, reason=f"couldn't reach console: {exc}")
         return
 
-    tcp_to_ws = asyncio.create_task(_pump_tcp_to_ws(reader, websocket))
-    ws_to_tcp = asyncio.create_task(_pump_ws_to_tcp(websocket, writer))
-    try:
-        done, pending = await asyncio.wait(
-            {tcp_to_ws, ws_to_tcp}, return_when=asyncio.FIRST_COMPLETED
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        for task in done:
-            exc = task.exception()
-            if exc is not None and not isinstance(exc, _EXPECTED_PUMP_EXCEPTIONS):
-                logger.debug(f"console proxy for {node_name!r} ended with: {exc!r}")
-    finally:
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except OSError:
-            pass
-        try:
-            await websocket.close()
-        except RuntimeError:
-            pass  # already closed
+    await bridge(websocket, reader, writer, label=f"console proxy for {node_name!r}")
