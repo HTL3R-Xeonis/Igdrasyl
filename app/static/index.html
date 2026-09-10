@@ -7,16 +7,29 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #0f1115;
-    --panel: #161923;
-    --border: #2a2f3d;
-    --text: #e4e6eb;
-    --dim: #8b93a7;
-    --accent: #4f8cff;
-    --ok: #3ecf8e;
+    color-scheme: dark;
+    /* Dark, Mint-Y-Dark-inspired base - warmed slightly off pure
+       black/blue for a modern-app feel rather than literal Qt grey. */
+    --bg: #1a1d1f;
+    --panel: #232629;
+    --panel-2: #2b2f32;
+    --border: #383c3f;
+    --text: #e8e6e3;
+    --dim: #9aa0a6;
+    /* Mint's own green, used for anything interactive/selected. */
+    --accent: #7cb342;
+    --accent-dim: #567a2e;
+    /* Deliberately a different, truer green from --accent so "this is
+       clickable" and "this is running" stay visually distinct. */
+    --ok: #4caf50;
     --warn: #e0a63e;
     --bad: #e05a5a;
+    /* Role colors, kept off both greens above on purpose. */
+    --role-router: #5c9fe0;
+    --role-switch: #4fb3bf;
+    --role-pc: #9aa0a6;
+    --role-fw: #e0895a;
+    --role-vm: #b07cd6;
   }
   * { box-sizing: border-box; }
   /* Without this, an element with an ID-selector display rule (flex,
@@ -42,6 +55,15 @@
     gap: 16px;
   }
   header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  header h1::before {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    background: var(--accent);
+    margin-right: 8px;
+  }
   header .meta { font-size: 12px; color: var(--dim); }
   #warning-banner {
     padding: 8px 20px;
@@ -62,20 +84,27 @@
     position: relative;
     overflow: hidden;
   }
-  #canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--bg); }
   #canvas.panning { cursor: grabbing; }
-  .node-shape { cursor: pointer; }
-  .node-shape rect { stroke-width: 1.5; fill: var(--panel); }
-  .node-shape.selected rect { stroke-width: 3; }
+  .grid-dot { fill: var(--border); }
+  .grid-bg { pointer-events: none; }
+  .node-shape { cursor: pointer; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45)); }
+  .node-shape rect.node-card { stroke-width: 1.5; fill: var(--panel); transition: stroke-width 0.1s; }
+  .node-shape.selected rect.node-card { stroke-width: 3; }
+  .node-shape:hover rect.node-card { stroke-width: 2.5; }
   .node-shape text { fill: var(--text); font-size: 11px; pointer-events: none; user-select: none; }
-  .node-shape .role-badge { fill: var(--dim); font-size: 9px; }
-  .role-ROUTER rect { stroke: #4f8cff; }
-  .role-SWITCH rect { stroke: #3ecf8e; }
-  .role-PC rect { stroke: #8b93a7; }
-  .role-FW rect { stroke: #e05a5a; }
-  .role-VM rect { stroke: #b06fe0; stroke-dasharray: 4 2; }
+  .role-ROUTER rect.node-card { stroke: var(--role-router); }
+  .role-SWITCH rect.node-card { stroke: var(--role-switch); }
+  .role-PC rect.node-card { stroke: var(--role-pc); }
+  .role-FW rect.node-card { stroke: var(--role-fw); }
+  .role-VM rect.node-card { stroke: var(--role-vm); stroke-dasharray: 4 2; }
+  .status-dot.status-ok { fill: var(--ok); stroke: var(--bg); stroke-width: 1.5; }
+  .status-dot.status-off { fill: var(--panel); stroke: var(--dim); stroke-width: 1.5; }
+  .status-dot.status-unknown { fill: var(--panel); stroke: var(--border); stroke-width: 1; opacity: 0.6; }
   .link-line { stroke: var(--border); stroke-width: 1.5; cursor: pointer; }
+  .link-line.link-up { stroke: var(--ok); }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
+  .link-endpoint { fill: var(--accent); pointer-events: none; }
   #canvas-toolbar {
     position: absolute;
     top: 10px;
@@ -90,13 +119,16 @@
     background: var(--panel);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 5px 10px;
     cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
   }
-  button.toolbar-btn:hover { border-color: var(--accent); }
+  button.toolbar-btn:hover { border-color: var(--accent); background: var(--panel-2); }
   button.toolbar-btn.active { border-color: var(--accent); color: var(--accent); }
-  button.toolbar-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.toolbar-btn.primary { background: var(--accent); color: #10130f; border-color: var(--accent); font-weight: 600; }
+  button.toolbar-btn.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
+  button.toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #link-mode-hint { font-size: 12px; color: var(--warn); }
   #add-node-form {
     position: absolute;
@@ -105,9 +137,10 @@
     z-index: 5;
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 12px;
     width: 320px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
   #add-node-form .form-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
   #add-node-form label { display: flex; flex-direction: column; font-size: 11px; color: var(--dim); gap: 3px; flex: 1; min-width: 90px; }
@@ -131,13 +164,61 @@
   button.console-btn {
     font-size: 12px;
     background: var(--accent);
-    color: #fff;
+    color: #10130f;
+    font-weight: 600;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 4px 10px;
     cursor: pointer;
   }
-  button.console-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; }
+  button.console-btn:disabled { background: var(--border); color: var(--dim); font-weight: 400; cursor: not-allowed; }
+  #right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #topology-summary {
+    flex-shrink: 0;
+    max-height: 38%;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+  }
+  #topology-summary h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    margin: 0;
+    padding: 10px 16px 6px;
+  }
+  #topology-summary-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 6px 8px;
+    overflow-y: auto;
+  }
+  .summary-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .summary-row:hover { background: var(--panel-2); }
+  .summary-row.selected { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
+  .summary-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .summary-dot.status-ok { background: var(--ok); }
+  .summary-dot.status-off { background: transparent; border: 1.5px solid var(--dim); }
+  .summary-icon { display: flex; flex-shrink: 0; }
+  .summary-icon svg { display: block; }
+  .summary-name { font-weight: 500; }
+  .summary-status { margin-left: auto; color: var(--dim); font-size: 11px; }
+  .summary-empty { padding: 6px 8px; color: var(--dim); font-size: 12px; }
   #node-actions {
     padding: 10px 16px;
     border-bottom: 1px solid var(--border);
@@ -151,6 +232,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
   }
   #console-header {
     padding: 8px 16px;
@@ -167,6 +249,8 @@
     justify-content: center;
     color: var(--dim);
     font-size: 13px;
+    text-align: center;
+    padding: 16px;
   }
   #terminal { flex: 1; padding: 8px; min-height: 0; }
   #terminal:empty { display: none; }
@@ -175,7 +259,7 @@
     background: none;
     color: var(--dim);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 4px 10px;
     cursor: pointer;
     margin-left: auto;
@@ -188,7 +272,7 @@
     background: var(--panel);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 8px;
     font-family: ui-monospace, monospace;
     font-size: 12px;
@@ -199,14 +283,15 @@
     margin-top: 8px;
     font-size: 13px;
     background: var(--accent);
-    color: #fff;
+    color: #10130f;
+    font-weight: 600;
     border: none;
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 6px 14px;
     cursor: pointer;
   }
   #push-results { margin-top: 16px; font-size: 13px; }
-  .device-result { border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; overflow: hidden; }
+  .device-result { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
   .device-result-header { padding: 6px 10px; display: flex; justify-content: space-between; background: var(--panel); }
   .device-result-header.ok { border-left: 3px solid var(--ok); }
   .device-result-header.fail { border-left: 3px solid var(--bad); }
@@ -214,6 +299,37 @@
   .device-result td { border-bottom: 1px solid var(--border); }
   .cmd-ok { color: var(--ok); }
   .cmd-fail { color: var(--bad); }
+  #status-bar {
+    flex-shrink: 0;
+    height: 28px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 11px;
+    color: var(--dim);
+    gap: 16px;
+  }
+  #status-connection { display: flex; align-items: center; gap: 6px; }
+  #status-connection-dot { width: 7px; height: 7px; border-radius: 50%; }
+  #status-connection-dot.status-ok { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
+  #status-connection-dot.status-bad { background: var(--bad); box-shadow: 0 0 4px var(--bad); }
+  #status-bar .spacer { flex: 1; }
+  #status-zoom { display: flex; align-items: center; gap: 6px; }
+  #status-zoom button {
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #status-zoom button:hover { border-color: var(--accent); color: var(--accent); }
+  #zoom-readout { min-width: 38px; text-align: center; }
 </style>
 </head>
 <body>
@@ -253,27 +369,39 @@
       </div>
     </div>
     <svg id="canvas" viewBox="0 0 1600 900">
+      <defs>
+        <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+          <circle class="grid-dot" cx="20" cy="20" r="1.4"></circle>
+        </pattern>
+      </defs>
+      <rect class="grid-bg" x="-6000" y="-6000" width="12000" height="12000" fill="url(#grid-pattern)"></rect>
       <g id="links-layer"></g>
       <g id="nodes-layer"></g>
     </svg>
   </div>
-  <div id="console-area">
-    <div id="node-actions" hidden>
-      <span class="env-tag" id="selected-role"></span>
-      <strong id="selected-name"></strong>
-      <span id="selected-status" style="color: var(--dim);"></span>
-      <button class="console-btn" id="selected-start-btn" style="margin-left: auto;">Start</button>
-      <button class="console-btn" id="selected-stop-btn">Stop</button>
-      <button class="console-btn" id="selected-reload-btn">Reload</button>
-      <button class="console-btn" id="selected-action-btn"></button>
-      <button class="console-btn" id="selected-delete-btn" style="background: var(--bad);">Delete</button>
+  <div id="right-panel">
+    <div id="topology-summary">
+      <h2>Topology</h2>
+      <ul id="topology-summary-list"></ul>
     </div>
-    <div id="console-header" hidden>
-      <span id="console-title"></span>
-      <span id="console-status"></span>
+    <div id="console-area">
+      <div id="node-actions" hidden>
+        <span class="env-tag" id="selected-role"></span>
+        <strong id="selected-name"></strong>
+        <span id="selected-status" style="color: var(--dim);"></span>
+        <button class="console-btn" id="selected-start-btn" style="margin-left: auto;">Start</button>
+        <button class="console-btn" id="selected-stop-btn">Stop</button>
+        <button class="console-btn" id="selected-reload-btn">Reload</button>
+        <button class="console-btn" id="selected-action-btn"></button>
+        <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
+      </div>
+      <div id="console-header" hidden>
+        <span id="console-title"></span>
+        <span id="console-status"></span>
+      </div>
+      <div id="console-placeholder">Click a node on the canvas, or in the Topology list above, to see its details here.</div>
+      <div id="terminal"></div>
     </div>
-    <div id="console-placeholder">Click a node on the canvas to see its details here.</div>
-    <div id="terminal"></div>
   </div>
   <div id="push-area" hidden>
     <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
@@ -288,8 +416,24 @@
     <div id="push-results"></div>
   </div>
 </main>
+<footer id="status-bar">
+  <div id="status-connection">
+    <span id="status-connection-dot" class="status-ok"></span>
+    <span id="status-connection-text">Connecting…</span>
+  </div>
+  <div class="spacer"></div>
+  <div id="status-zoom">
+    <span>Zoom</span>
+    <button id="zoom-out-btn" title="Zoom out">−</button>
+    <span id="zoom-readout">100%</span>
+    <button id="zoom-in-btn" title="Zoom in">+</button>
+    <button id="zoom-fit-btn" title="Reset view">Fit</button>
+  </div>
+</footer>
 
 <script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 let term = null;
 let ws = null;
 
@@ -300,7 +444,13 @@ function closeViewers() {
 
 const NODE_W = 70;
 const NODE_H = 44;
-const ROLE_BADGES = { ROUTER: "RT", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" };
+const ROLE_COLORS = {
+  ROUTER: "#5c9fe0",
+  SWITCH: "#4fb3bf",
+  PC: "#9aa0a6",
+  FW: "#e0895a",
+  VM: "#b07cd6",
+};
 
 let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
 let selectedName = null;
@@ -308,25 +458,153 @@ let linkMode = false;
 let linkFirstNode = null;
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 
-async function loadCanvas() {
-  const [health, topology, nodesResult, positions] = await Promise.all([
-    fetch("/health").then(r => r.json()),
-    fetch("/topology").then(r => r.json()),
-    fetch("/nodes").then(r => r.ok ? r.json() : null),
-    fetch("/layout").then(r => r.json()),
-  ]);
+function isNodeRunning(node) {
+  const status = node.live && node.live.status ? node.live.status : "none";
+  return status === "started" || status === "poweredOn";
+}
 
-  document.getElementById("project-meta").textContent =
-    `${health.gns3_project_name} @ ${health.esxi_ip}`;
-  document.getElementById("warning-banner").textContent = health.warning || "";
+function roleForIcon(node) {
+  return node.environment === "ON_ESXI" ? "VM" : node.role;
+}
 
-  const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
-  nodesData = {};
-  for (const node of topology) {
-    const pos = positions[node.name] || { x: 100, y: 100 };
-    nodesData[node.name] = { ...node, live: liveByName.get(node.name) || null, x: pos.x, y: pos.y };
+// Small hand-drawn device glyphs (primitive shapes, not a bitmap icon
+// font) in a 20x20 box - GNS3-flavored but simple enough to stay crisp
+// at the node's small on-canvas size.
+function buildRoleIconShapes(role) {
+  const g = document.createElementNS(SVG_NS, "g");
+  g.setAttribute("fill", ROLE_COLORS[role] || ROLE_COLORS.PC);
+  g.setAttribute("stroke", "none");
+
+  function rect(x, y, w, h, rx) {
+    const el = document.createElementNS(SVG_NS, "rect");
+    el.setAttribute("x", x);
+    el.setAttribute("y", y);
+    el.setAttribute("width", w);
+    el.setAttribute("height", h);
+    if (rx) el.setAttribute("rx", rx);
+    g.appendChild(el);
+    return el;
   }
-  renderCanvas();
+  function circle(cx, cy, r) {
+    const el = document.createElementNS(SVG_NS, "circle");
+    el.setAttribute("cx", cx);
+    el.setAttribute("cy", cy);
+    el.setAttribute("r", r);
+    g.appendChild(el);
+    return el;
+  }
+  function line(x1, y1, x2, y2, w) {
+    const el = document.createElementNS(SVG_NS, "line");
+    el.setAttribute("x1", x1);
+    el.setAttribute("y1", y1);
+    el.setAttribute("x2", x2);
+    el.setAttribute("y2", y2);
+    el.setAttribute("stroke", ROLE_COLORS[role] || ROLE_COLORS.PC);
+    el.setAttribute("stroke-width", w || 1.5);
+    g.appendChild(el);
+    return el;
+  }
+  function path(d) {
+    const el = document.createElementNS(SVG_NS, "path");
+    el.setAttribute("d", d);
+    g.appendChild(el);
+    return el;
+  }
+
+  switch (role) {
+    case "ROUTER":
+      rect(2, 8, 16, 8, 2);
+      line(10, 8, 10, 2, 1.5);
+      circle(10, 2, 1.5);
+      rect(5, 16, 2, 2);
+      rect(13, 16, 2, 2);
+      break;
+    case "SWITCH":
+      rect(2, 7, 16, 6, 1.5);
+      rect(4, 13, 2, 2);
+      rect(8, 13, 2, 2);
+      rect(12, 13, 2, 2);
+      rect(16, 13, 2, 2);
+      break;
+    case "FW":
+      path("M10,2 L17,5 V11 C17,15 13,18 10,19 C7,18 3,15 3,11 V5 Z");
+      break;
+    case "VM":
+      rect(5, 2, 10, 16, 1.5);
+      rect(7, 5, 6, 1.6);
+      rect(7, 8, 6, 1.6);
+      rect(7, 11, 6, 1.6);
+      break;
+    case "PC":
+    default:
+      rect(3, 3, 14, 10, 1.5);
+      rect(8, 13, 4, 2);
+      rect(6, 15.2, 8, 1.4, 0.5);
+      break;
+  }
+  return g;
+}
+
+function buildRoleIconStandalone(role, size) {
+  const svgEl = document.createElementNS(SVG_NS, "svg");
+  svgEl.setAttribute("viewBox", "0 0 20 20");
+  svgEl.setAttribute("width", size || 16);
+  svgEl.setAttribute("height", size || 16);
+  svgEl.appendChild(buildRoleIconShapes(role));
+  return svgEl;
+}
+
+async function loadCanvas() {
+  try {
+    const [health, topology, nodesResult, positions] = await Promise.all([
+      fetch("/health").then(r => r.json()),
+      fetch("/topology").then(r => r.json()),
+      fetch("/nodes").then(r => r.ok ? r.json() : null),
+      fetch("/layout").then(r => r.json()),
+    ]);
+
+    document.getElementById("project-meta").textContent =
+      `${health.gns3_project_name} @ ${health.esxi_ip}`;
+    document.getElementById("warning-banner").textContent = health.warning || "";
+
+    const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
+    nodesData = {};
+    for (const node of topology) {
+      const pos = positions[node.name] || { x: 100, y: 100 };
+      nodesData[node.name] = { ...node, live: liveByName.get(node.name) || null, x: pos.x, y: pos.y };
+    }
+    renderCanvas();
+    renderSummary();
+    updateStatusBar(true);
+  } catch (err) {
+    updateStatusBar(false);
+    throw err;
+  }
+}
+
+function edgePoint(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (dx === 0 && dy === 0) return { x: from.x, y: from.y };
+  const hw = NODE_W / 2;
+  const hh = NODE_H / 2;
+  const scale = Math.min(
+    dx !== 0 ? hw / Math.abs(dx) : Infinity,
+    dy !== 0 ? hh / Math.abs(dy) : Infinity
+  );
+  return { x: from.x + dx * scale, y: from.y + dy * scale };
+}
+
+function appendLinkEndpointDot(layer, nearNode, farNode) {
+  const p = edgePoint(nearNode, farNode);
+  const dot = document.createElementNS(SVG_NS, "circle");
+  dot.setAttribute("class", "link-endpoint");
+  dot.setAttribute("r", 3);
+  dot.setAttribute("cx", p.x);
+  dot.setAttribute("cy", p.y);
+  dot.dataset.for = nearNode.name;
+  dot.dataset.other = farNode.name;
+  layer.appendChild(dot);
 }
 
 function renderCanvas() {
@@ -342,10 +620,13 @@ function renderCanvas() {
       const pairKey = [node.name, neighbourName].sort().join("|");
       if (drawnPairs.has(pairKey)) continue;
       drawnPairs.add(pairKey);
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("class", "link-line");
+      const neighbour = nodesData[neighbourName];
+      const bothRunning = isNodeRunning(node) && isNodeRunning(neighbour);
+
+      const line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("class", `link-line${bothRunning ? " link-up" : ""}`);
       line.dataset.pair = pairKey;
-      setLineEndpoints(line, node, nodesData[neighbourName]);
+      setLineEndpoints(line, node, neighbour);
       line.addEventListener("pointerdown", (evt) => {
         evt.stopPropagation();
         if (linkMode) return;
@@ -353,6 +634,8 @@ function renderCanvas() {
         if (confirm(`Delete link between ${a} and ${b}?`)) deleteLink(a, b);
       });
       linksLayer.appendChild(line);
+      appendLinkEndpointDot(linksLayer, node, neighbour);
+      appendLinkEndpointDot(linksLayer, neighbour, node);
     }
   }
 
@@ -362,40 +645,48 @@ function renderCanvas() {
 }
 
 function setLineEndpoints(line, a, b) {
-  line.setAttribute("x1", a.x);
-  line.setAttribute("y1", a.y);
-  line.setAttribute("x2", b.x);
-  line.setAttribute("y2", b.y);
+  const pa = edgePoint(a, b);
+  const pb = edgePoint(b, a);
+  line.setAttribute("x1", pa.x);
+  line.setAttribute("y1", pa.y);
+  line.setAttribute("x2", pb.x);
+  line.setAttribute("y2", pb.y);
 }
 
 function buildNodeShape(node) {
   const isVM = node.environment === "ON_ESXI";
   const roleClass = isVM ? "role-VM" : `role-${node.role}`;
-  const status = node.live && node.live.status ? node.live.status : "none";
-  const running = status === "started" || status === "poweredOn";
+  const hasLive = !!node.live;
+  const running = isNodeRunning(node);
 
-  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("class", `node-shape ${roleClass}${node.name === selectedName ? " selected" : ""}`);
   g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`);
   g.dataset.name = node.name;
 
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  const rect = document.createElementNS(SVG_NS, "rect");
+  rect.setAttribute("class", "node-card");
   rect.setAttribute("width", NODE_W);
   rect.setAttribute("height", NODE_H);
-  rect.setAttribute("rx", 6);
-  rect.setAttribute("fill", running ? "#1c3d2e" : "var(--panel)");
+  rect.setAttribute("rx", 10);
+  rect.setAttribute("fill", running ? "#1e2f22" : "var(--panel)");
   g.appendChild(rect);
 
-  const badge = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  badge.setAttribute("class", "role-badge");
-  badge.setAttribute("x", 6);
-  badge.setAttribute("y", 14);
-  badge.textContent = ROLE_BADGES[node.role] || node.role.slice(0, 2).toUpperCase();
-  g.appendChild(badge);
+  const icon = buildRoleIconShapes(roleForIcon(node));
+  icon.setAttribute("transform", `translate(${NODE_W / 2 - 10}, 3) scale(0.85)`);
+  g.appendChild(icon);
 
-  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  const statusDot = document.createElementNS(SVG_NS, "circle");
+  const statusClass = running ? "status-ok" : (hasLive ? "status-off" : "status-unknown");
+  statusDot.setAttribute("class", `status-dot ${statusClass}`);
+  statusDot.setAttribute("cx", NODE_W - 8);
+  statusDot.setAttribute("cy", 8);
+  statusDot.setAttribute("r", 4);
+  g.appendChild(statusDot);
+
+  const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("x", NODE_W / 2);
-  label.setAttribute("y", NODE_H - 8);
+  label.setAttribute("y", NODE_H - 6);
   label.setAttribute("text-anchor", "middle");
   label.textContent = node.name;
   g.appendChild(label);
@@ -404,11 +695,75 @@ function buildNodeShape(node) {
   return g;
 }
 
+function renderSummary() {
+  const list = document.getElementById("topology-summary-list");
+  list.innerHTML = "";
+  const names = Object.keys(nodesData).sort();
+
+  if (!names.length) {
+    const li = document.createElement("li");
+    li.className = "summary-empty";
+    li.textContent = "No nodes in this topology.";
+    list.appendChild(li);
+    return;
+  }
+
+  for (const name of names) {
+    const node = nodesData[name];
+    const running = isNodeRunning(node);
+    const statusText = node.live && node.live.status ? node.live.status : "no live data";
+
+    const li = document.createElement("li");
+    li.className = `summary-row${name === selectedName ? " selected" : ""}`;
+
+    const dot = document.createElement("span");
+    dot.className = `summary-dot ${running ? "status-ok" : "status-off"}`;
+
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "summary-icon";
+    iconWrap.appendChild(buildRoleIconStandalone(roleForIcon(node)));
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "summary-name";
+    nameEl.textContent = name;
+
+    const statusEl = document.createElement("span");
+    statusEl.className = "summary-status";
+    statusEl.textContent = statusText;
+
+    li.append(dot, iconWrap, nameEl, statusEl);
+    li.addEventListener("click", () => selectNode(name));
+    list.appendChild(li);
+  }
+}
+
+function updateStatusBar(connectionOk) {
+  const nodes = Object.values(nodesData);
+  const running = nodes.filter(isNodeRunning).length;
+  const dot = document.getElementById("status-connection-dot");
+  const text = document.getElementById("status-connection-text");
+  dot.className = connectionOk ? "status-ok" : "status-bad";
+  text.textContent = connectionOk
+    ? `Connected · ${nodes.length} node${nodes.length === 1 ? "" : "s"}, ${running} running`
+    : "Disconnected - failed to reach the server";
+  document.getElementById("zoom-readout").textContent =
+    `${Math.round((1600 / viewBoxState.w) * 100)}%`;
+}
+
 const svg = document.getElementById("canvas");
 let viewBoxState = { x: 0, y: 0, w: 1600, h: 900 };
 
 function applyViewBox() {
   svg.setAttribute("viewBox", `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
+}
+
+function zoomBy(scale, center) {
+  viewBoxState.x = center.x - (center.x - viewBoxState.x) * scale;
+  viewBoxState.y = center.y - (center.y - viewBoxState.y) * scale;
+  viewBoxState.w *= scale;
+  viewBoxState.h *= scale;
+  applyViewBox();
+  updateStatusBar(true);
 }
 
 function svgPoint(evt) {
@@ -451,6 +806,12 @@ function onNodeDrag(evt) {
     const other = a === dragState.name ? b : a;
     setLineEndpoints(line, node, nodesData[other]);
   });
+  document.querySelectorAll(".link-endpoint").forEach((dot) => {
+    if (dot.dataset.for !== dragState.name && dot.dataset.other !== dragState.name) return;
+    const p2 = edgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other]);
+    dot.setAttribute("cx", p2.x);
+    dot.setAttribute("cy", p2.y);
+  });
 }
 
 function endNodeDrag() {
@@ -470,12 +831,7 @@ function endNodeDrag() {
 svg.addEventListener("wheel", (evt) => {
   evt.preventDefault();
   const p = svgPoint(evt);
-  const scale = evt.deltaY > 0 ? 1.1 : 0.9;
-  viewBoxState.x = p.x - (p.x - viewBoxState.x) * scale;
-  viewBoxState.y = p.y - (p.y - viewBoxState.y) * scale;
-  viewBoxState.w *= scale;
-  viewBoxState.h *= scale;
-  applyViewBox();
+  zoomBy(evt.deltaY > 0 ? 1.1 : 0.9, p);
 });
 
 let panState = null;
@@ -499,10 +855,25 @@ window.addEventListener("pointerup", () => {
   }
 });
 
+document.getElementById("zoom-in-btn").addEventListener("click", () => {
+  zoomBy(0.9, { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 });
+});
+document.getElementById("zoom-out-btn").addEventListener("click", () => {
+  zoomBy(1.1, { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 });
+});
+document.getElementById("zoom-fit-btn").addEventListener("click", () => {
+  viewBoxState = { x: 0, y: 0, w: 1600, h: 900 };
+  applyViewBox();
+  updateStatusBar(true);
+});
+
 function selectNode(name) {
   selectedName = name;
   document.querySelectorAll(".node-shape").forEach((g) => {
     g.classList.toggle("selected", g.dataset.name === name);
+  });
+  document.querySelectorAll(".summary-row").forEach((row) => {
+    row.classList.toggle("selected", row.querySelector(".summary-name").textContent === name);
   });
   showNodeActions(name);
 }
@@ -781,7 +1152,7 @@ function openTerminalWebSocket(nodeName, wsUrl, statusEl) {
   termEl.style.display = "block";
   termEl.innerHTML = "";
   if (term) term.dispose();
-  term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#0f1115" } });
+  term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#1a1d1f" } });
   term.open(termEl);
 
   ws = new WebSocket(wsUrl);
@@ -852,7 +1223,7 @@ document.getElementById("tab-console").addEventListener("click", () => showTab("
 document.getElementById("tab-push").addEventListener("click", () => showTab("push"));
 
 function showTab(name) {
-  document.getElementById("console-area").hidden = name !== "console";
+  document.getElementById("right-panel").hidden = name !== "console";
   document.getElementById("push-area").hidden = name !== "push";
   document.getElementById("tab-console").classList.toggle("active", name === "console");
   document.getElementById("tab-push").classList.toggle("active", name === "push");
