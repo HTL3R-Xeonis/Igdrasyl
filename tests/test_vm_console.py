@@ -191,23 +191,37 @@ def test_ensure_guest_console_configured_idempotent_when_already_configured():
 
     assert result is False
     mock_run.assert_called_once()
-    vm.RebootGuest.assert_not_called()
+    vm.PowerOffVM_Task.assert_not_called()
+    vm.PowerOnVM_Task.assert_not_called()
 
 
-def test_ensure_guest_console_configured_first_time_configures_and_reboots():
+def test_ensure_guest_console_configured_first_time_configures_and_power_cycles():
+    """
+    Real regression test: a soft vm.RebootGuest() was confirmed live
+    against real infrastructure to NOT reliably bring the network-backed
+    serial port back - only a full VM power cycle does (see this
+    function's own docstring). Asserts the power-cycle path specifically,
+    not RebootGuest.
+    """
+    from pyVmomi import vim
+
     vm = MagicMock()
+    vm.PowerOffVM_Task.return_value = MagicMock(info=MagicMock(state=vim.TaskInfo.State.success))
+    vm.PowerOnVM_Task.return_value = MagicMock(info=MagicMock(state=vim.TaskInfo.State.success))
     with patch.object(
         vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
     ), patch.object(
         vc,
         "run_command_in_guest",
         side_effect=[(1, "exit code 1"), (0, "exit code 0"), (0, "exit code 0")],
-    ) as mock_run:
+    ) as mock_run, patch.object(vc, "_existing_serial_console", return_value=None):
         result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
 
     assert result is True
     assert mock_run.call_count == 3
-    vm.RebootGuest.assert_called_once()
+    vm.PowerOffVM_Task.assert_called_once()
+    vm.PowerOnVM_Task.assert_called_once()
+    vm.RebootGuest.assert_not_called()
 
 
 def test_ensure_guest_console_configured_gives_up_if_script_write_fails():
@@ -220,4 +234,5 @@ def test_ensure_guest_console_configured_gives_up_if_script_write_fails():
         result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
 
     assert result is None
-    vm.RebootGuest.assert_not_called()
+    vm.PowerOffVM_Task.assert_not_called()
+    vm.PowerOnVM_Task.assert_not_called()

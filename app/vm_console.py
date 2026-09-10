@@ -181,15 +181,28 @@ def ensure_serial_console(vm: Any, assigned_ports: dict[str, int]) -> tuple[int,
 def ensure_guest_console_configured(vm: Any, image: str, esxi_connection: Any) -> bool | None:
     """
     Best-effort: adds `console=ttyS0` to the guest's own GRUB config (via
-    guest-ops) and reboots it, so the serial console
+    guest-ops), then power-cycles the VM so the serial console
     ensure_serial_console's own hardware/network path already provides
-    actually shows something - confirmed working this session, by hand,
-    against a real VM (see HANDOFF.md). Never raises - returns None if
-    not attempted (a Windows image, per the same "windows" in
-    image.lower() heuristic app/config_push.py already uses since
-    Windows has no GRUB; or no guest credentials found for this image),
-    False if already configured (idempotent, no change made), True if
-    it just configured it (and triggered a guest reboot to pick it up).
+    actually shows something. Never raises - returns None if not
+    attempted (a Windows image, per the same "windows" in image.lower()
+    heuristic app/config_push.py already uses since Windows has no GRUB;
+    or no guest credentials found for this image), False if already
+    configured (idempotent, no change made), True if it just configured
+    it (and power-cycled the VM to pick it up).
+
+    Confirmed live against real infrastructure: a soft guest-level
+    reboot (`vm.RebootGuest()`) is NOT enough here - the guest itself
+    comes back up correctly (kernel cmdline, `serial-getty@ttyS0`, all
+    genuinely correct), but the vmx-level network-backed serial port
+    listener doesn't reliably re-attach to the virtual UART afterward,
+    so nothing reaches the network side despite the guest working
+    perfectly. Only a real VM power cycle (a fresh vmx process) fixes
+    this - the exact same pattern already true for
+    ensure_serial_console's own hardware-add step and the classic-VNC
+    bypass's `extraConfig` quirk before it. This makes this function
+    genuinely disruptive on an already-configured VM's *first* setup
+    (not just the initial hardware add), which is why it's still gated
+    by the same idempotency check below - it only ever runs once per VM.
     """
     if "windows" in image.lower():
         return None
@@ -229,7 +242,14 @@ def ensure_guest_console_configured(vm: Any, image: str, esxi_connection: Any) -
             logger.warning(f"GRUB fix script failed on {vm.name}: {output}")
             return None
 
-        vm.RebootGuest()
+        from src.settings import Settings
+
+        _wait_for_task(vm.PowerOffVM_Task())
+        _wait_for_task(vm.PowerOnVM_Task())
+
+        port = _existing_serial_console(vm)
+        if port is not None:
+            _wait_until_port_open(Settings.ESXI.IP, port, _SERIAL_READY_TIMEOUT_SECONDS)
         return True
     except Exception as exc:  # best-effort - never break the caller's own flow
         logger.warning(f"guest console=ttyS0 setup skipped for {vm.name}: {exc!r}")

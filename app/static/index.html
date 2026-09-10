@@ -833,7 +833,7 @@ async function openVmConsole(nodeName) {
     }
     const data = await resp.json();
     if (data.guest_console_configured) {
-      statusEl.textContent = "guest was rebooted to enable console output, connecting…";
+      statusEl.textContent = "VM was power-cycled to enable console output, connecting…";
     } else if (data.power_cycled) {
       statusEl.textContent = "VM was power-cycled to enable its console, connecting…";
     }
