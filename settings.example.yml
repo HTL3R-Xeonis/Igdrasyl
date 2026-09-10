@@ -8,7 +8,10 @@
 # deploy already used, so it can look up what's actually running.
 # Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
 # GNS3_PASSWORD environment variables instead (a .env file works too, see
-# .env.example).
+# .env.example). GNS3_PASSWORD specifically is only needed for Phase B's
+# write endpoints (add/remove node/link) - they SSH into the GNS3 VM to
+# rebuild its VLAN trunk subinterfaces on every call. Read-only endpoints
+# work fine without it.
 
 # Path to the SAME topology YAML file a `topologybuilder deploy` already
 # used - this is what TopologyOperator reads to know what nodes/edges
@@ -19,6 +22,13 @@ esxi:
   ip: 10.20.20.202
   username: root
   gns3_vm_name: GNS3-VM (1)
+  # Must match the ESXi port group actually carrying the GNS3 VM's VLAN
+  # trunk NIC on your host - defaults to "PG_GNS3_TRUNK" if omitted, which
+  # won't match every host's naming (e.g. "PG-GNS3-TRUNK" with hyphens).
+  # Phase B's write endpoints fail with "Could not auto-detect the GNS3
+  # VM's trunk interface" if this doesn't match. Same value the
+  # TopologyBuilder deploy that created this topology used.
+  # trunk_port_group: PG-GNS3-TRUNK
 
 gns3:
   username: gns3
