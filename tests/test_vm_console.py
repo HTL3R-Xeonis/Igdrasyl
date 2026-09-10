@@ -130,11 +130,13 @@ def test_prepare_vm_console_happy_path(client, app_state):
     fake_vm = MagicMock()
     app_state.esxi_connection.get_vm.return_value = fake_vm
 
-    with patch.object(vc, "ensure_serial_console", return_value=(2000, True)):
+    with patch.object(vc, "ensure_serial_console", return_value=(2000, True)), patch.object(
+        vc, "ensure_guest_console_configured", return_value=True
+    ):
         resp = client.post("/vm-console/VM1/prepare")
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"power_cycled": True}
+    assert resp.json() == {"power_cycled": True, "guest_console_configured": True}
 
 
 def test_prepare_vm_console_unknown_node_maps_to_404(client, app_state):
@@ -161,3 +163,61 @@ def test_prepare_vm_console_runtime_error_maps_to_503(client, app_state):
         resp = client.post("/vm-console/VM1/prepare")
 
     assert resp.status_code == 503
+
+
+def test_ensure_guest_console_configured_skips_windows_image():
+    vm = MagicMock()
+    with patch.object(vc, "guest_credentials_for_image") as mock_creds:
+        result = vc.ensure_guest_console_configured(vm, "Windows Server 2022 Standard", MagicMock())
+
+    assert result is None
+    mock_creds.assert_not_called()
+
+
+def test_ensure_guest_console_configured_skips_when_no_credentials():
+    vm = MagicMock()
+    with patch.object(vc, "guest_credentials_for_image", return_value=None):
+        result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
+
+    assert result is None
+
+
+def test_ensure_guest_console_configured_idempotent_when_already_configured():
+    vm = MagicMock()
+    with patch.object(
+        vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
+    ), patch.object(vc, "run_command_in_guest", return_value=(0, "exit code 0")) as mock_run:
+        result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
+
+    assert result is False
+    mock_run.assert_called_once()
+    vm.RebootGuest.assert_not_called()
+
+
+def test_ensure_guest_console_configured_first_time_configures_and_reboots():
+    vm = MagicMock()
+    with patch.object(
+        vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
+    ), patch.object(
+        vc,
+        "run_command_in_guest",
+        side_effect=[(1, "exit code 1"), (0, "exit code 0"), (0, "exit code 0")],
+    ) as mock_run:
+        result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
+
+    assert result is True
+    assert mock_run.call_count == 3
+    vm.RebootGuest.assert_called_once()
+
+
+def test_ensure_guest_console_configured_gives_up_if_script_write_fails():
+    vm = MagicMock()
+    with patch.object(
+        vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
+    ), patch.object(
+        vc, "run_command_in_guest", side_effect=[(1, "exit code 1"), (1, "exit code 1")]
+    ):
+        result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
+
+    assert result is None
+    vm.RebootGuest.assert_not_called()

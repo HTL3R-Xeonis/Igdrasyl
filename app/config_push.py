@@ -22,20 +22,16 @@ which a family of commands representing modal CLI transitions needs.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from pydantic import BaseModel
 
 from app.gns3_state import NoLiveProject, list_live_nodes
-from src.connections.api_handler import APIHandler
+from app.guest_ops import guest_credentials_for_image, run_command_in_guest
 from src.graph.blocks.generic_node import GenericNode
-from src.graph.environment import Environment, normalize_template_name
-from src.settings import Settings
+from src.graph.environment import Environment
 
 _NETMIKO_CONNECT_TIMEOUT_SECONDS = 20
-_GUEST_OPS_TIMEOUT_SECONDS = 60
-_GUEST_OPS_POLL_INTERVAL_SECONDS = 1.0
 
 # Minimal, deliberately narrow: only recognized for the cisco_ios_telnet
 # device type, where these prefixes are well-established. No attempt is
@@ -110,39 +106,6 @@ def _push_via_netmiko(
     )
 
 
-def _guest_credentials_for_image(image: str) -> tuple[str, str] | None:
-    """
-    First user/password pair (parallel lists, index-matched) from the
-    ESXi Template-API's per-template metadata for the given image - see
-    HANDOFF.md, confirmed live on this project's real infrastructure
-    (e.g. debian: users=[junioradmin, root], passwords=[junioradmin,
-    REMOVED]). Mirrors APIHandler.find_esxi_template_file's own
-    lenient-name-match pattern rather than adding a new endpoint.
-    """
-    data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")
-    normalized = normalize_template_name(image)
-    for template in data["templates"]:
-        if normalize_template_name(template["name"]) != normalized:
-            continue
-        users = template.get("users") or []
-        passwords = template.get("passwords") or []
-        if users and passwords:
-            return users[0], passwords[0]
-        return None
-    return None
-
-
-def _wait_for_guest_process(process_manager, vm, auth, pid: int) -> int | None:
-    """Polls until the guest process exits, or returns None on timeout."""
-    deadline = time.monotonic() + _GUEST_OPS_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        procs = process_manager.ListProcessesInGuest(vm, auth, [pid])
-        if procs and procs[0].endTime is not None:
-            return procs[0].exitCode
-        time.sleep(_GUEST_OPS_POLL_INTERVAL_SECONDS)
-    return None
-
-
 def _push_via_guest_ops(
     node: GenericNode, commands: list[str], esxi_connection: Any
 ) -> DeviceResult:
@@ -155,7 +118,7 @@ def _push_via_guest_ops(
             error=f"VM '{node.name}' not found on ESXi",
         )
 
-    creds = _guest_credentials_for_image(node.image)
+    creds = guest_credentials_for_image(node.image)
     if creds is None:
         return DeviceResult(
             device=node.name, transport="guest_ops", ok=False,
@@ -169,25 +132,8 @@ def _push_via_guest_ops(
     results: list[CommandResult] = []
     overall_ok = True
     for command in commands:
-        if is_windows:
-            spec = vim.vm.guest.ProcessManager.ProgramSpec(
-                programPath="C:\\Windows\\System32\\cmd.exe",
-                arguments=f"/c {command}",
-            )
-        else:
-            spec = vim.vm.guest.ProcessManager.ProgramSpec(
-                programPath="/bin/bash", arguments=f'-c "{command}"'
-            )
-        try:
-            pid = process_manager.StartProgramInGuest(vm, auth, spec)
-        except vim.fault.MethodFault as exc:
-            results.append(CommandResult(command=command, output=str(exc), ok=False))
-            overall_ok = False
-            break
-
-        exit_code = _wait_for_guest_process(process_manager, vm, auth, pid)
+        exit_code, output = run_command_in_guest(process_manager, vm, auth, command, is_windows)
         ok = exit_code == 0
-        output = "timed out waiting for exit" if exit_code is None else f"exit code {exit_code}"
         results.append(CommandResult(command=command, output=output, ok=ok))
         if not ok:
             overall_ok = False

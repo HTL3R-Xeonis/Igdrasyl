@@ -27,7 +27,7 @@ from src.settings import Settings
 
 from app import console, lifecycle, topology_write, vm_console
 from app.config_push import DeviceResult, push_all
-from app.gns3_state import NoLiveProject, list_live_nodes
+from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports
 from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
@@ -170,6 +170,20 @@ def nodes() -> list[dict[str, Any]]:
             entry["status"] = str(vm.runtime.powerState) if vm is not None else None
         result.append(entry)
     return result
+
+
+@app.get("/nodes/{name}/ports")
+def node_ports(name: str) -> list[dict[str, Any]]:
+    """
+    Real, live interface names for a GNS3 node - Add Link's own picker
+    uses this instead of free text. ESXi VM interfaces have no
+    equivalent live source, so those 404 here and the frontend falls
+    back to free text for them.
+    """
+    try:
+        return list_node_ports(app, name)
+    except (ValueError, NoLiveProject) as exc:
+        raise HTTPException(404, str(exc))
 
 
 @app.get("/layout")
@@ -333,9 +347,12 @@ def prepare_vm_console(node_name: str) -> dict[str, Any]:
     """
     Ensures a network-backed serial console is added on this ESXi VM
     node. The first call for a given VM can take up to ~60s and power-
-    cycles it - see app/vm_console.py. Call this before opening
-    /ws/vm-console/{name}; that endpoint refuses to connect until this
-    has run at least once.
+    cycles it - see app/vm_console.py. Also makes a best-effort attempt
+    to configure the guest's own GRUB for `console=ttyS0` (needed for
+    the guest to actually send anything there) - never fails the
+    request if that can't be done. Call this before opening
+    /ws/vm-console/{name}; that endpoint refuses to connect until the
+    hardware/network part above has run at least once.
     """
     node = app.state.graph.nodes.get(node_name)
     if node is None or node.env != Environment.ON_ESXI:
@@ -349,7 +366,14 @@ def prepare_vm_console(node_name: str) -> dict[str, Any]:
         )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
-    return {"power_cycled": just_enabled}
+
+    # Best-effort, never fails the request - the hardware/network path
+    # above is already the real value even if this can't run (Windows
+    # images, missing guest credentials, guest tools not up yet, etc.).
+    guest_configured = vm_console.ensure_guest_console_configured(
+        vm, node.image, app.state.esxi_connection
+    )
+    return {"power_cycled": just_enabled, "guest_console_configured": guest_configured}
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in

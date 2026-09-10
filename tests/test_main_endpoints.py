@@ -38,6 +38,30 @@ def test_nodes_merges_live_gns3_data_for_gns3_nodes(client, app_state):
     assert by_name["R1"]["console_type"] == "telnet"
 
 
+def test_node_ports_returns_real_interfaces_for_gns3_node(client, app_state):
+    app_state.project_id = "proj-1"
+    live = [
+        {
+            "name": "R1",
+            "node_id": "n1",
+            "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
+        }
+    ]
+    with patch("app.main.GNS3Connection.list_project_nodes", return_value=live), patch(
+        "app.main.GNS3Connection.list_project_links", return_value=[]
+    ):
+        resp = client.get("/nodes/R1/ports")
+    assert resp.status_code == 200
+    assert resp.json() == [{"name": "gi0/0", "in_use": False}]
+
+
+def test_node_ports_404_for_esxi_node(client, app_state):
+    app_state.project_id = "proj-1"
+    with patch("app.main.GNS3Connection.list_project_nodes", return_value=[]):
+        resp = client.get("/nodes/VM1/ports")
+    assert resp.status_code == 404
+
+
 def test_nodes_resolves_esxi_power_state_independent_of_gns3_project(client, app_state):
     """
     Real regression test for a real bug this session: /nodes used to

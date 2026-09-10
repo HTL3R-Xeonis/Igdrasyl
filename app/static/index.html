@@ -588,7 +588,30 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
   }
 });
 
-function handleLinkModeClick(name) {
+async function promptForInterface(nodeName) {
+  let ports = null;
+  try {
+    const resp = await fetch(`/nodes/${encodeURIComponent(nodeName)}/ports`);
+    if (resp.ok) ports = await resp.json();
+  } catch (err) {
+    // fall through to plain free-text prompt below
+  }
+
+  if (!ports) {
+    return prompt(`Interface name on ${nodeName}:`);
+  }
+
+  const listing = ports.map((p) => `${p.name}${p.in_use ? " (in use)" : ""}`).join(", ");
+  const validNames = new Set(ports.map((p) => p.name));
+  while (true) {
+    const answer = prompt(`Interface on ${nodeName} - available: ${listing}`);
+    if (!answer) return null;
+    if (validNames.has(answer)) return answer;
+    alert(`"${answer}" isn't one of ${nodeName}'s real interfaces - try again.`);
+  }
+}
+
+async function handleLinkModeClick(name) {
   if (!linkFirstNode) {
     linkFirstNode = name;
     document.getElementById("link-mode-hint").textContent =
@@ -600,9 +623,9 @@ function handleLinkModeClick(name) {
   linkFirstNode = null;
   if (node1 === node2) return;
 
-  const if1 = prompt(`Interface name on ${node1}:`);
+  const if1 = await promptForInterface(node1);
   if (!if1) { exitLinkMode(); return; }
-  const if2 = prompt(`Interface name on ${node2}:`);
+  const if2 = await promptForInterface(node2);
   if (!if2) { exitLinkMode(); return; }
   if (!confirm(
     `Connect ${node1}:${if1} <-> ${node2}:${if2}?\n\nThis briefly disrupts every ` +
@@ -809,7 +832,9 @@ async function openVmConsole(nodeName) {
       return;
     }
     const data = await resp.json();
-    if (data.power_cycled) {
+    if (data.guest_console_configured) {
+      statusEl.textContent = "guest was rebooted to enable console output, connecting…";
+    } else if (data.power_cycled) {
       statusEl.textContent = "VM was power-cycled to enable its console, connecting…";
     }
   } catch (err) {

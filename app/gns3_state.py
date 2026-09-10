@@ -27,3 +27,37 @@ def list_live_nodes(app: FastAPI) -> list[dict[str, Any]]:
     return GNS3Connection.list_project_nodes(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )
+
+
+def list_node_ports(app: FastAPI, name: str) -> list[dict[str, Any]]:
+    """
+    Every port GNS3 knows about for this live node - name plus whether
+    it's already connected to another node - for Add Link's own
+    interface picker to enumerate real options instead of free text.
+    ESXi VM interfaces have no live GNS3-side equivalent - not this
+    function's concern, callers 404 for those.
+    :raises ValueError: if the node isn't live on GNS3 right now.
+    """
+    live_by_name = {n["name"]: n for n in list_live_nodes(app)}
+    node = live_by_name.get(name)
+    if node is None or "ports" not in node:
+        raise ValueError(f"node {name!r} has no live GNS3 port information")
+
+    links = GNS3Connection.list_project_links(
+        app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
+    )
+    used = {
+        (endpoint["node_id"], endpoint["adapter_number"], endpoint["port_number"])
+        for link in links
+        for endpoint in link["nodes"]
+        if endpoint["node_id"] == node["node_id"]
+    }
+
+    return [
+        {
+            "name": port["name"],
+            "in_use": (node["node_id"], port["adapter_number"], port["port_number"])
+            in used,
+        }
+        for port in node["ports"]
+    ]

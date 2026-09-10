@@ -28,12 +28,15 @@ never started" trap to guard against here.
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 import time
 from typing import Any
 
 from fastapi import APIRouter, WebSocket
+from loguru import logger
 
+from app.guest_ops import guest_credentials_for_image, run_command_in_guest
 from app.tcp_bridge import bridge
 
 router = APIRouter()
@@ -46,6 +49,29 @@ _SERIAL_URI_PATTERN = re.compile(r"^tcp://(?::(\d+))?$")
 _TASK_POLL_INTERVAL_SECONDS = 0.5
 _SERIAL_READY_TIMEOUT_SECONDS = 60
 _FIREWALL_RULESET = "remoteSerialPort"
+
+# A small Python script (not a shell one-liner) specifically to avoid
+# the nested-quoting problems a sed-based approach hit when run through
+# guest-ops' single command-line interface this session - base64-encoded
+# below and piped through `base64 -d` to sidestep quoting entirely.
+_GRUB_FIX_SCRIPT = """
+import re
+path = "/etc/default/grub"
+with open(path) as f:
+    content = f.read()
+if "console=ttyS0" not in content:
+    content = re.sub(
+        r'^GRUB_CMDLINE_LINUX_DEFAULT="([^"]*)"',
+        r'GRUB_CMDLINE_LINUX_DEFAULT="\\1 console=ttyS0,115200n8"',
+        content,
+        flags=re.MULTILINE,
+    )
+    with open(path, "w") as f:
+        f.write(content)
+import subprocess
+subprocess.run(["update-grub"], check=True)
+print("done")
+"""
 
 
 def _wait_until_port_open(host: str, port: int, timeout_seconds: float) -> bool:
@@ -150,6 +176,64 @@ def ensure_serial_console(vm: Any, assigned_ports: dict[str, int]) -> tuple[int,
 
     assigned_ports[vm.name] = port
     return port, True
+
+
+def ensure_guest_console_configured(vm: Any, image: str, esxi_connection: Any) -> bool | None:
+    """
+    Best-effort: adds `console=ttyS0` to the guest's own GRUB config (via
+    guest-ops) and reboots it, so the serial console
+    ensure_serial_console's own hardware/network path already provides
+    actually shows something - confirmed working this session, by hand,
+    against a real VM (see HANDOFF.md). Never raises - returns None if
+    not attempted (a Windows image, per the same "windows" in
+    image.lower() heuristic app/config_push.py already uses since
+    Windows has no GRUB; or no guest credentials found for this image),
+    False if already configured (idempotent, no change made), True if
+    it just configured it (and triggered a guest reboot to pick it up).
+    """
+    if "windows" in image.lower():
+        return None
+
+    try:
+        creds = guest_credentials_for_image(image)
+        if creds is None:
+            return None
+        username, password = creds
+
+        from pyVmomi import vim
+
+        auth = vim.vm.guest.NamePasswordAuthentication(username=username, password=password)
+        process_manager = esxi_connection.content.guestOperationsManager.processManager
+
+        exit_code, _output = run_command_in_guest(
+            process_manager, vm, auth,
+            "grep -q console=ttyS0 /etc/default/grub", is_windows=False,
+        )
+        if exit_code == 0:
+            return False
+
+        script_b64 = base64.b64encode(_GRUB_FIX_SCRIPT.encode()).decode()
+        exit_code, output = run_command_in_guest(
+            process_manager, vm, auth,
+            f"echo {script_b64} | base64 -d > /tmp/grubfix.py", is_windows=False,
+        )
+        if exit_code != 0:
+            logger.warning(f"couldn't write GRUB fix script to {vm.name}: {output}")
+            return None
+
+        exit_code, output = run_command_in_guest(
+            process_manager, vm, auth,
+            f"echo {password} | sudo -S python3 /tmp/grubfix.py", is_windows=False,
+        )
+        if exit_code != 0:
+            logger.warning(f"GRUB fix script failed on {vm.name}: {output}")
+            return None
+
+        vm.RebootGuest()
+        return True
+    except Exception as exc:  # best-effort - never break the caller's own flow
+        logger.warning(f"guest console=ttyS0 setup skipped for {vm.name}: {exc!r}")
+        return None
 
 
 @router.websocket("/ws/vm-console/{node_name}")

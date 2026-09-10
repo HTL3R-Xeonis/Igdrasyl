@@ -71,7 +71,7 @@ def test_push_via_guest_ops_happy_path(graph):
     completed = MagicMock(endTime="2026-01-01", exitCode=0)
     process_manager.ListProcessesInGuest.return_value = [completed]
 
-    with patch.object(cp, "_guest_credentials_for_image", return_value=("u", "p")):
+    with patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")):
         result = cp._push_via_guest_ops(node, ["echo hi", "echo bye"], fake_esxi)
 
     assert result.ok is True
@@ -90,7 +90,7 @@ def test_push_via_guest_ops_stops_on_first_failure(graph):
     fail_proc = MagicMock(endTime="t", exitCode=1)
     process_manager.ListProcessesInGuest.side_effect = [[ok_proc], [fail_proc]]
 
-    with patch.object(cp, "_guest_credentials_for_image", return_value=("u", "p")):
+    with patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")):
         result = cp._push_via_guest_ops(node, ["ok", "bad", "never"], fake_esxi)
 
     assert result.ok is False
@@ -102,7 +102,7 @@ def test_push_via_guest_ops_no_credentials_found(graph):
     fake_esxi = MagicMock()
     fake_esxi.get_vm.return_value = MagicMock()
 
-    with patch.object(cp, "_guest_credentials_for_image", return_value=None):
+    with patch.object(cp, "guest_credentials_for_image", return_value=None):
         result = cp._push_via_guest_ops(node, ["echo hi"], fake_esxi)
 
     assert result.ok is False
@@ -120,7 +120,7 @@ def test_push_all_dispatches_by_environment_and_reports_unknown_device(
         {"name": "R1", "console": port, "console_type": "telnet", "status": "started"}
     ]
     with patch("app.config_push.list_live_nodes", return_value=live_nodes), patch.object(
-        cp, "_guest_credentials_for_image", return_value=("u", "p")
+        cp, "guest_credentials_for_image", return_value=("u", "p")
     ):
         fake_vm = MagicMock()
         app_state.esxi_connection.get_vm.return_value = fake_vm
