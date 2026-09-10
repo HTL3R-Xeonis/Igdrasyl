@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, topology_write, vm_screen
+from app import console, lifecycle, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.layout import load_layout, save_position
@@ -270,6 +270,39 @@ def add_link(request: AddLinkRequest) -> dict[str, str]:
 def remove_link(node1: str, node2: str) -> dict[str, str]:
     try:
         topology_write.remove_link(app, node1, node2)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/nodes/{name}/start")
+def start_node(name: str) -> dict[str, str]:
+    try:
+        lifecycle.start_node(app, name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/nodes/{name}/stop")
+def stop_node(name: str) -> dict[str, str]:
+    try:
+        lifecycle.stop_node(app, name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/nodes/{name}/reload")
+def reload_node(name: str) -> dict[str, str]:
+    try:
+        lifecycle.reload_node(app, name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     except (RuntimeError, ConnectionError, TimeoutError) as exc:

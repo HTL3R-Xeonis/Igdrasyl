@@ -268,7 +268,10 @@
       <span class="env-tag" id="selected-role"></span>
       <strong id="selected-name"></strong>
       <span id="selected-status" style="color: var(--dim);"></span>
-      <button class="console-btn" id="selected-action-btn" style="margin-left: auto;"></button>
+      <button class="console-btn" id="selected-start-btn" style="margin-left: auto;">Start</button>
+      <button class="console-btn" id="selected-stop-btn">Stop</button>
+      <button class="console-btn" id="selected-reload-btn">Reload</button>
+      <button class="console-btn" id="selected-action-btn"></button>
       <button class="console-btn" id="selected-delete-btn" style="background: var(--bad);">Delete</button>
     </div>
     <div id="console-header" hidden>
@@ -536,7 +539,42 @@ function showNodeActions(name) {
     : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
   btn.onclick = () => (isVM ? openScreen(name) : openConsole(name));
 
+  const running = status === "started" || status === "poweredOn";
+  const stopped = status === "stopped" || status === "poweredOff";
+  const hasLive = !!live;
+
+  const startBtn = document.getElementById("selected-start-btn");
+  const stopBtn = document.getElementById("selected-stop-btn");
+  const reloadBtn = document.getElementById("selected-reload-btn");
+  startBtn.disabled = !hasLive || running;
+  stopBtn.disabled = !hasLive || stopped;
+  reloadBtn.disabled = !hasLive || !running;
+  startBtn.title = hasLive ? "Start this node" : "No live instance to start";
+  stopBtn.title = hasLive ? "Stop this node" : "No live instance to stop";
+  reloadBtn.title = hasLive ? "Reload this node" : "No live instance to reload";
+  startBtn.onclick = () => callLifecycle("start", name);
+  stopBtn.onclick = () => {
+    if (confirm(`Stop node "${name}"?`)) callLifecycle("stop", name);
+  };
+  reloadBtn.onclick = () => {
+    if (confirm(`Reload node "${name}"? This restarts it from scratch.`)) callLifecycle("reload", name);
+  };
+
   showTab("console");
+}
+
+async function callLifecycle(action, name) {
+  try {
+    const resp = await fetch(`/nodes/${encodeURIComponent(name)}/${action}`, { method: "POST" });
+    if (!resp.ok) {
+      alert(`Failed to ${action} node: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await loadCanvas();
+    if (selectedName === name) showNodeActions(name);
+  } catch (err) {
+    alert(`Failed to ${action} node: ${err}`);
+  }
 }
 
 document.getElementById("selected-delete-btn").addEventListener("click", async () => {
