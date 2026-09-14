@@ -634,25 +634,35 @@ let initialFitDone = false;
 // role/image validation treats them as fully independent - see
 // TopologyFileValidation.add_node) - role is just an operator-chosen
 // label. This is purely a frontend convenience to narrow the Image
-// list and to guess Role from an already-chosen Image; checked in
-// order so more specific keywords (e.g. firewall vendor names) win
-// over generic ones. Anything unmatched falls back to VM for ESXi
-// templates (which are always full VMs) or is left unclassified for
-// GNS3 templates, so nothing is ever permanently hidden.
+// list and to guess Role from an already-chosen Image.
+//
+// Environment (which of the two /templates lists a name came from)
+// settles VM outright, before any keyword guessing: every ESXi
+// template deploys as a full VM regardless of what OS/software it
+// runs (Environment.get_environment decides ON_ESXI purely by list
+// membership - see TopologyBuilder/src/graph/environment.py), and the
+// canvas already always renders an ON_ESXI node's icon as VM
+// regardless of its stored role (see roleForIcon below) - so guessing
+// FW/PC/etc. from an ESXi template's name (e.g. "pfSense", "Windows
+// 10 Pro Education") would just contradict how the node actually
+// displays once deployed. Keyword matching only ever applies to GNS3
+// templates, to tell a router/switch/PC/firewall apart from one
+// another; anything unmatched there is left unclassified (shown under
+// every role filter) rather than mis-bucketed.
 const ROLE_KEYWORDS = [
   ["FW", ["firewall", "pfsense", "opnsense", "fortigate", "fortinet", "sophos", "checkpoint", "palo alto", "asa", "srx"]],
   ["ROUTER", ["router", "iosv", "ios-xr", "iosxr", "csr1000", "csr", "iou", "vios", "mikrotik", "vyos", "frr", "quagga", "juniper"]],
   ["SWITCH", ["switch", "ovs", "vswitch", "nx-os", "nxos", "catalyst"]],
   ["PC", ["vpcs", "workstation", "desktop", "windows", "win10", "win11", "winxp", "client"]],
-  ["VM", ["server", "ubuntu", "debian", "centos", "rhel", "fedora", "alpine", "linux", "docker", "container"]],
 ];
 
 function classifyTemplateRole(name, group) {
+  if (group === "esxi") return "VM";
   const lower = name.toLowerCase();
   for (const [role, keywords] of ROLE_KEYWORDS) {
     if (keywords.some((kw) => lower.includes(kw))) return role;
   }
-  return group === "esxi" ? "VM" : null;
+  return null;
 }
 
 function isNodeRunning(node) {
