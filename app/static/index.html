@@ -332,6 +332,39 @@
   }
   #status-zoom button:hover { border-color: var(--accent); color: var(--accent); }
   #zoom-readout { min-width: 38px; text-align: center; }
+  button.toolbar-btn.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  button.toolbar-btn.danger:hover { background: #c94b4b; border-color: #c94b4b; }
+  #modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  #modal-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    width: 380px;
+    max-width: 90vw;
+    padding: 16px;
+  }
+  #modal-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  #modal-message { margin: 0 0 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.4; }
+  #modal-field-wrap { margin-bottom: 14px; }
+  #modal-select, #modal-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>
 </head>
 <body>
@@ -436,6 +469,20 @@
     <button id="zoom-fit-btn" title="Reset view">Fit</button>
   </div>
 </footer>
+<div id="modal-overlay" hidden>
+  <div id="modal-box" role="dialog" aria-modal="true">
+    <h3 id="modal-title"></h3>
+    <p id="modal-message"></p>
+    <div id="modal-field-wrap" hidden>
+      <select id="modal-select" hidden></select>
+      <input type="text" id="modal-input" hidden>
+    </div>
+    <div id="modal-actions">
+      <button class="toolbar-btn" id="modal-cancel-btn">Cancel</button>
+      <button class="toolbar-btn primary" id="modal-confirm-btn">OK</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -446,6 +493,122 @@ let ws = null;
 function closeViewers() {
   if (ws) { ws.close(); ws = null; }
   document.getElementById("terminal").style.display = "none";
+}
+
+// In-app replacements for the browser's own confirm()/alert()/prompt(),
+// styled to match the rest of the UI rather than popping an
+// OS-chrome dialog. All resolve a Promise instead of blocking the
+// thread, so every call site awaits them from an async function.
+function openModal(config) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("modal-overlay");
+    const titleEl = document.getElementById("modal-title");
+    const messageEl = document.getElementById("modal-message");
+    const selectEl = document.getElementById("modal-select");
+    const inputEl = document.getElementById("modal-input");
+    const fieldWrap = document.getElementById("modal-field-wrap");
+    const confirmBtn = document.getElementById("modal-confirm-btn");
+    const cancelBtn = document.getElementById("modal-cancel-btn");
+
+    const isAlert = config.mode === "alert";
+    const isConfirm = config.mode === "confirm";
+    const isSelect = config.mode === "select";
+    const isText = config.mode === "text";
+
+    titleEl.textContent = config.title || "";
+    messageEl.textContent = config.message || "";
+    selectEl.hidden = true;
+    inputEl.hidden = true;
+    selectEl.innerHTML = "";
+    fieldWrap.hidden = !(isSelect || isText);
+    cancelBtn.hidden = isAlert;
+    confirmBtn.textContent = config.confirmLabel || (isConfirm ? "Confirm" : "OK");
+    confirmBtn.classList.toggle("danger", !!config.danger);
+    confirmBtn.classList.toggle("primary", !config.danger);
+
+    if (isSelect) {
+      selectEl.hidden = false;
+      for (const opt of config.options) {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (opt.disabled) o.disabled = true;
+        selectEl.appendChild(o);
+      }
+      if (config.defaultValue !== undefined) selectEl.value = config.defaultValue;
+    } else if (isText) {
+      inputEl.hidden = false;
+      inputEl.value = config.defaultValue || "";
+      inputEl.placeholder = config.placeholder || "";
+    }
+
+    function finish(result) {
+      overlay.hidden = true;
+      document.removeEventListener("keydown", onKeydown);
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      overlay.onclick = null;
+      resolve(result);
+    }
+    function doConfirm() {
+      if (isAlert) return finish(undefined);
+      if (isConfirm) return finish(true);
+      if (isSelect) return finish(selectEl.value);
+      return finish(inputEl.value.trim() || null);
+    }
+    function doCancel() {
+      if (isAlert) return finish(undefined);
+      if (isConfirm) return finish(false);
+      return finish(null);
+    }
+    function onKeydown(evt) {
+      if (evt.key === "Escape") { evt.preventDefault(); doCancel(); }
+      else if (evt.key === "Enter" && document.activeElement !== selectEl) { evt.preventDefault(); doConfirm(); }
+    }
+
+    confirmBtn.onclick = doConfirm;
+    cancelBtn.onclick = doCancel;
+    overlay.onclick = (evt) => { if (evt.target === overlay) doCancel(); };
+    document.addEventListener("keydown", onKeydown);
+
+    overlay.hidden = false;
+    setTimeout(() => {
+      const toFocus = isSelect ? selectEl : isText ? inputEl : confirmBtn;
+      toFocus.focus();
+      if (isText) inputEl.select();
+    }, 0);
+  });
+}
+
+function showAlert(message, opts = {}) {
+  return openModal({ mode: "alert", title: opts.title || "Notice", message });
+}
+function showConfirm(message, opts = {}) {
+  return openModal({
+    mode: "confirm",
+    title: opts.title || "Confirm",
+    message,
+    danger: opts.danger,
+    confirmLabel: opts.confirmLabel,
+  });
+}
+function showSelectPrompt(message, options, opts = {}) {
+  return openModal({
+    mode: "select",
+    title: opts.title || "Select",
+    message,
+    options,
+    defaultValue: opts.defaultValue,
+  });
+}
+function showTextPrompt(message, opts = {}) {
+  return openModal({
+    mode: "text",
+    title: opts.title || "Enter value",
+    message,
+    defaultValue: opts.defaultValue,
+    placeholder: opts.placeholder,
+  });
 }
 
 const NODE_W = 70;
@@ -463,6 +626,34 @@ let selectedName = null;
 let linkMode = false;
 let linkFirstNode = null;
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
+let roleManuallySet = false;   // true once the operator has touched the Role select themselves
+let initialFitDone = false;
+
+// Heuristic template-name -> role classifier. There's no real backend
+// link between a template's name and its role (TopologyBuilder's own
+// role/image validation treats them as fully independent - see
+// TopologyFileValidation.add_node) - role is just an operator-chosen
+// label. This is purely a frontend convenience to narrow the Image
+// list and to guess Role from an already-chosen Image; checked in
+// order so more specific keywords (e.g. firewall vendor names) win
+// over generic ones. Anything unmatched falls back to VM for ESXi
+// templates (which are always full VMs) or is left unclassified for
+// GNS3 templates, so nothing is ever permanently hidden.
+const ROLE_KEYWORDS = [
+  ["FW", ["firewall", "pfsense", "opnsense", "fortigate", "fortinet", "sophos", "checkpoint", "palo alto", "asa", "srx"]],
+  ["ROUTER", ["router", "iosv", "ios-xr", "iosxr", "csr1000", "csr", "iou", "vios", "mikrotik", "vyos", "frr", "quagga", "juniper"]],
+  ["SWITCH", ["switch", "ovs", "vswitch", "nx-os", "nxos", "catalyst"]],
+  ["PC", ["vpcs", "workstation", "desktop", "windows", "win10", "win11", "winxp", "client"]],
+  ["VM", ["server", "ubuntu", "debian", "centos", "rhel", "fedora", "alpine", "linux", "docker", "container"]],
+];
+
+function classifyTemplateRole(name, group) {
+  const lower = name.toLowerCase();
+  for (const [role, keywords] of ROLE_KEYWORDS) {
+    if (keywords.some((kw) => lower.includes(kw))) return role;
+  }
+  return group === "esxi" ? "VM" : null;
+}
 
 function isNodeRunning(node) {
   const status = node.live && node.live.status ? node.live.status : "none";
@@ -620,6 +811,10 @@ async function loadCanvas() {
     }
     renderCanvas();
     renderSummary();
+    if (!initialFitDone) {
+      initialFitDone = true;
+      fitViewToNodes();
+    }
     updateStatusBar(true);
   } catch (err) {
     updateStatusBar(false);
@@ -672,11 +867,11 @@ function renderCanvas() {
       line.setAttribute("class", `link-line${bothRunning ? " link-up" : ""}`);
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, neighbour);
-      line.addEventListener("pointerdown", (evt) => {
+      line.addEventListener("pointerdown", async (evt) => {
         evt.stopPropagation();
         if (linkMode) return;
         const [a, b] = line.dataset.pair.split("|");
-        if (confirm(`Delete link between ${a} and ${b}?`)) deleteLink(a, b);
+        if (await showConfirm(`Delete link between ${a} and ${b}?`, { danger: true })) deleteLink(a, b);
       });
       linksLayer.appendChild(line);
       appendLinkEndpointDot(linksLayer, node, neighbour);
@@ -907,10 +1102,48 @@ document.getElementById("zoom-out-btn").addEventListener("click", () => {
   zoomBy(1.1, { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 });
 });
 document.getElementById("zoom-fit-btn").addEventListener("click", () => {
-  viewBoxState = { x: 0, y: 0, w: 1600, h: 900 };
+  fitViewToNodes();
+});
+
+// Computes a viewBox that contains every current node (plus padding),
+// preserving the canvas's own default 16:9 aspect ratio so nothing
+// looks stretched and the zoom-percent readout stays meaningful. Never
+// zooms in tighter than the default 1600x900 "page" for a sparse
+// topology - only zooms out further when nodes actually spread wider
+// than that.
+function boundingBoxOfNodes(padding) {
+  const nodes = Object.values(nodesData);
+  if (!nodes.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x - NODE_W / 2);
+    maxX = Math.max(maxX, n.x + NODE_W / 2);
+    minY = Math.min(minY, n.y - NODE_H / 2);
+    maxY = Math.max(maxY, n.y + NODE_H / 2);
+  }
+  const p = padding ?? 80;
+  return { x: minX - p, y: minY - p, w: maxX - minX + p * 2, h: maxY - minY + p * 2 };
+}
+
+function fitViewToNodes() {
+  const box = boundingBoxOfNodes();
+  if (!box) return;
+  const baseAspect = 1600 / 900;
+  let w = box.w;
+  let h = box.h;
+  if (w / h > baseAspect) {
+    h = w / baseAspect;
+  } else {
+    w = h * baseAspect;
+  }
+  w = Math.max(w, 1600);
+  h = w / baseAspect;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  viewBoxState = { x: cx - w / 2, y: cy - h / 2, w, h };
   applyViewBox();
   updateStatusBar(true);
-});
+}
 
 function selectNode(name) {
   selectedName = name;
@@ -959,11 +1192,11 @@ function showNodeActions(name) {
   stopBtn.title = hasLive ? "Stop this node" : "No live instance to stop";
   reloadBtn.title = hasLive ? "Reload this node" : "No live instance to reload";
   startBtn.onclick = () => callLifecycle("start", name);
-  stopBtn.onclick = () => {
-    if (confirm(`Stop node "${name}"?`)) callLifecycle("stop", name);
+  stopBtn.onclick = async () => {
+    if (await showConfirm(`Stop node "${name}"?`, { danger: true, confirmLabel: "Stop" })) callLifecycle("stop", name);
   };
-  reloadBtn.onclick = () => {
-    if (confirm(`Reload node "${name}"? This restarts it from scratch.`)) callLifecycle("reload", name);
+  reloadBtn.onclick = async () => {
+    if (await showConfirm(`Reload node "${name}"? This restarts it from scratch.`, { danger: true, confirmLabel: "Reload" })) callLifecycle("reload", name);
   };
 
   showTab("console");
@@ -973,24 +1206,27 @@ async function callLifecycle(action, name) {
   try {
     const resp = await fetch(`/nodes/${encodeURIComponent(name)}/${action}`, { method: "POST" });
     if (!resp.ok) {
-      alert(`Failed to ${action} node: ${(await resp.json()).detail || resp.status}`);
+      await showAlert(`Failed to ${action} node: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     await loadCanvas();
     if (selectedName === name) showNodeActions(name);
   } catch (err) {
-    alert(`Failed to ${action} node: ${err}`);
+    await showAlert(`Failed to ${action} node: ${err}`);
   }
 }
 
 document.getElementById("selected-delete-btn").addEventListener("click", async () => {
   const name = selectedName;
   if (!name) return;
-  if (!confirm(`Delete node "${name}"? This removes its live GNS3/ESXi instance and any links to it.`)) return;
+  if (!await showConfirm(
+    `Delete node "${name}"? This removes its live GNS3/ESXi instance and any links to it.`,
+    { danger: true, confirmLabel: "Delete" }
+  )) return;
   try {
     const resp = await fetch(`/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
     if (!resp.ok) {
-      alert(`Failed to delete node: ${(await resp.json()).detail || resp.status}`);
+      await showAlert(`Failed to delete node: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     closeViewers();
@@ -1000,7 +1236,7 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
     document.getElementById("console-placeholder").style.display = "";
     await loadCanvas();
   } catch (err) {
-    alert(`Failed to delete node: ${err}`);
+    await showAlert(`Failed to delete node: ${err}`);
   }
 });
 
@@ -1010,21 +1246,23 @@ async function promptForInterface(nodeName) {
     const resp = await fetch(`/nodes/${encodeURIComponent(nodeName)}/ports`);
     if (resp.ok) ports = await resp.json();
   } catch (err) {
-    // fall through to plain free-text prompt below
+    // fall through to the plain text field below
   }
 
   if (!ports) {
-    return prompt(`Interface name on ${nodeName}:`);
+    return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
   }
 
-  const listing = ports.map((p) => `${p.name}${p.in_use ? " (in use)" : ""}`).join(", ");
-  const validNames = new Set(ports.map((p) => p.name));
-  while (true) {
-    const answer = prompt(`Interface on ${nodeName} - available: ${listing}`);
-    if (!answer) return null;
-    if (validNames.has(answer)) return answer;
-    alert(`"${answer}" isn't one of ${nodeName}'s real interfaces - try again.`);
-  }
+  const free = ports.filter((p) => !p.in_use);
+  const options = ports.map((p) => ({
+    value: p.name,
+    label: `${p.name}${p.in_use ? " (in use)" : ""}`,
+    disabled: p.in_use,
+  }));
+  return showSelectPrompt(`Interface on ${nodeName}:`, options, {
+    title: "Choose interface",
+    defaultValue: free.length ? free[0].name : undefined,
+  });
 }
 
 async function handleLinkModeClick(name) {
@@ -1043,9 +1281,10 @@ async function handleLinkModeClick(name) {
   if (!if1) { exitLinkMode(); return; }
   const if2 = await promptForInterface(node2);
   if (!if2) { exitLinkMode(); return; }
-  if (!confirm(
+  if (!await showConfirm(
     `Connect ${node1}:${if1} <-> ${node2}:${if2}?\n\nThis briefly disrupts every ` +
-    `already-running ESXi-bridged Cloud connection, even for just this one link.`
+    `already-running ESXi-bridged Cloud connection, even for just this one link.`,
+    { title: "Add link", confirmLabel: "Connect" }
   )) {
     exitLinkMode();
     return;
@@ -1062,12 +1301,12 @@ async function createLink(node1, if1, node2, if2) {
       body: JSON.stringify({ node1, if1, node2, if2 }),
     });
     if (!resp.ok) {
-      alert(`Failed to add link: ${(await resp.json()).detail || resp.status}`);
+      await showAlert(`Failed to add link: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     await loadCanvas();
   } catch (err) {
-    alert(`Failed to add link: ${err}`);
+    await showAlert(`Failed to add link: ${err}`);
   }
 }
 
@@ -1078,12 +1317,12 @@ async function deleteLink(node1, node2) {
       { method: "DELETE" }
     );
     if (!resp.ok) {
-      alert(`Failed to delete link: ${(await resp.json()).detail || resp.status}`);
+      await showAlert(`Failed to delete link: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     await loadCanvas();
   } catch (err) {
-    alert(`Failed to delete link: ${err}`);
+    await showAlert(`Failed to delete link: ${err}`);
   }
 }
 
@@ -1109,8 +1348,9 @@ window.addEventListener("keydown", (evt) => {
 
 async function populateTemplateOptions() {
   const select = document.getElementById("new-node-image");
+  const roleFilter = roleManuallySet ? document.getElementById("new-node-role").value : null;
   if (availableTemplates) {
-    renderTemplateOptions(select, availableTemplates);
+    renderTemplateOptions(select, availableTemplates, roleFilter);
     return;
   }
   select.innerHTML = `<option value="">(loading templates…)</option>`;
@@ -1118,27 +1358,59 @@ async function populateTemplateOptions() {
     const resp = await fetch("/templates");
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     availableTemplates = await resp.json();
-    renderTemplateOptions(select, availableTemplates);
+    renderTemplateOptions(select, availableTemplates, roleFilter);
   } catch (err) {
     select.innerHTML = `<option value="">(failed to load: ${err})</option>`;
   }
 }
 
-function renderTemplateOptions(select, templates) {
+// roleFilter narrows the list to templates classifyTemplateRole guesses
+// match that role (see feature: "role selection shrinks down the
+// available devices to the ones that actually match the role"). If a
+// filter would hide every single template, it's dropped rather than
+// leaving the operator with an unusable empty dropdown.
+function renderTemplateOptions(select, templates, roleFilter) {
+  const previousValue = select.value;
   select.innerHTML = "";
-  for (const [label, names] of [["GNS3", templates.gns3], ["ESXi", templates.esxi]]) {
+  let matchedCount = 0;
+  for (const [label, group] of [["GNS3", "gns3"], ["ESXi", "esxi"]]) {
+    const names = templates[group];
     if (!names.length) continue;
-    const group = document.createElement("optgroup");
-    group.label = label;
-    for (const name of names) {
+    const filtered = roleFilter ? names.filter((n) => classifyTemplateRole(n, group) === roleFilter) : names;
+    if (!filtered.length) continue;
+    matchedCount += filtered.length;
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = label;
+    for (const name of filtered) {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
-      group.appendChild(opt);
+      optgroup.appendChild(opt);
     }
-    select.appendChild(group);
+    select.appendChild(optgroup);
+  }
+  if (roleFilter && !matchedCount) {
+    renderTemplateOptions(select, templates, null);
+    return;
+  }
+  if ([...select.options].some((o) => o.value === previousValue)) {
+    select.value = previousValue;
   }
 }
+
+document.getElementById("new-node-role").addEventListener("change", () => {
+  roleManuallySet = true;
+  if (availableTemplates) {
+    renderTemplateOptions(document.getElementById("new-node-image"), availableTemplates, document.getElementById("new-node-role").value);
+  }
+});
+
+document.getElementById("new-node-image").addEventListener("change", (evt) => {
+  if (roleManuallySet || !evt.target.value || !availableTemplates) return;
+  const group = availableTemplates.esxi.includes(evt.target.value) ? "esxi" : "gns3";
+  const guessed = classifyTemplateRole(evt.target.value, group);
+  if (guessed) document.getElementById("new-node-role").value = guessed;
+});
 
 document.getElementById("import-project-btn").addEventListener("click", () => {
   document.getElementById("import-project-input").click();
@@ -1151,12 +1423,13 @@ document.getElementById("import-project-input").addEventListener("change", async
   if (!file) return;
 
   const statusEl = document.getElementById("import-project-status");
-  if (!confirm(
+  if (!await showConfirm(
     `Import "${file.name}"?\n\nThis deploys the bundle's topology live, ` +
     `incrementally - it creates whatever's missing and reuses anything ` +
     `already running with a matching name, but never removes anything. ` +
     `This briefly disrupts every already-running ESXi-bridged Cloud ` +
-    `connection, same as adding a node/link, and may take a while.`
+    `connection, same as adding a node/link, and may take a while.`,
+    { title: "Import project", confirmLabel: "Import" }
   )) {
     return;
   }
@@ -1174,12 +1447,14 @@ document.getElementById("import-project-input").addEventListener("change", async
     await loadCanvas();
 
     const configEntries = Object.entries(result.configs || {});
-    if (configEntries.length && confirm(
-      `Load ${configEntries.length} device config(s) from this project into Config Push?`
+    if (configEntries.length && await showConfirm(
+      `Load ${configEntries.length} device config(s) from this project into Config Push?`,
+      { title: "Import project", confirmLabel: "Load" }
     )) {
       document.getElementById("push-input").value = JSON.stringify(result.configs, null, 2);
     }
     statusEl.textContent = `Imported "${result.manifest.project_name || file.name}".`;
+    fitViewToNodes();
   } catch (err) {
     statusEl.textContent = `Import failed: ${err}`;
   }
@@ -1189,7 +1464,11 @@ document.getElementById("add-node-btn").addEventListener("click", async () => {
   const form = document.getElementById("add-node-form");
   const opening = form.hidden;
   form.hidden = !opening;
-  if (opening) await populateTemplateOptions();
+  if (opening) {
+    roleManuallySet = false;
+    document.getElementById("new-node-role").value = "ROUTER";
+    await populateTemplateOptions();
+  }
 });
 
 document.getElementById("add-node-cancel").addEventListener("click", () => {
@@ -1205,10 +1484,11 @@ document.getElementById("add-node-submit").addEventListener("click", async () =>
     statusEl.textContent = "Name and image are required.";
     return;
   }
-  if (!confirm(
+  if (!await showConfirm(
     `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
     `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
-    `and may take a while.`
+    `and may take a while.`,
+    { title: "Add node", confirmLabel: "Add" }
   )) {
     return;
   }
@@ -1229,7 +1509,9 @@ document.getElementById("add-node-submit").addEventListener("click", async () =>
     document.getElementById("add-node-form").hidden = true;
     document.getElementById("new-node-name").value = "";
     statusEl.textContent = "";
+    roleManuallySet = false;
     await loadCanvas();
+    fitViewToNodes();
   } catch (err) {
     statusEl.textContent = `${err}`;
   } finally {
