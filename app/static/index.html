@@ -629,35 +629,55 @@ let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first
 let roleManuallySet = false;   // true once the operator has touched the Role select themselves
 let initialFitDone = false;
 
-// Heuristic template-name -> role classifier. There's no real backend
-// link between a template's name and its role (TopologyBuilder's own
+// Template-name -> role classifier. There's no real backend link
+// between a template's name and its role (TopologyBuilder's own
 // role/image validation treats them as fully independent - see
 // TopologyFileValidation.add_node) - role is just an operator-chosen
 // label. This is purely a frontend convenience to narrow the Image
 // list and to guess Role from an already-chosen Image.
 //
 // Environment (which of the two /templates lists a name came from)
-// settles VM outright, before any keyword guessing: every ESXi
-// template deploys as a full VM regardless of what OS/software it
-// runs (Environment.get_environment decides ON_ESXI purely by list
+// settles VM outright, before anything else: every ESXi template
+// deploys as a full VM regardless of what OS/software it runs
+// (Environment.get_environment decides ON_ESXI purely by list
 // membership - see TopologyBuilder/src/graph/environment.py), and the
 // canvas already always renders an ON_ESXI node's icon as VM
 // regardless of its stored role (see roleForIcon below) - so guessing
 // FW/PC/etc. from an ESXi template's name (e.g. "pfSense", "Windows
 // 10 Pro Education") would just contradict how the node actually
-// displays once deployed. Keyword matching only ever applies to GNS3
-// templates, to tell a router/switch/PC/firewall apart from one
-// another; anything unmatched there is left unclassified (shown under
-// every role filter) rather than mis-bucketed.
+// displays once deployed.
+//
+// For GNS3 templates, prefer GNS3's own real category
+// (`/templates`'s `gns3_categories`, straight from the Template-API's
+// `category` field - see app/topology_write.py's
+// _gns3_template_categories) over guessing from the name: this is what
+// tells Cisco's "IOSv" (category "router") and "IOSvL2" (category
+// "switch") apart correctly, where a name-only keyword match can't
+// (both contain "iosv"). Keyword matching is only a fallback for a
+// GNS3 template with no category data at all (the category-fetch
+// failed server-side, or - like VPCS/Cloud/NAT - GNS3 categorizes it
+// as generic "guest" rather than a specific network-device category);
+// anything that still matches nothing is left unclassified (shown
+// under every role filter) rather than mis-bucketed.
+const GNS3_CATEGORY_TO_ROLE = {
+  router: "ROUTER",
+  switch: "SWITCH",
+  multilayer_switch: "SWITCH",
+  firewall: "FW",
+  guard: "FW",
+};
 const ROLE_KEYWORDS = [
   ["FW", ["firewall", "pfsense", "opnsense", "fortigate", "fortinet", "sophos", "checkpoint", "palo alto", "asa", "srx"]],
+  ["SWITCH", ["switch", "iosvl2", "ovs", "vswitch", "nx-os", "nxos", "catalyst"]],
   ["ROUTER", ["router", "iosv", "ios-xr", "iosxr", "csr1000", "csr", "iou", "vios", "mikrotik", "vyos", "frr", "quagga", "juniper"]],
-  ["SWITCH", ["switch", "ovs", "vswitch", "nx-os", "nxos", "catalyst"]],
   ["PC", ["vpcs", "workstation", "desktop", "windows", "win10", "win11", "winxp", "client"]],
 ];
 
 function classifyTemplateRole(name, group) {
   if (group === "esxi") return "VM";
+  const category = availableTemplates && availableTemplates.gns3_categories && availableTemplates.gns3_categories[name];
+  const mappedFromCategory = category && GNS3_CATEGORY_TO_ROLE[category];
+  if (mappedFromCategory) return mappedFromCategory;
   const lower = name.toLowerCase();
   for (const [role, keywords] of ROLE_KEYWORDS) {
     if (keywords.some((kw) => lower.includes(kw))) return role;

@@ -186,6 +186,9 @@ def test_templates_returns_gns3_and_esxi_names(client, app_state):
     ), patch(
         "app.topology_write.APIHandler.get_esxi_template_names",
         return_value={"debian", "pfSense"},
+    ), patch(
+        "app.topology_write._gns3_template_categories",
+        return_value={"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
     ):
         resp = client.get("/templates")
 
@@ -193,6 +196,7 @@ def test_templates_returns_gns3_and_esxi_names(client, app_state):
     assert resp.json() == {
         "gns3": ["Cisco IOSv 15.6(1)T", "VPCS"],
         "esxi": ["debian", "pfSense"],
+        "gns3_categories": {"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
     }
 
 
@@ -204,3 +208,51 @@ def test_templates_timeout_maps_to_503(client, app_state):
         resp = client.get("/templates")
 
     assert resp.status_code == 503
+
+
+def test_gns3_template_categories_returns_name_to_category_mapping(app_state):
+    from app import topology_write
+
+    fake_response = {
+        "templates": [
+            {"name": "Cisco IOSv 15.9(3)M6", "category": "router"},
+            {"name": "Cisco IOSvL2 15.2.1", "category": "switch"},
+            {"name": "no category here"},
+        ]
+    }
+    # LITERAL_API_VALUES is forced "true" for the whole suite (see this
+    # file's own top-of-conftest comment) so the real-fetch code path
+    # needs its own override to actually run here.
+    with patch.object(
+        topology_write.Settings.API, "LITERAL_API_VALUES", False
+    ), patch("app.topology_write.APIHandler.get", return_value=fake_response):
+        result = topology_write._gns3_template_categories()
+
+    assert result == {
+        "Cisco IOSv 15.9(3)M6": "router",
+        "Cisco IOSvL2 15.2.1": "switch",
+    }
+
+
+def test_gns3_template_categories_tolerates_server_failure(app_state):
+    from app import topology_write
+
+    with patch.object(
+        topology_write.Settings.API, "LITERAL_API_VALUES", False
+    ), patch(
+        "app.topology_write.APIHandler.get",
+        side_effect=TimeoutError("template server slow"),
+    ):
+        result = topology_write._gns3_template_categories()
+
+    assert result == {}
+
+
+def test_gns3_template_categories_short_circuits_in_literal_mode(app_state):
+    from app import topology_write
+
+    with patch("app.topology_write.APIHandler.get") as mock_get:
+        result = topology_write._gns3_template_categories()
+
+    assert result == {}
+    mock_get.assert_not_called()

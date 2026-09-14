@@ -216,11 +216,13 @@ def update_layout(update: LayoutUpdate) -> dict[str, str]:
 
 
 @app.get("/templates")
-def templates() -> dict[str, list[str]]:
+def templates() -> dict[str, Any]:
     """
     Valid `image` names for POST /nodes, grouped by which backend they
     deploy to (GNS3 vs ESXi - see app/topology_write.py's own docstring:
-    this is what actually decides a new node's environment, not its role).
+    this is what actually decides a new node's environment, not its role),
+    plus `gns3_categories` - a best-effort name -> GNS3 category hint
+    for the frontend's own Role filter (see list_templates's docstring).
     """
     try:
         return topology_write.list_templates()
