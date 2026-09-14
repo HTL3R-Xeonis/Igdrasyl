@@ -11,31 +11,10 @@ already-tested concern.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 import yaml
-
-from src.settings import Settings
-
-_FIXTURE_TOPOLOGY = Path(__file__).parent / "fixtures" / "topology.yaml"
-
-
-@pytest.fixture
-def temp_topology_file(tmp_path, app_state):
-    """Points Settings.TOPOLOGY_FILE at a mutable copy of the fixture
-    topology, so a fake backend can write to it without touching the
-    shared, checked-in fixture file."""
-    dest = tmp_path / "topology.yaml"
-    shutil.copy(_FIXTURE_TOPOLOGY, dest)
-    original = Settings.TOPOLOGY_FILE
-    Settings.TOPOLOGY_FILE = str(dest)
-    try:
-        yield dest
-    finally:
-        Settings.TOPOLOGY_FILE = original
 
 
 class _FakeBackend:

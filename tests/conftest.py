@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -24,6 +25,24 @@ from app.topology import load_graph, resolve_project_name
 from src.settings import Settings
 
 _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
+
+
+@pytest.fixture
+def temp_topology_file(tmp_path, app_state):
+    """
+    Points Settings.TOPOLOGY_FILE at a mutable copy of the fixture
+    topology, so a fake/real write path (add_node, deploy_topology,
+    ...) can write to it without touching the shared, checked-in
+    fixture file.
+    """
+    dest = tmp_path / "topology.yaml"
+    shutil.copy(_FIXTURE_TOPOLOGY, dest)
+    original = Settings.TOPOLOGY_FILE
+    Settings.TOPOLOGY_FILE = str(dest)
+    try:
+        yield dest
+    finally:
+        Settings.TOPOLOGY_FILE = original
 
 
 @pytest.fixture

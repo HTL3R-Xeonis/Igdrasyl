@@ -1,4 +1,11 @@
+import io
+import json
+import zipfile
 from unittest.mock import MagicMock, patch
+
+import yaml
+
+from src.settings import Settings
 
 
 def test_health_reports_degraded_state(client, app_state):
@@ -109,3 +116,66 @@ def test_layout_post_rejects_unknown_node(client, app_state, tmp_path, monkeypat
     monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     resp = client.post("/layout", json={"name": "GHOST", "x": 0, "y": 0})
     assert resp.status_code == 404
+
+
+def _valid_bundle(topology_yaml_text: str) -> bytes:
+    manifest = {"format_version": 1, "project_name": "test", "exported_at": "now"}
+    settings = {
+        "esxi": {"ip": Settings.ESXI.IP, "gns3_vm_name": Settings.ESXI.GNS3_VM_NAME},
+        "gns3": {"username": Settings.GNS3.USERNAME, "port": Settings.GNS3.PORT},
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        zf.writestr("topology.yaml", topology_yaml_text)
+        zf.writestr("settings.yml", yaml.safe_dump(settings))
+        zf.writestr("configs.json", json.dumps({"devices": {}}))
+    return buf.getvalue()
+
+
+def test_export_project_returns_zip_with_attachment_header(client, app_state, temp_topology_file):
+    resp = client.get("/project/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert ".topoproj" in resp.headers["content-disposition"]
+    assert set(zipfile.ZipFile(io.BytesIO(resp.content)).namelist()) == {
+        "manifest.json", "topology.yaml", "settings.yml", "configs.json",
+    }
+
+
+def test_import_project_happy_path_returns_manifest_and_configs(
+    client, app_state, temp_topology_file
+):
+    fake = MagicMock()
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(temp_topology_file.read_text())
+
+    resp = client.post(
+        "/project/import",
+        files={"file": ("bundle.topoproj", bundle, "application/zip")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    fake.deploy_topology.assert_called_once()
+    assert resp.json()["manifest"]["format_version"] == 1
+
+
+def test_import_project_bad_bundle_maps_to_400(client, app_state, temp_topology_file):
+    resp = client.post(
+        "/project/import",
+        files={"file": ("bundle.topoproj", b"not a zip", "application/zip")},
+    )
+    assert resp.status_code == 400
+
+
+def test_import_project_deploy_failure_maps_to_502(client, app_state, temp_topology_file):
+    fake = MagicMock()
+    fake.deploy_topology.side_effect = RuntimeError("deploy failed")
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(temp_topology_file.read_text())
+
+    resp = client.post(
+        "/project/import",
+        files={"file": ("bundle.topoproj", bundle, "application/zip")},
+    )
+    assert resp.status_code == 502

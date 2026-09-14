@@ -1,0 +1,142 @@
+"""
+Tests app/project_bundle.py against a fake TopologyBackend, same
+reasoning as test_topology_write.py - a real TopologyBackend opens a
+real pyvmomi/GNS3 session. build_export/apply_import's own zip
+handling is real (not mocked) - only the live deploy itself is faked.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import zipfile
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+import yaml
+
+from src.settings import Settings
+
+from app import project_bundle
+
+_FIXTURE_TOPOLOGY = Path(__file__).parent / "fixtures" / "topology.yaml"
+
+
+def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=()) -> bytes:
+    manifest = {"format_version": format_version, "project_name": "test", "exported_at": "now"}
+    settings = {
+        "esxi": {
+            "ip": esxi_ip if esxi_ip is not None else Settings.ESXI.IP,
+            "gns3_vm_name": esxi_vm_name if esxi_vm_name is not None else Settings.ESXI.GNS3_VM_NAME,
+        },
+        "gns3": {"username": Settings.GNS3.USERNAME, "port": Settings.GNS3.PORT},
+    }
+    members = {
+        "manifest.json": json.dumps(manifest),
+        "topology.yaml": _FIXTURE_TOPOLOGY.read_text(),
+        "settings.yml": yaml.safe_dump(settings),
+        "configs.json": json.dumps({"devices": {"R1": ["show version"]}}),
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in members.items():
+            if name in omit:
+                continue
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+class _FakeBackend:
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def deploy_topology(self, topology_file, topology_yaml_text):
+        self.calls.append(("deploy_topology", topology_file, topology_yaml_text))
+        Path(topology_file).write_text(topology_yaml_text)
+
+
+def test_build_export_produces_expected_zip_members(app_state, temp_topology_file):
+    app_state.last_config_push = {"R1": ["show version"]}
+
+    data = project_bundle.build_export(_app())
+
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    assert set(zf.namelist()) == {"manifest.json", "topology.yaml", "settings.yml", "configs.json"}
+
+    manifest = json.loads(zf.read("manifest.json"))
+    assert manifest["format_version"] == 1
+    assert manifest["project_name"] == app_state.project_name
+
+    assert zf.read("topology.yaml").decode() == temp_topology_file.read_text()
+
+    configs = json.loads(zf.read("configs.json"))
+    assert configs == {"devices": {"R1": ["show version"]}}
+
+    settings = yaml.safe_load(zf.read("settings.yml"))
+    assert settings["esxi"]["ip"] == Settings.ESXI.IP
+    assert settings["esxi"]["gns3_vm_name"] == Settings.ESXI.GNS3_VM_NAME
+
+
+def _app():
+    import app.main as main_module
+
+    return main_module.app
+
+
+def test_apply_import_happy_path_deploys_and_reloads_graph(app_state, temp_topology_file):
+    fake = _FakeBackend()
+    app_state.topology_backend = fake
+    bundle = _make_bundle()
+
+    result = project_bundle.apply_import(_app(), bundle)
+
+    assert fake.calls[0][0] == "deploy_topology"
+    assert fake.calls[0][1] == str(temp_topology_file)
+    assert result["manifest"]["format_version"] == 1
+    assert result["configs"] == {"R1": ["show version"]}
+    assert "R1" in app_state.graph.nodes
+
+
+def test_apply_import_rejects_mismatched_esxi_target(app_state, temp_topology_file):
+    app_state.topology_backend = MagicMock()
+    bundle = _make_bundle(esxi_ip="9.9.9.9")
+
+    with pytest.raises(project_bundle.BundleValidationError, match="9.9.9.9"):
+        project_bundle.apply_import(_app(), bundle)
+
+    app_state.topology_backend.deploy_topology.assert_not_called()
+
+
+def test_apply_import_rejects_malformed_zip(app_state, temp_topology_file):
+    with pytest.raises(project_bundle.BundleValidationError, match="not a valid"):
+        project_bundle.apply_import(_app(), b"not a zip file at all")
+
+
+def test_apply_import_rejects_missing_member(app_state, temp_topology_file):
+    bundle = _make_bundle(omit=("configs.json",))
+
+    with pytest.raises(project_bundle.BundleValidationError, match="configs.json"):
+        project_bundle.apply_import(_app(), bundle)
+
+
+def test_apply_import_rejects_unsupported_format_version(app_state, temp_topology_file):
+    bundle = _make_bundle(format_version=99)
+
+    with pytest.raises(project_bundle.BundleValidationError, match="99"):
+        project_bundle.apply_import(_app(), bundle)
+
+
+def test_apply_import_propagates_deploy_failure_and_leaves_file_untouched(
+    app_state, temp_topology_file
+):
+    fake = MagicMock()
+    fake.deploy_topology.side_effect = RuntimeError("deploy failed")
+    app_state.topology_backend = fake
+    original_content = temp_topology_file.read_text()
+    bundle = _make_bundle()
+
+    with pytest.raises(RuntimeError, match="deploy failed"):
+        project_bundle.apply_import(_app(), bundle)
+
+    assert temp_topology_file.read_text() == original_content

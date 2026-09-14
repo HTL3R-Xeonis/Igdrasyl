@@ -15,7 +15,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, lifecycle, topology_write, vm_console
+from app import console, lifecycle, project_bundle, topology_write, vm_console
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports
 from app.layout import load_layout, save_position
@@ -62,6 +62,10 @@ async def lifespan(app: FastAPI):
     # vm_name -> assigned serial console port, in-memory for this
     # process's lifetime - see app/vm_console.py.
     app.state.vm_console_ports = {}
+    # Most recent /config-push request body - project_bundle.py's own
+    # GET /project/export includes this as the bundle's configs.json,
+    # since nothing else persists config-push data anywhere.
+    app.state.last_config_push = {}
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
@@ -339,7 +343,44 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     threadpool, so this doesn't block the event loop the console
     WebSocket proxy also needs.
     """
+    app.state.last_config_push = request.devices
     return push_all(request.devices, app)
+
+
+@app.get("/project/export")
+def export_project() -> Response:
+    """
+    Downloads the current topology as a `.topoproj` bundle (a plain
+    zip - topology.yaml, a sanitized settings.yml, configs.json from
+    the last config-push, and a manifest) - see app/project_bundle.py.
+    """
+    data = project_bundle.build_export(app)
+    filename = f"{app.state.project_name or 'topology'}.topoproj"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/project/import")
+async def import_project(file: UploadFile) -> dict[str, Any]:
+    """
+    Deploys a `.topoproj` bundle's topology live - incrementally, same
+    as POST /nodes/POST /links (reuses anything already live by name,
+    never deletes anything not in the bundle) - then reloads the
+    canvas. Refuses the bundle outright (400) if it targets a
+    different ESXi host/GNS3 VM than this server, or isn't a
+    well-formed bundle at all - see app/project_bundle.py's own
+    apply_import docstring.
+    """
+    data = await file.read()
+    try:
+        return project_bundle.apply_import(app, data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
 
 
 @app.post("/vm-console/{node_name}/prepare")
