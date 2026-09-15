@@ -502,20 +502,28 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 let term = null;
 let ws = null;
 let rfb = null;
-// Name of the VM whose screen should silently reconnect after a clean
-// server-initiated close, or null if no screen view wants that. See
-// openVmScreen's own comment: WebMKS sessions through this project's
-// real vCenter close cleanly on their own after ~10s regardless of
-// activity (confirmed via a raw, app-independent test - not a bug in
-// this app, a real, current characteristic of that ticket-brokered
-// connection) - reconnecting automatically is what makes the feature
-// actually usable rather than needing a manual re-click every ~10s.
+// Name of the VM whose screen should silently reconnect after it drops,
+// or null if no screen view wants that. See openVmScreen's own comment:
+// WebMKS sessions through this project's real vCenter/ESXi end on
+// their own after roughly 10-20s regardless of activity (confirmed via
+// a raw, app-independent test - not a bug in this app, a real, current
+// characteristic of that ticket-brokered connection) - reconnecting
+// automatically is what makes the feature actually usable rather than
+// needing a manual re-click every ~10-20s.
 let vmScreenAutoReconnect = null;
+// Consecutive reconnect failures for the current vmScreenAutoReconnect
+// target - reset to 0 on every successful connect, so this only ever
+// counts an unbroken run of failures. Caps automatic retrying so a
+// genuinely broken VM (powered off mid-session, deleted, ...) gives up
+// with a clear message instead of silently retrying forever.
+let vmScreenReconnectAttempts = 0;
+const VM_SCREEN_MAX_CONSECUTIVE_FAILURES = 8;
 
 function closeViewers() {
   if (ws) { ws.close(); ws = null; }
   if (rfb) { rfb.disconnect(); rfb = null; }
   vmScreenAutoReconnect = null;
+  vmScreenReconnectAttempts = 0;
   document.getElementById("terminal").style.display = "none";
   document.getElementById("vm-screen-container").style.display = "none";
 }
@@ -1655,14 +1663,17 @@ async function openVmConsole(nodeName) {
   );
 }
 
-async function openVmScreen(nodeName) {
-  closeViewers();
+async function openVmScreen(nodeName, opts) {
+  const isReconnect = !!(opts && opts.isReconnect);
+  if (!isReconnect) {
+    closeViewers();
+  }
   document.getElementById("console-placeholder").style.display = "none";
   const header = document.getElementById("console-header");
   header.hidden = false;
   document.getElementById("console-title").textContent = `${nodeName} (screen)`;
   const statusEl = document.getElementById("console-status");
-  statusEl.textContent = "connecting…";
+  statusEl.textContent = isReconnect ? "reconnecting…" : "connecting…";
 
   const screenEl = document.getElementById("vm-screen-container");
   screenEl.style.display = "flex";
@@ -1681,27 +1692,36 @@ async function openVmScreen(nodeName) {
 
   vmScreenAutoReconnect = nodeName;
 
-  rfb = new RFB(screenEl, url, { wsProtocols: ["binary"] });
-  rfb.scaleViewport = true;
-  rfb.resizeSession = false;
-  rfb.showDotCursor = true;
+  const thisRfb = new RFB(screenEl, url, { wsProtocols: ["binary"] });
+  rfb = thisRfb;
+  thisRfb.scaleViewport = true;
+  thisRfb.resizeSession = false;
+  thisRfb.showDotCursor = true;
 
-  rfb.addEventListener("connect", () => { statusEl.textContent = "connected"; });
-  rfb.addEventListener("disconnect", (evt) => {
-    const clean = evt.detail && evt.detail.clean;
-    if (clean && vmScreenAutoReconnect === nodeName) {
-      statusEl.textContent = "reconnecting…";
-      setTimeout(() => {
-        if (vmScreenAutoReconnect === nodeName) openVmScreen(nodeName);
-      }, 250);
+  thisRfb.addEventListener("connect", () => {
+    vmScreenReconnectAttempts = 0;
+    statusEl.textContent = "connected";
+  });
+  thisRfb.addEventListener("disconnect", () => {
+    // rfb !== thisRfb: a newer attempt (or closeViewers()) has already
+    // superseded this one - don't double-reconnect or clobber its state.
+    if (vmScreenAutoReconnect !== nodeName || rfb !== thisRfb) return;
+
+    vmScreenReconnectAttempts += 1;
+    if (vmScreenReconnectAttempts > VM_SCREEN_MAX_CONSECUTIVE_FAILURES) {
+      statusEl.textContent = "screen keeps disconnecting - giving up for now, click Screen to retry";
+      vmScreenAutoReconnect = null;
       return;
     }
-    statusEl.textContent = clean ? "closed" : "connection lost";
+    statusEl.textContent = "reconnecting…";
+    setTimeout(() => {
+      if (vmScreenAutoReconnect === nodeName) openVmScreen(nodeName, { isReconnect: true });
+    }, 300);
   });
-  rfb.addEventListener("credentialsrequired", () => {
+  thisRfb.addEventListener("credentialsrequired", () => {
     statusEl.textContent = "server requires credentials (not supported by this viewer)";
   });
-  rfb.addEventListener("securityfailure", (evt) => {
+  thisRfb.addEventListener("securityfailure", (evt) => {
     const detail = evt.detail || {};
     statusEl.textContent = `security negotiation failed: ${detail.reason || detail.status || "unknown"}`;
   });
