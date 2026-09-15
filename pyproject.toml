@@ -19,6 +19,11 @@ dependencies = [
     # Needed for FastAPI's UploadFile (POST /project/import's .topoproj upload) -
     # FastAPI only parses multipart form bodies if this is installed.
     "python-multipart==0.0.20",
+    # WebSocket *client* (app/vm_screen.py's own outbound connection to
+    # ESXi's WebMKS ticket endpoint) - distinct from FastAPI's own
+    # built-in server-side WebSocket support, which only handles the
+    # browser-facing side.
+    "websockets==17.1",
 ]
 
 [project.optional-dependencies]

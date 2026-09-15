@@ -138,3 +138,59 @@ def fake_tcp_server():
 
     for stop in stoppers:
         stop()
+
+
+def _start_fake_ws_server(handler: Callable[[Any], Any]) -> tuple[int, Callable[[], None]]:
+    import websockets
+
+    loop = asyncio.new_event_loop()
+    port_holder: dict[str, int] = {}
+    ready = threading.Event()
+    task_holder: dict[str, asyncio.Task] = {}
+
+    async def main():
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port_holder["port"] = server.sockets[0].getsockname()[1]
+            ready.set()
+            try:
+                await asyncio.Future()  # run until cancelled
+            except asyncio.CancelledError:
+                pass
+
+    def run():
+        asyncio.set_event_loop(loop)
+        task = loop.create_task(main())
+        task_holder["task"] = task
+        loop.run_until_complete(task)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    ready.wait(timeout=5)
+
+    def stop():
+        loop.call_soon_threadsafe(task_holder["task"].cancel)
+        thread.join(timeout=5)
+
+    return port_holder["port"], stop
+
+
+@pytest.fixture
+def fake_ws_server():
+    """
+    app/ws_bridge.py's own counterpart to fake_tcp_server - a real local
+    websockets server for a test-provided per-connection handler
+    `async def handler(websocket)`. Used to test app/vm_screen.py's real
+    WebSocket<->WebSocket byte-pumping against a real upstream socket
+    rather than a mock.
+    """
+    stoppers = []
+
+    def start(handler):
+        port, stop = _start_fake_ws_server(handler)
+        stoppers.append(stop)
+        return port
+
+    yield start
+
+    for stop in stoppers:
+        stop()

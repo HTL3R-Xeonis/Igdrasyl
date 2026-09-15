@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, lifecycle, project_bundle, topology_write, vm_console
+from app import console, lifecycle, project_bundle, topology_write, vm_console, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports
 from app.layout import load_layout, save_position
@@ -105,6 +105,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
 app.include_router(console.router)
 app.include_router(vm_console.router)
+app.include_router(vm_screen.router)
 
 
 @app.get("/health")

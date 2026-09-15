@@ -256,6 +256,16 @@
   }
   #terminal { flex: 1; padding: 8px; min-height: 0; }
   #terminal:empty { display: none; }
+  #vm-screen-container {
+    flex: 1;
+    display: none;
+    min-height: 0;
+    background: #000;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+  }
+  #vm-screen-container canvas { max-width: 100%; max-height: 100%; }
   header button.tab-btn {
     font-size: 12px;
     background: none;
@@ -432,6 +442,7 @@
         <button class="console-btn" id="selected-stop-btn">Stop</button>
         <button class="console-btn" id="selected-reload-btn">Reload</button>
         <button class="console-btn" id="selected-action-btn"></button>
+        <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="console-header" hidden>
@@ -440,6 +451,7 @@
       </div>
       <div id="console-placeholder">Click a node on the canvas, or in the Topology list above, to see its details here.</div>
       <div id="terminal"></div>
+      <div id="vm-screen-container"></div>
     </div>
   </div>
   <div id="push-area" hidden>
@@ -489,10 +501,23 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 let term = null;
 let ws = null;
+let rfb = null;
+// Name of the VM whose screen should silently reconnect after a clean
+// server-initiated close, or null if no screen view wants that. See
+// openVmScreen's own comment: WebMKS sessions through this project's
+// real vCenter close cleanly on their own after ~10s regardless of
+// activity (confirmed via a raw, app-independent test - not a bug in
+// this app, a real, current characteristic of that ticket-brokered
+// connection) - reconnecting automatically is what makes the feature
+// actually usable rather than needing a manual re-click every ~10s.
+let vmScreenAutoReconnect = null;
 
 function closeViewers() {
   if (ws) { ws.close(); ws = null; }
+  if (rfb) { rfb.disconnect(); rfb = null; }
+  vmScreenAutoReconnect = null;
   document.getElementById("terminal").style.display = "none";
+  document.getElementById("vm-screen-container").style.display = "none";
 }
 
 // In-app replacements for the browser's own confirm()/alert()/prompt(),
@@ -1201,12 +1226,21 @@ function showNodeActions(name) {
   const btn = document.getElementById("selected-action-btn");
   const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
   const canVmConsole = isVM && live && live.status === "poweredOn";
-  btn.textContent = "Console";
+  btn.textContent = isVM ? "Serial Console" : "Console";
   btn.disabled = isVM ? !canVmConsole : !canConsole;
   btn.title = isVM
-    ? (canVmConsole ? "Open this VM's console" : `VM status: ${status}`)
+    ? (canVmConsole ? "Open this VM's serial console (text)" : `VM status: ${status}`)
     : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
   btn.onclick = () => (isVM ? openVmConsole(name) : openConsole(name));
+
+  const screenBtn = document.getElementById("selected-screen-btn");
+  screenBtn.hidden = !isVM;
+  if (isVM) {
+    const canScreen = live && live.status === "poweredOn";
+    screenBtn.disabled = !canScreen;
+    screenBtn.title = canScreen ? "Open this VM's graphical screen" : `VM status: ${status}`;
+    screenBtn.onclick = () => openVmScreen(name);
+  }
 
   const running = status === "started" || status === "poweredOn";
   const stopped = status === "stopped" || status === "poweredOff";
@@ -1619,6 +1653,58 @@ async function openVmConsole(nodeName) {
   openTerminalWebSocket(
     nodeName, `${proto}//${location.host}/ws/vm-console/${encodeURIComponent(nodeName)}`, statusEl
   );
+}
+
+async function openVmScreen(nodeName) {
+  closeViewers();
+  document.getElementById("console-placeholder").style.display = "none";
+  const header = document.getElementById("console-header");
+  header.hidden = false;
+  document.getElementById("console-title").textContent = `${nodeName} (screen)`;
+  const statusEl = document.getElementById("console-status");
+  statusEl.textContent = "connecting…";
+
+  const screenEl = document.getElementById("vm-screen-container");
+  screenEl.style.display = "flex";
+  screenEl.innerHTML = "";
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/ws/vm-screen/${encodeURIComponent(nodeName)}`;
+
+  let RFB;
+  try {
+    ({ default: RFB } = await import("/vendor/novnc/core/rfb.js"));
+  } catch (err) {
+    statusEl.textContent = `couldn't load screen viewer: ${err}`;
+    return;
+  }
+
+  vmScreenAutoReconnect = nodeName;
+
+  rfb = new RFB(screenEl, url, { wsProtocols: ["binary"] });
+  rfb.scaleViewport = true;
+  rfb.resizeSession = false;
+  rfb.showDotCursor = true;
+
+  rfb.addEventListener("connect", () => { statusEl.textContent = "connected"; });
+  rfb.addEventListener("disconnect", (evt) => {
+    const clean = evt.detail && evt.detail.clean;
+    if (clean && vmScreenAutoReconnect === nodeName) {
+      statusEl.textContent = "reconnecting…";
+      setTimeout(() => {
+        if (vmScreenAutoReconnect === nodeName) openVmScreen(nodeName);
+      }, 250);
+      return;
+    }
+    statusEl.textContent = clean ? "closed" : "connection lost";
+  });
+  rfb.addEventListener("credentialsrequired", () => {
+    statusEl.textContent = "server requires credentials (not supported by this viewer)";
+  });
+  rfb.addEventListener("securityfailure", (evt) => {
+    const detail = evt.detail || {};
+    statusEl.textContent = `security negotiation failed: ${detail.reason || detail.status || "unknown"}`;
+  });
 }
 
 document.getElementById("tab-console").addEventListener("click", () => showTab("console"));
