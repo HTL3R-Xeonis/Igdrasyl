@@ -30,13 +30,23 @@
     --role-pc: #9aa0a6;
     --role-fw: #e0895a;
     --role-vm: #b07cd6;
+    /* The canvas itself is a deliberately separate, light surface -
+       everything else (header, panels, modals) stays the dark theme
+       above; only the SVG drawing area below uses these. */
+    --canvas-bg: #ffffff;
+    --canvas-grid-dot: #dde1e4;
+    --canvas-card-bg: #f3f4f6;
+    --canvas-card-running-bg: #e3f3e6;
+    --canvas-text: #1f2328;
+    --canvas-status-off-stroke: #9aa0a6;
+    --canvas-status-unknown-stroke: #c7cbd1;
+    --canvas-link: #9aa2a8;
   }
   * { box-sizing: border-box; }
   /* Without this, an element with an ID-selector display rule (flex,
      block, ...) stays visible despite the `hidden` attribute - the
      browser's own [hidden] default rule loses the specificity fight
-     against any #id{display:...} rule. Hit both #node-actions and
-     #console-header this session. */
+     against any #id{display:...} rule. Hit #node-actions this way. */
   [hidden] { display: none !important; }
   body {
     margin: 0;
@@ -84,24 +94,24 @@
     position: relative;
     overflow: hidden;
   }
-  #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--bg); }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
   #canvas.panning { cursor: grabbing; }
-  .grid-dot { fill: var(--border); }
+  .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
-  .node-shape { cursor: pointer; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45)); }
-  .node-shape rect.node-card { stroke-width: 1.5; fill: var(--panel); transition: stroke-width 0.1s; }
+  .node-shape { cursor: pointer; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.18)); }
+  .node-shape rect.node-card { stroke-width: 1.5; fill: var(--canvas-card-bg); transition: stroke-width 0.1s; }
   .node-shape.selected rect.node-card { stroke-width: 3; }
   .node-shape:hover rect.node-card { stroke-width: 2.5; }
-  .node-shape text { fill: var(--text); font-size: 11px; pointer-events: none; user-select: none; }
+  .node-shape text { fill: var(--canvas-text); font-size: 11px; pointer-events: none; user-select: none; }
   .role-ROUTER rect.node-card { stroke: var(--role-router); }
   .role-SWITCH rect.node-card { stroke: var(--role-switch); }
   .role-PC rect.node-card { stroke: var(--role-pc); }
   .role-FW rect.node-card { stroke: var(--role-fw); }
   .role-VM rect.node-card { stroke: var(--role-vm); stroke-dasharray: 4 2; }
-  .status-dot.status-ok { fill: var(--ok); stroke: var(--bg); stroke-width: 1.5; }
-  .status-dot.status-off { fill: var(--panel); stroke: var(--dim); stroke-width: 1.5; }
-  .status-dot.status-unknown { fill: var(--panel); stroke: var(--border); stroke-width: 1; opacity: 0.6; }
-  .link-line { stroke: var(--border); stroke-width: 1.5; cursor: pointer; }
+  .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-card-bg); stroke-width: 1.5; }
+  .status-dot.status-off { fill: var(--canvas-card-bg); stroke: var(--canvas-status-off-stroke); stroke-width: 1.5; }
+  .status-dot.status-unknown { fill: var(--canvas-card-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
+  .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
   .link-line.link-up { stroke: var(--ok); }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
   .link-endpoint { fill: var(--accent); pointer-events: none; }
@@ -236,14 +246,50 @@
     min-width: 0;
     min-height: 0;
   }
-  #console-header {
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--dim);
+  /* Session tabs - one per open console/screen, shown side by side like
+     terminal tabs, each keeping its own live connection running even
+     while a different tab is the active/visible one. */
+  #session-tabbar {
     display: flex;
-    justify-content: space-between;
+    gap: 2px;
+    padding: 4px 4px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
   }
+  .session-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 10px;
+    background: var(--bg);
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 180px;
+    flex-shrink: 0;
+  }
+  .session-tab.active { background: var(--panel-2); color: var(--text); }
+  .session-tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
+  .session-tab-dot.status-ok { background: var(--ok); }
+  .session-tab-dot.status-bad { background: var(--bad); }
+  .session-tab-label { overflow: hidden; text-overflow: ellipsis; }
+  .session-tab-close {
+    margin-left: 2px;
+    color: var(--dim);
+    border-radius: 3px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .session-tab-close:hover { background: var(--border); color: var(--text); }
   #console-placeholder {
     flex: 1;
     display: flex;
@@ -254,18 +300,30 @@
     text-align: center;
     padding: 16px;
   }
-  #terminal { flex: 1; padding: 8px; min-height: 0; }
-  #terminal:empty { display: none; }
-  #vm-screen-container {
+  #session-panels { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .session-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .session-panel-header {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .session-panel-title { color: var(--text); font-weight: 500; }
+  .session-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .session-terminal { flex: 1; padding: 8px; min-height: 0; }
+  .session-screen {
     flex: 1;
-    display: none;
+    display: flex;
     min-height: 0;
     background: #000;
     align-items: center;
     justify-content: center;
     overflow: auto;
   }
-  #vm-screen-container canvas { max-width: 100%; max-height: 100%; }
+  .session-screen canvas { max-width: 100%; max-height: 100%; }
   header button.tab-btn {
     font-size: 12px;
     background: none;
@@ -401,6 +459,7 @@
         <label>Name <input type="text" id="new-node-name"></label>
         <label>Role
           <select id="new-node-role">
+            <option value="ALL" selected>All Devices</option>
             <option value="ROUTER">ROUTER</option>
             <option value="SWITCH">SWITCH</option>
             <option value="PC">PC</option>
@@ -445,13 +504,9 @@
         <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
-      <div id="console-header" hidden>
-        <span id="console-title"></span>
-        <span id="console-status"></span>
-      </div>
+      <div id="session-tabbar" hidden></div>
       <div id="console-placeholder">Click a node on the canvas, or in the Topology list above, to see its details here.</div>
-      <div id="terminal"></div>
-      <div id="vm-screen-container"></div>
+      <div id="session-panels"></div>
     </div>
   </div>
   <div id="push-area" hidden>
@@ -499,33 +554,115 @@
 <script>
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-let term = null;
-let ws = null;
-let rfb = null;
-// Name of the VM whose screen should silently reconnect after it drops,
-// or null if no screen view wants that. See openVmScreen's own comment:
-// WebMKS sessions through this project's real vCenter/ESXi end on
-// their own after roughly 10-20s regardless of activity (confirmed via
-// a raw, app-independent test - not a bug in this app, a real, current
-// characteristic of that ticket-brokered connection) - reconnecting
-// automatically is what makes the feature actually usable rather than
-// needing a manual re-click every ~10-20s.
-let vmScreenAutoReconnect = null;
-// Consecutive reconnect failures for the current vmScreenAutoReconnect
-// target - reset to 0 on every successful connect, so this only ever
-// counts an unbroken run of failures. Caps automatic retrying so a
-// genuinely broken VM (powered off mid-session, deleted, ...) gives up
-// with a clear message instead of silently retrying forever.
-let vmScreenReconnectAttempts = 0;
+// Multiple simultaneous console/screen sessions, shown as tabs next to
+// each other (like a terminal's own tabs) instead of one replacing
+// another. Each session keeps its own live connection - a WebSocket +
+// xterm.js Terminal, or an RFB instance - running even while its tab
+// isn't the active one: switching only toggles which panel is visible
+// ([hidden]), nothing is ever torn down or recreated by a switch, so a
+// background tab keeps receiving real data and is instantly current
+// when switched back to.
 const VM_SCREEN_MAX_CONSECUTIVE_FAILURES = 8;
+let sessions = new Map();   // id -> session object, see ensureSessionPanel
+let activeSessionId = null;
 
-function closeViewers() {
-  if (ws) { ws.close(); ws = null; }
-  if (rfb) { rfb.disconnect(); rfb = null; }
-  vmScreenAutoReconnect = null;
-  vmScreenReconnectAttempts = 0;
-  document.getElementById("terminal").style.display = "none";
-  document.getElementById("vm-screen-container").style.display = "none";
+function sessionIdFor(nodeName, kind) {
+  return `${kind}:${nodeName}`;
+}
+
+// Creates a session's tab + panel the first time id is seen, or just
+// returns the existing one - callers check the returned session's own
+// `.kind` to tell "brand new, still needs to be opened" (null) apart
+// from "already open or opening" (set), so re-clicking a node's own
+// Console/Screen button switches to its existing tab instead of
+// starting a duplicate connection.
+function ensureSessionPanel(id, nodeName, title) {
+  let session = sessions.get(id);
+  if (session) return session;
+
+  const tab = document.createElement("button");
+  tab.className = "session-tab";
+  tab.type = "button";
+  const dot = document.createElement("span");
+  dot.className = "session-tab-dot";
+  const label = document.createElement("span");
+  label.className = "session-tab-label";
+  label.textContent = title;
+  const close = document.createElement("span");
+  close.className = "session-tab-close";
+  close.textContent = "×";
+  close.title = "Close";
+  close.addEventListener("click", (evt) => { evt.stopPropagation(); closeSession(id); });
+  tab.append(dot, label, close);
+  tab.addEventListener("click", () => switchToSession(id));
+  document.getElementById("session-tabbar").appendChild(tab);
+  document.getElementById("session-tabbar").hidden = false;
+
+  const panel = document.createElement("div");
+  panel.className = "session-panel";
+  panel.hidden = true;
+  const header = document.createElement("div");
+  header.className = "session-panel-header";
+  const titleEl = document.createElement("span");
+  titleEl.className = "session-panel-title";
+  titleEl.textContent = title;
+  const statusEl = document.createElement("span");
+  header.append(titleEl, statusEl);
+  const body = document.createElement("div");
+  body.className = "session-panel-body";
+  panel.append(header, body);
+  document.getElementById("session-panels").appendChild(panel);
+
+  document.getElementById("console-placeholder").style.display = "none";
+
+  session = {
+    id, nodeName, kind: null,
+    tabEl: tab, dotEl: dot, panelEl: panel, statusEl, bodyEl: body,
+    ws: null, term: null, rfb: null,
+    screenWanted: false, reconnectAttempts: 0,
+  };
+  sessions.set(id, session);
+  return session;
+}
+
+function setSessionStatus(session, text, dotClass) {
+  session.statusEl.textContent = text;
+  session.dotEl.className = `session-tab-dot${dotClass ? " " + dotClass : ""}`;
+}
+
+function switchToSession(id) {
+  activeSessionId = id;
+  for (const s of sessions.values()) {
+    const active = s.id === id;
+    s.panelEl.hidden = !active;
+    s.tabEl.classList.toggle("active", active);
+  }
+}
+
+function closeSession(id) {
+  const session = sessions.get(id);
+  if (!session) return;
+  session.screenWanted = false;
+  if (session.ws) session.ws.close();
+  if (session.rfb) session.rfb.disconnect();
+  session.tabEl.remove();
+  session.panelEl.remove();
+  sessions.delete(id);
+  if (activeSessionId !== id) return;
+  const next = sessions.keys().next();
+  if (!next.done) {
+    switchToSession(next.value);
+  } else {
+    activeSessionId = null;
+    document.getElementById("session-tabbar").hidden = true;
+    document.getElementById("console-placeholder").style.display = "";
+  }
+}
+
+function closeSessionsForNode(nodeName) {
+  for (const session of [...sessions.values()]) {
+    if (session.nodeName === nodeName) closeSession(session.id);
+  }
 }
 
 // In-app replacements for the browser's own confirm()/alert()/prompt(),
@@ -646,12 +783,17 @@ function showTextPrompt(message, opts = {}) {
 
 const NODE_W = 70;
 const NODE_H = 44;
-const ROLE_COLORS = {
-  ROUTER: "#5c9fe0",
-  SWITCH: "#4fb3bf",
-  PC: "#9aa0a6",
-  FW: "#e0895a",
-  VM: "#b07cd6",
+// GNS3's own real "classic" icon set (GPL-2.0, by the GNS3 project -
+// vendored unmodified from the live GNS3 controller's own
+// /v2/symbols/:/symbols/classic/<name>.svg/raw, the exact same files
+// GNS3's own desktop client renders) - replaces this app's earlier
+// hand-drawn primitive-shape icons.
+const ROLE_ICON_FILES = {
+  ROUTER: "/vendor/gns3-icons/router.svg",
+  SWITCH: "/vendor/gns3-icons/ethernet_switch.svg",
+  PC: "/vendor/gns3-icons/computer.svg",
+  FW: "/vendor/gns3-icons/firewall.svg",
+  VM: "/vendor/gns3-icons/server.svg",
 };
 
 let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
@@ -659,7 +801,6 @@ let selectedName = null;
 let linkMode = false;
 let linkFirstNode = null;
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
-let roleManuallySet = false;   // true once the operator has touched the Role select themselves
 let initialFitDone = false;
 
 // Template-name -> role classifier. There's no real backend link
@@ -727,129 +868,29 @@ function roleForIcon(node) {
   return node.environment === "ON_ESXI" ? "VM" : node.role;
 }
 
-// Small hand-drawn device glyphs (primitive shapes, not a bitmap icon
-// font) in a 20x20 box - GNS3-flavored but simple enough to stay crisp
-// at the node's small on-canvas size.
-function buildRoleIconShapes(role) {
-  const g = document.createElementNS(SVG_NS, "g");
-  g.setAttribute("fill", ROLE_COLORS[role] || ROLE_COLORS.PC);
-  g.setAttribute("stroke", "none");
-
-  function rect(x, y, w, h, rx) {
-    const el = document.createElementNS(SVG_NS, "rect");
-    el.setAttribute("x", x);
-    el.setAttribute("y", y);
-    el.setAttribute("width", w);
-    el.setAttribute("height", h);
-    if (rx) el.setAttribute("rx", rx);
-    g.appendChild(el);
-    return el;
-  }
-  function circle(cx, cy, r) {
-    const el = document.createElementNS(SVG_NS, "circle");
-    el.setAttribute("cx", cx);
-    el.setAttribute("cy", cy);
-    el.setAttribute("r", r);
-    g.appendChild(el);
-    return el;
-  }
-  function line(x1, y1, x2, y2, w) {
-    const el = document.createElementNS(SVG_NS, "line");
-    el.setAttribute("x1", x1);
-    el.setAttribute("y1", y1);
-    el.setAttribute("x2", x2);
-    el.setAttribute("y2", y2);
-    el.setAttribute("stroke", ROLE_COLORS[role] || ROLE_COLORS.PC);
-    el.setAttribute("stroke-width", w || 1.5);
-    g.appendChild(el);
-    return el;
-  }
-  function path(d) {
-    const el = document.createElementNS(SVG_NS, "path");
-    el.setAttribute("d", d);
-    g.appendChild(el);
-    return el;
-  }
-  // A soft white overlay, not a true cutout (icons render over varying
-  // backgrounds) - cheap way to fake a bevel/highlight/engraved detail
-  // without per-role color math.
-  function highlight(x, y, w, h, rx) {
-    const el = rect(x, y, w, h, rx);
-    el.setAttribute("fill", "#ffffff");
-    el.setAttribute("fill-opacity", 0.3);
-    return el;
-  }
-  function arc(cx, cy, r, w) {
-    const el = document.createElementNS(SVG_NS, "path");
-    el.setAttribute("d", `M ${cx - r},${cy} A ${r},${r} 0 0 1 ${cx + r},${cy}`);
-    el.setAttribute("fill", "none");
-    el.setAttribute("stroke", ROLE_COLORS[role] || ROLE_COLORS.PC);
-    el.setAttribute("stroke-width", w || 1.3);
-    el.setAttribute("stroke-linecap", "round");
-    g.appendChild(el);
-    return el;
-  }
-
-  switch (role) {
-    case "ROUTER":
-      rect(2, 9, 16, 7, 2);
-      highlight(2, 9, 16, 2, 2);
-      arc(10, 8, 3, 1.2);
-      arc(10, 8, 5.5, 1.2);
-      circle(10, 2.5, 1.3);
-      rect(5, 16.5, 2, 1.8);
-      rect(13, 16.5, 2, 1.8);
-      break;
-    case "SWITCH":
-      rect(2, 7, 16, 6, 1.5);
-      highlight(2, 7, 16, 1.8, 1.5);
-      rect(4, 13, 2, 2);
-      rect(7.3, 13, 2, 2);
-      rect(10.6, 13, 2, 2);
-      rect(13.9, 13, 2, 2);
-      break;
-    case "FW": {
-      path("M10,2 L17,5 V11 C17,15 13,18 10,19 C7,18 3,15 3,11 V5 Z");
-      const topHighlight = path("M10,2 L17,5 V8 C13,8.5 7,8.5 3,8 V5 Z");
-      topHighlight.setAttribute("fill", "#ffffff");
-      topHighlight.setAttribute("fill-opacity", 0.3);
-      const keyhole = circle(10, 11.5, 1.6);
-      keyhole.setAttribute("fill", "#ffffff");
-      keyhole.setAttribute("fill-opacity", 0.55);
-      const keyholeStem = rect(9.3, 12.4, 1.4, 2.4);
-      keyholeStem.setAttribute("fill", "#ffffff");
-      keyholeStem.setAttribute("fill-opacity", 0.55);
-      break;
-    }
-    case "VM":
-      rect(5, 2, 10, 16, 1.5);
-      highlight(5, 2, 3, 16, 1.5);
-      rect(7, 5, 6, 1.6).setAttribute("fill-opacity", 0.95);
-      rect(7, 8, 6, 1.6).setAttribute("fill-opacity", 0.8);
-      rect(7, 11, 6, 1.6).setAttribute("fill-opacity", 0.65);
-      circle(15.3, 5.8, 0.6).setAttribute("fill", "#ffffff");
-      break;
-    case "PC":
-    default:
-      rect(3, 3, 14, 10, 1.5);
-      { const bezel = rect(4.3, 4.3, 11.4, 7.4, 1);
-        bezel.setAttribute("fill", "none");
-        bezel.setAttribute("stroke", "#ffffff");
-        bezel.setAttribute("stroke-opacity", 0.35);
-        bezel.setAttribute("stroke-width", 0.8); }
-      rect(9, 13, 2, 2);
-      rect(6, 15.2, 8, 1.4, 0.5);
-      break;
-  }
-  return g;
+// A single <image> referencing the real vendored GNS3 icon file for
+// role, sized into a size x size box - preserveAspectRatio keeps each
+// icon's own real proportions (they vary a lot: ethernet_switch.svg is
+// wide/short, server.svg is tall/narrow) rather than stretching them
+// to a forced square.
+function buildRoleIconImage(role, size) {
+  const href = ROLE_ICON_FILES[role] || ROLE_ICON_FILES.PC;
+  const img = document.createElementNS(SVG_NS, "image");
+  img.setAttributeNS("http://www.w3.org/1999/xlink", "href", href);
+  img.setAttribute("href", href);
+  img.setAttribute("width", size);
+  img.setAttribute("height", size);
+  img.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  return img;
 }
 
 function buildRoleIconStandalone(role, size) {
+  const s = size || 18;
   const svgEl = document.createElementNS(SVG_NS, "svg");
-  svgEl.setAttribute("viewBox", "0 0 20 20");
-  svgEl.setAttribute("width", size || 16);
-  svgEl.setAttribute("height", size || 16);
-  svgEl.appendChild(buildRoleIconShapes(role));
+  svgEl.setAttribute("viewBox", `0 0 ${s} ${s}`);
+  svgEl.setAttribute("width", s);
+  svgEl.setAttribute("height", s);
+  svgEl.appendChild(buildRoleIconImage(role, s));
   return svgEl;
 }
 
@@ -972,11 +1013,13 @@ function buildNodeShape(node) {
   rect.setAttribute("width", NODE_W);
   rect.setAttribute("height", NODE_H);
   rect.setAttribute("rx", 10);
-  rect.setAttribute("fill", running ? "#1e2f22" : "var(--panel)");
+  rect.setAttribute("fill", running ? "var(--canvas-card-running-bg)" : "var(--canvas-card-bg)");
   g.appendChild(rect);
 
-  const icon = buildRoleIconShapes(roleForIcon(node));
-  icon.setAttribute("transform", `translate(${NODE_W / 2 - 10}, 3) scale(0.85)`);
+  const iconSize = 22;
+  const icon = buildRoleIconImage(roleForIcon(node), iconSize);
+  icon.setAttribute("x", (NODE_W - iconSize) / 2);
+  icon.setAttribute("y", 2);
   g.appendChild(icon);
 
   const statusDot = document.createElementNS(SVG_NS, "circle");
@@ -1225,15 +1268,22 @@ function showNodeActions(name) {
   const live = node.live;
   const status = live && live.status ? live.status : "none";
 
-  document.getElementById("console-placeholder").style.display = "none";
   document.getElementById("node-actions").hidden = false;
   document.getElementById("selected-role").textContent = node.environment.replace("ON_", "");
   document.getElementById("selected-name").textContent = node.name;
   document.getElementById("selected-status").textContent = `(${node.role}, ${status})`;
 
+  // A VM bridged into GNS3 via a Cloud-node link reports its live
+  // status as GNS3's own "started"/"stopped" (see main.py's /nodes -
+  // once a live GNS3 entry exists for a node, that's what's used,
+  // never falling back to the ESXi-side "poweredOn"/"poweredOff"
+  // string) - so "is this VM usable" has to accept either spelling,
+  // not just the ESXi one.
+  const running = status === "started" || status === "poweredOn";
+
   const btn = document.getElementById("selected-action-btn");
   const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
-  const canVmConsole = isVM && live && live.status === "poweredOn";
+  const canVmConsole = isVM && running;
   btn.textContent = isVM ? "Serial Console" : "Console";
   btn.disabled = isVM ? !canVmConsole : !canConsole;
   btn.title = isVM
@@ -1244,13 +1294,10 @@ function showNodeActions(name) {
   const screenBtn = document.getElementById("selected-screen-btn");
   screenBtn.hidden = !isVM;
   if (isVM) {
-    const canScreen = live && live.status === "poweredOn";
-    screenBtn.disabled = !canScreen;
-    screenBtn.title = canScreen ? "Open this VM's graphical screen" : `VM status: ${status}`;
+    screenBtn.disabled = !running;
+    screenBtn.title = running ? "Open this VM's graphical screen" : `VM status: ${status}`;
     screenBtn.onclick = () => openVmScreen(name);
   }
-
-  const running = status === "started" || status === "poweredOn";
   const stopped = status === "stopped" || status === "poweredOff";
   const hasLive = !!live;
 
@@ -1301,11 +1348,9 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
       await showAlert(`Failed to delete node: ${(await resp.json()).detail || resp.status}`);
       return;
     }
-    closeViewers();
+    closeSessionsForNode(name);
     selectedName = null;
     document.getElementById("node-actions").hidden = true;
-    document.getElementById("console-header").hidden = true;
-    document.getElementById("console-placeholder").style.display = "";
     await loadCanvas();
   } catch (err) {
     await showAlert(`Failed to delete node: ${err}`);
@@ -1420,7 +1465,8 @@ window.addEventListener("keydown", (evt) => {
 
 async function populateTemplateOptions() {
   const select = document.getElementById("new-node-image");
-  const roleFilter = roleManuallySet ? document.getElementById("new-node-role").value : null;
+  const roleValue = document.getElementById("new-node-role").value;
+  const roleFilter = roleValue === "ALL" ? null : roleValue;
   if (availableTemplates) {
     renderTemplateOptions(select, availableTemplates, roleFilter);
     return;
@@ -1471,17 +1517,20 @@ function renderTemplateOptions(select, templates, roleFilter) {
 }
 
 document.getElementById("new-node-role").addEventListener("change", () => {
-  roleManuallySet = true;
+  const roleValue = document.getElementById("new-node-role").value;
   if (availableTemplates) {
-    renderTemplateOptions(document.getElementById("new-node-image"), availableTemplates, document.getElementById("new-node-role").value);
+    renderTemplateOptions(
+      document.getElementById("new-node-image"), availableTemplates, roleValue === "ALL" ? null : roleValue
+    );
   }
 });
 
 document.getElementById("new-node-image").addEventListener("change", (evt) => {
-  if (roleManuallySet || !evt.target.value || !availableTemplates) return;
+  const roleSelect = document.getElementById("new-node-role");
+  if (roleSelect.value !== "ALL" || !evt.target.value || !availableTemplates) return;
   const group = availableTemplates.esxi.includes(evt.target.value) ? "esxi" : "gns3";
   const guessed = classifyTemplateRole(evt.target.value, group);
-  if (guessed) document.getElementById("new-node-role").value = guessed;
+  if (guessed) roleSelect.value = guessed;
 });
 
 document.getElementById("import-project-btn").addEventListener("click", () => {
@@ -1537,8 +1586,7 @@ document.getElementById("add-node-btn").addEventListener("click", async () => {
   const opening = form.hidden;
   form.hidden = !opening;
   if (opening) {
-    roleManuallySet = false;
-    document.getElementById("new-node-role").value = "ROUTER";
+    document.getElementById("new-node-role").value = "ALL";
     await populateTemplateOptions();
   }
 });
@@ -1549,12 +1597,26 @@ document.getElementById("add-node-cancel").addEventListener("click", () => {
 
 document.getElementById("add-node-submit").addEventListener("click", async () => {
   const name = document.getElementById("new-node-name").value.trim();
-  const role = document.getElementById("new-node-role").value;
+  let role = document.getElementById("new-node-role").value;
   const image = document.getElementById("new-node-image").value;
   const statusEl = document.getElementById("add-node-status");
   if (!name || !image) {
     statusEl.textContent = "Name and image are required.";
     return;
+  }
+  if (role === "ALL") {
+    // "All Devices" is a frontend-only browsing aid, not a real role
+    // the backend accepts - resolve it the same way picking an image
+    // already auto-fills Role, and require a real pick if that can't
+    // classify this specific image confidently.
+    const group = availableTemplates && availableTemplates.esxi.includes(image) ? "esxi" : "gns3";
+    const guessed = classifyTemplateRole(image, group);
+    if (!guessed) {
+      statusEl.textContent = "Couldn't automatically determine a role for this image - pick one from Role.";
+      return;
+    }
+    role = guessed;
+    document.getElementById("new-node-role").value = role;
   }
   if (!await showConfirm(
     `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
@@ -1581,7 +1643,6 @@ document.getElementById("add-node-submit").addEventListener("click", async () =>
     document.getElementById("add-node-form").hidden = true;
     document.getElementById("new-node-name").value = "";
     statusEl.textContent = "";
-    roleManuallySet = false;
     await loadCanvas();
     fitViewToNodes();
   } catch (err) {
@@ -1591,93 +1652,95 @@ document.getElementById("add-node-submit").addEventListener("click", async () =>
   }
 });
 
-function openTerminalWebSocket(nodeName, wsUrl, statusEl) {
-  const termEl = document.getElementById("terminal");
-  termEl.style.display = "block";
-  termEl.innerHTML = "";
-  if (term) term.dispose();
-  term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#1a1d1f" } });
-  term.open(termEl);
+function openTerminalWebSocket(session, wsUrl) {
+  const termHost = document.createElement("div");
+  termHost.className = "session-terminal";
+  session.bodyEl.innerHTML = "";
+  session.bodyEl.appendChild(termHost);
 
-  ws = new WebSocket(wsUrl);
+  const term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: "#1a1d1f" } });
+  term.open(termHost);
+  session.term = term;
+
+  const ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
+  session.ws = ws;
 
-  ws.onopen = () => { statusEl.textContent = "connected"; };
+  ws.onopen = () => setSessionStatus(session, "connected", "status-ok");
   ws.onmessage = (event) => { term.write(new Uint8Array(event.data)); };
   ws.onclose = (event) => {
-    statusEl.textContent = event.reason ? `closed: ${event.reason}` : "closed";
+    setSessionStatus(session, event.reason ? `closed: ${event.reason}` : "closed", "status-bad");
   };
-  ws.onerror = () => { statusEl.textContent = "error"; };
+  ws.onerror = () => setSessionStatus(session, "error", "status-bad");
 
   term.onData((data) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(new TextEncoder().encode(data));
-    }
+    if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
   });
 }
 
 function openConsole(nodeName) {
-  closeViewers();
-  document.getElementById("console-placeholder").style.display = "none";
-  const header = document.getElementById("console-header");
-  header.hidden = false;
-  document.getElementById("console-title").textContent = nodeName;
-  const statusEl = document.getElementById("console-status");
-  statusEl.textContent = "connecting…";
+  const id = sessionIdFor(nodeName, "console");
+  const session = ensureSessionPanel(id, nodeName, nodeName);
+  switchToSession(id);
+  if (session.kind) return; // already open or opening - just switched to its tab
+  session.kind = "terminal";
+  setSessionStatus(session, "connecting…");
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  openTerminalWebSocket(
-    nodeName, `${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`, statusEl
-  );
+  openTerminalWebSocket(session, `${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`);
 }
 
 async function openVmConsole(nodeName) {
-  closeViewers();
-  document.getElementById("console-placeholder").style.display = "none";
-  const header = document.getElementById("console-header");
-  header.hidden = false;
-  document.getElementById("console-title").textContent = nodeName;
-  const statusEl = document.getElementById("console-status");
-  statusEl.textContent = "preparing (may power-cycle the VM on first use)…";
+  const id = sessionIdFor(nodeName, "vm-console");
+  const session = ensureSessionPanel(id, nodeName, `${nodeName} (serial)`);
+  switchToSession(id);
+  if (session.kind) return;
+  session.kind = "terminal";
+  setSessionStatus(session, "preparing (may power-cycle the VM on first use)…");
 
   try {
     const resp = await fetch(`/vm-console/${encodeURIComponent(nodeName)}/prepare`, { method: "POST" });
     if (!resp.ok) {
-      statusEl.textContent = `prepare failed: HTTP ${resp.status} ${await resp.text()}`;
+      setSessionStatus(session, `prepare failed: HTTP ${resp.status} ${await resp.text()}`, "status-bad");
       return;
     }
     const data = await resp.json();
     if (data.guest_console_configured) {
-      statusEl.textContent = "VM was power-cycled to enable console output, connecting…";
+      setSessionStatus(session, "VM was power-cycled to enable console output, connecting…");
     } else if (data.power_cycled) {
-      statusEl.textContent = "VM was power-cycled to enable its console, connecting…";
+      setSessionStatus(session, "VM was power-cycled to enable its console, connecting…");
     }
   } catch (err) {
-    statusEl.textContent = `prepare failed: ${err}`;
+    setSessionStatus(session, `prepare failed: ${err}`, "status-bad");
     return;
   }
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  openTerminalWebSocket(
-    nodeName, `${proto}//${location.host}/ws/vm-console/${encodeURIComponent(nodeName)}`, statusEl
-  );
+  openTerminalWebSocket(session, `${proto}//${location.host}/ws/vm-console/${encodeURIComponent(nodeName)}`);
 }
 
 async function openVmScreen(nodeName, opts) {
   const isReconnect = !!(opts && opts.isReconnect);
-  if (!isReconnect) {
-    closeViewers();
+  const id = sessionIdFor(nodeName, "screen");
+  let session;
+  if (isReconnect) {
+    session = sessions.get(id);
+    if (!session || !session.screenWanted) return; // tab closed/gave up while this was pending
+  } else {
+    session = ensureSessionPanel(id, nodeName, `${nodeName} (screen)`);
+    switchToSession(id);
+    if (session.kind) return;
+    session.kind = "screen";
+    session.screenWanted = true;
+    session.reconnectAttempts = 0;
   }
-  document.getElementById("console-placeholder").style.display = "none";
-  const header = document.getElementById("console-header");
-  header.hidden = false;
-  document.getElementById("console-title").textContent = `${nodeName} (screen)`;
-  const statusEl = document.getElementById("console-status");
-  statusEl.textContent = isReconnect ? "reconnecting…" : "connecting…";
 
-  const screenEl = document.getElementById("vm-screen-container");
-  screenEl.style.display = "flex";
-  screenEl.innerHTML = "";
+  setSessionStatus(session, isReconnect ? "reconnecting…" : "connecting…");
+
+  const screenHost = document.createElement("div");
+  screenHost.className = "session-screen";
+  session.bodyEl.innerHTML = "";
+  session.bodyEl.appendChild(screenHost);
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${proto}//${location.host}/ws/vm-screen/${encodeURIComponent(nodeName)}`;
@@ -1686,44 +1749,41 @@ async function openVmScreen(nodeName, opts) {
   try {
     ({ default: RFB } = await import("/vendor/novnc/core/rfb.js"));
   } catch (err) {
-    statusEl.textContent = `couldn't load screen viewer: ${err}`;
+    setSessionStatus(session, `couldn't load screen viewer: ${err}`, "status-bad");
     return;
   }
+  if (!session.screenWanted) return; // closed while the module was loading
 
-  vmScreenAutoReconnect = nodeName;
-
-  const thisRfb = new RFB(screenEl, url, { wsProtocols: ["binary"] });
-  rfb = thisRfb;
+  const thisRfb = new RFB(screenHost, url, { wsProtocols: ["binary"] });
+  session.rfb = thisRfb;
   thisRfb.scaleViewport = true;
   thisRfb.resizeSession = false;
   thisRfb.showDotCursor = true;
 
   thisRfb.addEventListener("connect", () => {
-    vmScreenReconnectAttempts = 0;
-    statusEl.textContent = "connected";
+    session.reconnectAttempts = 0;
+    setSessionStatus(session, "connected", "status-ok");
   });
   thisRfb.addEventListener("disconnect", () => {
-    // rfb !== thisRfb: a newer attempt (or closeViewers()) has already
-    // superseded this one - don't double-reconnect or clobber its state.
-    if (vmScreenAutoReconnect !== nodeName || rfb !== thisRfb) return;
+    // session.rfb !== thisRfb: a newer attempt has already superseded
+    // this one - don't double-reconnect or clobber its state.
+    if (!session.screenWanted || session.rfb !== thisRfb) return;
 
-    vmScreenReconnectAttempts += 1;
-    if (vmScreenReconnectAttempts > VM_SCREEN_MAX_CONSECUTIVE_FAILURES) {
-      statusEl.textContent = "screen keeps disconnecting - giving up for now, click Screen to retry";
-      vmScreenAutoReconnect = null;
+    session.reconnectAttempts += 1;
+    if (session.reconnectAttempts > VM_SCREEN_MAX_CONSECUTIVE_FAILURES) {
+      setSessionStatus(session, "screen keeps disconnecting - giving up for now, click Screen to retry", "status-bad");
+      session.screenWanted = false;
       return;
     }
-    statusEl.textContent = "reconnecting…";
-    setTimeout(() => {
-      if (vmScreenAutoReconnect === nodeName) openVmScreen(nodeName, { isReconnect: true });
-    }, 300);
+    setSessionStatus(session, "reconnecting…");
+    setTimeout(() => openVmScreen(nodeName, { isReconnect: true }), 300);
   });
   thisRfb.addEventListener("credentialsrequired", () => {
-    statusEl.textContent = "server requires credentials (not supported by this viewer)";
+    setSessionStatus(session, "server requires credentials (not supported by this viewer)", "status-bad");
   });
   thisRfb.addEventListener("securityfailure", (evt) => {
     const detail = evt.detail || {};
-    statusEl.textContent = `security negotiation failed: ${detail.reason || detail.status || "unknown"}`;
+    setSessionStatus(session, `security negotiation failed: ${detail.reason || detail.status || "unknown"}`, "status-bad");
   });
 }
 
