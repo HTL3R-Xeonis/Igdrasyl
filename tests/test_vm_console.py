@@ -174,8 +174,25 @@ def test_ensure_guest_console_configured_skips_windows_image():
     mock_creds.assert_not_called()
 
 
+def test_ensure_guest_console_configured_skips_when_tools_not_running():
+    """
+    Real bug found live: OPNsense (a FreeBSD appliance with no VMware
+    Tools installed) hit this exact path - guest-ops can't run at all
+    without Tools, regardless of credentials, so this must be checked
+    before ever touching guest_credentials_for_image/run_command_in_guest.
+    """
+    vm = MagicMock()
+    vm.guest.toolsRunningStatus = "guestToolsNotRunning"
+    with patch.object(vc, "guest_credentials_for_image") as mock_creds:
+        result = vc.ensure_guest_console_configured(vm, "OPNsense", MagicMock())
+
+    assert result is None
+    mock_creds.assert_not_called()
+
+
 def test_ensure_guest_console_configured_skips_when_no_credentials():
     vm = MagicMock()
+    vm.guest.toolsRunningStatus = "guestToolsRunning"
     with patch.object(vc, "guest_credentials_for_image", return_value=None):
         result = vc.ensure_guest_console_configured(vm, "debian", MagicMock())
 
@@ -184,6 +201,7 @@ def test_ensure_guest_console_configured_skips_when_no_credentials():
 
 def test_ensure_guest_console_configured_idempotent_when_already_configured():
     vm = MagicMock()
+    vm.guest.toolsRunningStatus = "guestToolsRunning"
     with patch.object(
         vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
     ), patch.object(vc, "run_command_in_guest", return_value=(0, "exit code 0")) as mock_run:
@@ -206,6 +224,7 @@ def test_ensure_guest_console_configured_first_time_configures_and_power_cycles(
     from pyVmomi import vim
 
     vm = MagicMock()
+    vm.guest.toolsRunningStatus = "guestToolsRunning"
     vm.PowerOffVM_Task.return_value = MagicMock(info=MagicMock(state=vim.TaskInfo.State.success))
     vm.PowerOnVM_Task.return_value = MagicMock(info=MagicMock(state=vim.TaskInfo.State.success))
     with patch.object(
@@ -226,6 +245,7 @@ def test_ensure_guest_console_configured_first_time_configures_and_power_cycles(
 
 def test_ensure_guest_console_configured_gives_up_if_script_write_fails():
     vm = MagicMock()
+    vm.guest.toolsRunningStatus = "guestToolsRunning"
     with patch.object(
         vc, "guest_credentials_for_image", return_value=("junioradmin", "junioradmin")
     ), patch.object(

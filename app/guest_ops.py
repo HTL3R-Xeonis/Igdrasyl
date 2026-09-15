@@ -58,10 +58,10 @@ def run_command_in_guest(
     """
     Runs one command to completion via guest-ops, waiting for its exit
     code. Returns (exit_code, output) - exit_code is None if the
-    process couldn't even start (a MethodFault, e.g. bad credentials)
-    or timed out, with output describing which.
+    process couldn't even start (bad credentials, guest ops unavailable,
+    or a timeout), with output describing which.
     """
-    from pyVmomi import vim
+    from pyVmomi import vim, vmodl
 
     if is_windows:
         spec = vim.vm.guest.ProcessManager.ProgramSpec(
@@ -75,8 +75,26 @@ def run_command_in_guest(
 
     try:
         pid = process_manager.StartProgramInGuest(vm, auth, spec)
-    except vim.fault.MethodFault as exc:
+    except vmodl.MethodFault as exc:
+        # Real, pre-existing bug found live (an OPNsense VM with no
+        # VMware Tools installed hit this): the base vSphere API fault
+        # class is `vmodl.MethodFault`, not `vim.fault.MethodFault` -
+        # `vim.fault` only holds specific subtypes (InvalidLogin,
+        # NoPermission, ...), not the base class itself. The original
+        # `except vim.fault.MethodFault` here could never actually
+        # match anything - referencing that attribute at all raises its
+        # own `AttributeError('MethodFault')` from pyvmomi's lazy
+        # WSDL-type lookup (confirmed directly: `hasattr(vim.fault,
+        # "MethodFault")` is False in this pyvmomi version), which is
+        # exactly the cryptic error this project's own logs showed
+        # instead of a clean "guest ops failed" message.
         return None, str(exc)
+    except Exception as exc:
+        # Still a safety net beneath the fix above - any other failure
+        # (not a vmodl.MethodFault at all) still returns cleanly rather
+        # than breaking this function's own documented "always returns
+        # (None, reason), never raises" contract.
+        return None, f"{type(exc).__name__}: {exc}"
 
     exit_code = wait_for_guest_process(process_manager, vm, auth, pid)
     output = "timed out waiting for exit" if exit_code is None else f"exit code {exit_code}"

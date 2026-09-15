@@ -186,9 +186,14 @@ def ensure_guest_console_configured(vm: Any, image: str, esxi_connection: Any) -
     actually shows something. Never raises - returns None if not
     attempted (a Windows image, per the same "windows" in image.lower()
     heuristic app/config_push.py already uses since Windows has no GRUB;
-    or no guest credentials found for this image), False if already
-    configured (idempotent, no change made), True if it just configured
-    it (and power-cycled the VM to pick it up).
+    VMware Tools isn't installed/running in the guest, so guest-ops
+    can't run at all - confirmed live against a real OPNsense VM, a
+    FreeBSD-based appliance that doesn't ship Tools by default and also
+    has no `/etc/default/grub` to begin with, so this wouldn't have
+    worked even with Tools; or no guest credentials found for this
+    image), False if already configured (idempotent, no change made),
+    True if it just configured it (and power-cycled the VM to pick it
+    up).
 
     Confirmed live against real infrastructure: a soft guest-level
     reboot (`vm.RebootGuest()`) is NOT enough here - the guest itself
@@ -205,6 +210,14 @@ def ensure_guest_console_configured(vm: Any, image: str, esxi_connection: Any) -
     by the same idempotency check below - it only ever runs once per VM.
     """
     if "windows" in image.lower():
+        return None
+    if vm.guest.toolsRunningStatus != "guestToolsRunning":
+        logger.warning(
+            f"guest console=ttyS0 setup skipped for {vm.name}: VMware Tools "
+            f"isn't running in the guest (toolsRunningStatus="
+            f"{vm.guest.toolsRunningStatus!r}) - guest-ops can't run at all "
+            f"without it, regardless of credentials"
+        )
         return None
 
     try:
