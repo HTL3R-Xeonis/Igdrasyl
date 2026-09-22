@@ -126,6 +126,7 @@
     left: 8px;
     color: var(--accent);
   }
+  .menu-separator { height: 1px; background: var(--border); margin: 4px 2px; }
   .menu-info-line { padding: 7px 10px; font-size: 12px; color: var(--dim); white-space: nowrap; }
   .menu-settings-row {
     display: flex;
@@ -188,7 +189,22 @@
     padding: 10px 12px 8px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  #palette-close-btn {
+    text-transform: none;
+    letter-spacing: normal;
+    background: none;
+    border: none;
+    color: var(--dim);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px;
+  }
+  #palette-close-btn:hover { color: var(--accent); }
   #palette-categories {
     display: flex;
     flex-direction: column;
@@ -261,7 +277,16 @@
   }
   #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
   #canvas.panning { cursor: grabbing; }
-  #canvas.placing { cursor: crosshair; }
+  #canvas.placing, #canvas.drawing { cursor: crosshair; }
+  .drawing-shape { cursor: pointer; }
+  .drawing-rect, .drawing-ellipse {
+    fill: rgba(124, 179, 66, 0.12);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+  .drawing-line { stroke: var(--accent); stroke-width: 2; }
+  .drawing-text { fill: var(--canvas-text); font-size: 16px; }
+  .drawing-draft { opacity: 0.6; stroke-dasharray: 4 3; }
   .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
   /* GNS3 Desktop's own node look: just the device icon and its label,
@@ -325,12 +350,19 @@
   }
   button.console-btn:disabled { background: var(--border); color: var(--dim); font-weight: 400; cursor: not-allowed; }
   #right-panel {
-    width: 360px;
+    width: var(--right-panel-width, 360px);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     min-width: 0;
   }
+  #right-panel-resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  #right-panel-resize-handle:hover, #right-panel-resize-handle.dragging { background: var(--accent); }
   #topology-summary {
     flex-shrink: 0;
     height: 260px;
@@ -420,9 +452,19 @@
   .summary-name { font-weight: 500; }
   .summary-status { margin-left: auto; color: var(--dim); font-size: 11px; }
   .summary-empty { padding: 6px 8px; color: var(--dim); font-size: 12px; }
+  /* A floating popup near whatever was clicked (a canvas icon, or a
+     Topology Summary row) - not docked in the page flow, so it stays
+     out of #console-area's own layout (that's just the live session
+     area now). */
   #node-actions {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    z-index: 150;
+    max-width: 320px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    padding: 10px 14px;
     font-size: 13px;
     display: flex;
     flex-wrap: wrap;
@@ -515,7 +557,7 @@
     overflow: auto;
   }
   .session-screen canvas { max-width: 100%; max-height: 100%; }
-  #push-area { width: 360px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
+  #push-area { width: var(--right-panel-width, 360px); flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
   #push-area textarea {
     width: 100%;
     height: 140px;
@@ -649,6 +691,8 @@
       <div class="menu-dropdown" id="menu-view" hidden>
         <button class="menu-item active" id="tab-console">Topology</button>
         <button class="menu-item" id="tab-push">Config Push</button>
+        <div class="menu-separator"></div>
+        <button class="menu-item active" id="toggle-devices-btn">Devices</button>
       </div>
     </div>
     <div class="menu">
@@ -675,6 +719,17 @@
         </label>
       </div>
     </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="draw">Draw/Write</button>
+      <div class="menu-dropdown" id="menu-draw" hidden>
+        <button class="menu-item" id="draw-rect-btn" data-draw="rect">Rectangle</button>
+        <button class="menu-item" id="draw-ellipse-btn" data-draw="ellipse">Ellipse</button>
+        <button class="menu-item" id="draw-line-btn" data-draw="line">Line</button>
+        <button class="menu-item" id="draw-text-btn" data-draw="text">Text</button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="draw-clear-btn">Clear all drawings</button>
+      </div>
+    </div>
   </nav>
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
   <div id="menubar-status"></div>
@@ -682,7 +737,7 @@
 <div id="warning-banner"></div>
 <main>
   <div id="device-palette">
-    <div id="palette-header">Devices</div>
+    <div id="palette-header"><span>Devices</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
     <div id="palette-categories">
       <button class="palette-cat active" data-role="ALL">All Devices</button>
       <button class="palette-cat" data-role="ROUTER">Routers</button>
@@ -709,10 +764,12 @@
         </pattern>
       </defs>
       <rect class="grid-bg" x="-6000" y="-6000" width="12000" height="12000" fill="url(#grid-pattern)"></rect>
+      <g id="drawings-layer"></g>
       <g id="links-layer"></g>
       <g id="nodes-layer"></g>
     </svg>
   </div>
+  <div id="right-panel-resize-handle" title="Drag to resize"></div>
   <div id="right-panel">
     <div id="topology-summary">
       <div id="status-connection"><span id="status-connection-text">Connecting…</span></div>
@@ -729,7 +786,7 @@
         <span class="env-tag" id="selected-role"></span>
         <strong id="selected-name"></strong>
         <span id="selected-status" style="color: var(--dim);"></span>
-        <button class="console-btn" id="selected-start-btn" style="margin-left: auto;">Start</button>
+        <button class="console-btn" id="selected-start-btn">Start</button>
         <button class="console-btn" id="selected-stop-btn">Stop</button>
         <button class="console-btn" id="selected-reload-btn">Reload</button>
         <button class="console-btn" id="selected-action-btn"></button>
@@ -737,7 +794,7 @@
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="session-tabbar" hidden></div>
-      <div id="console-placeholder">Click a node on the canvas, or in the Topology list above, to see its details here.</div>
+      <div id="console-placeholder">Click a node on the canvas, or in the Topology Summary above, then open its Console or Screen to see it here.</div>
       <div id="session-panels"></div>
     </div>
   </div>
@@ -991,6 +1048,19 @@ function showTextPrompt(message, opts = {}) {
 // cancels (resolves null). Used for interface-picking during Add Link,
 // which used to be a full modal (a <select> for GNS3 nodes with real
 // live ports, or a blind free-text field for ones without).
+// Positions a fixed-position floating element near a viewport-space
+// anchor point ({x, y}, e.g. a click's clientX/clientY), clamped so it
+// never runs off-screen. Shared by every floating popover in this
+// app - the interface-picker dropdown, the node-actions popup.
+function positionNear(el, anchor) {
+  const a = anchor || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  const rect = el.getBoundingClientRect();
+  const left = Math.max(8, Math.min(a.x + 12, window.innerWidth - rect.width - 12));
+  const top = Math.max(8, Math.min(a.y + 12, window.innerHeight - rect.height - 12));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
 function showInlineDropdown(options, opts = {}) {
   return new Promise((resolve) => {
     const pop = document.createElement("div");
@@ -1016,13 +1086,7 @@ function showInlineDropdown(options, opts = {}) {
     pop.appendChild(select);
 
     document.body.appendChild(pop);
-
-    const anchor = opts.anchor || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    const rect = pop.getBoundingClientRect();
-    const left = Math.max(8, Math.min(anchor.x + 12, window.innerWidth - rect.width - 12));
-    const top = Math.max(8, Math.min(anchor.y + 12, window.innerHeight - rect.height - 12));
-    pop.style.left = `${left}px`;
-    pop.style.top = `${top}px`;
+    positionNear(pop, opts.anchor);
 
     function finish(result) {
       document.removeEventListener("mousedown", onOutside, true);
@@ -1073,6 +1137,17 @@ let selectedName = null;
 let linkMode = false;
 let linkFirstNode = null;
 let linkFirstAnchor = null; // {x, y} viewport coords of node1's click, for the interface dropdown's position
+
+// Draw/Write - GNS3 Desktop's own drawing-toolbar equivalent
+// (rectangle/ellipse/line/text annotations on the canvas). Client-side
+// only for now: kept in browser memory and rendered on its own SVG
+// layer, not persisted to the topology file or synced with GNS3's own
+// real /v2/projects/{id}/drawings API - a real implementation of that
+// would need backend work in TopologyBuilder's GNS3Connection first.
+let drawings = [];
+let drawIdCounter = 0;
+let drawMode = null; // 'rect' | 'ellipse' | 'line' | 'text' | null
+let drawDraft = null; // {type, x1, y1, x2, y2} while dragging out a new shape
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;
 let placementRole = null;   // armed device's resolved role, or null if nothing armed
@@ -1239,6 +1314,92 @@ function appendLinkEndpointDot(layer, nearNode, farNode) {
   layer.appendChild(dot);
 }
 
+function setDrawMode(mode) {
+  drawMode = drawMode === mode ? null : mode;
+  document.querySelectorAll("#menu-draw .menu-item[data-draw]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.draw === drawMode);
+  });
+  svg.classList.toggle("drawing", !!drawMode);
+}
+
+function buildDrawingShape(d, isDraft) {
+  const x1 = Math.min(d.x1, d.x2);
+  const y1 = Math.min(d.y1, d.y2);
+  const w = Math.abs(d.x2 - d.x1);
+  const h = Math.abs(d.y2 - d.y1);
+  let el;
+  if (d.type === "rect") {
+    el = document.createElementNS(SVG_NS, "rect");
+    el.setAttribute("x", x1);
+    el.setAttribute("y", y1);
+    el.setAttribute("width", w);
+    el.setAttribute("height", h);
+  } else if (d.type === "ellipse") {
+    el = document.createElementNS(SVG_NS, "ellipse");
+    el.setAttribute("cx", x1 + w / 2);
+    el.setAttribute("cy", y1 + h / 2);
+    el.setAttribute("rx", w / 2);
+    el.setAttribute("ry", h / 2);
+  } else if (d.type === "line") {
+    el = document.createElementNS(SVG_NS, "line");
+    el.setAttribute("x1", d.x1);
+    el.setAttribute("y1", d.y1);
+    el.setAttribute("x2", d.x2);
+    el.setAttribute("y2", d.y2);
+  } else {
+    el = document.createElementNS(SVG_NS, "text");
+    el.setAttribute("x", d.x1);
+    el.setAttribute("y", d.y1);
+    el.textContent = d.text || "";
+  }
+  el.setAttribute("class", `drawing-shape drawing-${d.type}${isDraft ? " drawing-draft" : ""}`);
+  if (!isDraft) {
+    el.dataset.drawId = d.id;
+    el.addEventListener("pointerdown", (evt) => {
+      evt.stopPropagation();
+      if (drawMode) return; // a draw tool is armed - don't hijack the click for selection
+      showDrawingActionsPopup(d.id, { x: evt.clientX, y: evt.clientY });
+    });
+  }
+  return el;
+}
+
+function renderDrawings() {
+  const layer = document.getElementById("drawings-layer");
+  layer.innerHTML = "";
+  for (const d of drawings) layer.appendChild(buildDrawingShape(d));
+  if (drawDraft) layer.appendChild(buildDrawingShape(drawDraft, true));
+}
+
+function showDrawingActionsPopup(id, anchor) {
+  const pop = document.createElement("div");
+  pop.className = "inline-dropdown";
+  const label = document.createElement("div");
+  label.className = "inline-dropdown-title";
+  label.textContent = "Drawing";
+  pop.appendChild(label);
+  const del = document.createElement("button");
+  del.className = "menu-item";
+  del.textContent = "Delete";
+  pop.appendChild(del);
+  document.body.appendChild(pop);
+  positionNear(pop, anchor);
+
+  function close() {
+    document.removeEventListener("mousedown", onOutside, true);
+    pop.remove();
+  }
+  function onOutside(evt) {
+    if (!pop.contains(evt.target)) close();
+  }
+  del.addEventListener("click", () => {
+    drawings = drawings.filter((d) => d.id !== id);
+    renderDrawings();
+    close();
+  });
+  setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+}
+
 function renderCanvas() {
   const linksLayer = document.getElementById("links-layer");
   const nodesLayer = document.getElementById("nodes-layer");
@@ -1362,7 +1523,10 @@ function renderSummary() {
     statusEl.textContent = statusText;
 
     li.append(dot, iconWrap, nameEl, statusEl);
-    li.addEventListener("click", () => selectNode(name));
+    li.addEventListener("click", () => {
+      const r = li.getBoundingClientRect();
+      selectNode(name, { x: r.left, y: r.top + r.height / 2 });
+    });
     list.appendChild(li);
   }
 }
@@ -1425,7 +1589,7 @@ function startNodeDrag(evt, name) {
   const node = nodesData[name];
   const p = svgPoint(evt);
   dragState = { name, offsetX: p.x - node.x, offsetY: p.y - node.y, moved: false };
-  selectNode(name);
+  selectNode(name, { x: evt.clientX, y: evt.clientY });
   window.addEventListener("pointermove", onNodeDrag);
   window.addEventListener("pointerup", endNodeDrag);
 }
@@ -1486,10 +1650,31 @@ svg.addEventListener("pointerdown", (evt) => {
     placeNodeAt(svgPoint(evt));
     return;
   }
+  if (drawMode) {
+    const p = svgPoint(evt);
+    if (drawMode === "text") {
+      showTextPrompt("Text to add:", { title: "Add Text" }).then((text) => {
+        if (!text) return;
+        drawings.push({ id: ++drawIdCounter, type: "text", x1: p.x, y1: p.y, text });
+        renderDrawings();
+      });
+      return;
+    }
+    drawDraft = { type: drawMode, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+    renderDrawings();
+    return;
+  }
   panState = { startX: evt.clientX, startY: evt.clientY, startVB: { ...viewBoxState } };
   svg.classList.add("panning");
 });
 window.addEventListener("pointermove", (evt) => {
+  if (drawDraft) {
+    const p = svgPoint(evt);
+    drawDraft.x2 = p.x;
+    drawDraft.y2 = p.y;
+    renderDrawings();
+    return;
+  }
   if (!panState) return;
   const dx = (evt.clientX - panState.startX) * (viewBoxState.w / svg.clientWidth);
   const dy = (evt.clientY - panState.startY) * (viewBoxState.h / svg.clientHeight);
@@ -1498,6 +1683,18 @@ window.addEventListener("pointermove", (evt) => {
   applyViewBox();
 });
 window.addEventListener("pointerup", () => {
+  if (drawDraft) {
+    // A plain click with barely any drag gets a sensible default size
+    // instead of a degenerate sliver - GNS3's own drawing tools do the
+    // same for a click-without-drag.
+    if (Math.abs(drawDraft.x2 - drawDraft.x1) < 4 && Math.abs(drawDraft.y2 - drawDraft.y1) < 4) {
+      drawDraft.x2 = drawDraft.x1 + 160;
+      drawDraft.y2 = drawDraft.y1 + 100;
+    }
+    drawings.push({ ...drawDraft, id: ++drawIdCounter });
+    drawDraft = null;
+    renderDrawings();
+  }
   if (panState) {
     panState = null;
     svg.classList.remove("panning");
@@ -1554,7 +1751,7 @@ function fitViewToNodes() {
   updateStatusBar(true);
 }
 
-function selectNode(name) {
+function selectNode(name, anchor) {
   selectedName = name;
   document.querySelectorAll(".node-shape").forEach((g) => {
     g.classList.toggle("selected", g.dataset.name === name);
@@ -1562,16 +1759,17 @@ function selectNode(name) {
   document.querySelectorAll(".summary-row").forEach((row) => {
     row.classList.toggle("selected", row.querySelector(".summary-name").textContent === name);
   });
-  showNodeActions(name);
+  showNodeActions(name, anchor);
 }
 
-function showNodeActions(name) {
+function showNodeActions(name, anchor) {
   const node = nodesData[name];
   const isVM = node.environment === "ON_ESXI";
   const live = node.live;
   const status = live && live.status ? live.status : "none";
 
-  document.getElementById("node-actions").hidden = false;
+  const popup = document.getElementById("node-actions");
+  popup.hidden = false;
   document.getElementById("selected-role").textContent = node.environment.replace("ON_", "");
   document.getElementById("selected-name").textContent = node.name;
   document.getElementById("selected-status").textContent = `(${node.role}, ${status})`;
@@ -1620,6 +1818,7 @@ function showNodeActions(name) {
   };
 
   showTab("console");
+  positionNear(popup, anchor);
 }
 
 async function callLifecycle(action, name) {
@@ -1783,7 +1982,9 @@ window.addEventListener("keydown", (evt) => {
   if (evt.key !== "Escape") return;
   if (linkMode) exitLinkMode();
   if (placementImage) clearPlacementMode();
+  if (drawMode) { drawDraft = null; renderDrawings(); setDrawMode(null); }
   closeAllMenus();
+  if (!document.getElementById("node-actions").hidden) deselectNode();
 });
 
 // Left device palette (GNS3 Desktop's own node-selection dock, adapted
@@ -1945,6 +2146,16 @@ async function initPalette() {
   await ensureTemplatesLoaded();
   renderPaletteList();
 }
+
+function setDevicePaletteVisible(visible) {
+  document.getElementById("device-palette").hidden = !visible;
+  document.getElementById("toggle-devices-btn").classList.toggle("active", visible);
+  if (!visible) clearPlacementMode();
+}
+document.getElementById("palette-close-btn").addEventListener("click", () => setDevicePaletteVisible(false));
+document.getElementById("toggle-devices-btn").addEventListener("click", () => {
+  setDevicePaletteVisible(document.getElementById("device-palette").hidden);
+});
 
 // Loading feedback for slow, live-deploying actions - shown next to
 // the menu bar's own buttons rather than a full-page overlay, since
@@ -2145,6 +2356,25 @@ document.querySelectorAll(".menu-btn").forEach((btn) => {
 });
 document.addEventListener("click", closeAllMenus);
 
+// The node-actions popup closes on a click anywhere else - except a
+// click that itself just opened/repositioned it (a node icon or a
+// Topology Summary row, both already handled by selectNode) or a
+// click on one of its own buttons (Start/Stop/etc. stay open
+// afterward, same as the old docked panel always did, so their
+// result is visible without re-selecting the node).
+function deselectNode() {
+  selectedName = null;
+  document.getElementById("node-actions").hidden = true;
+  document.querySelectorAll(".node-shape.selected").forEach((g) => g.classList.remove("selected"));
+  document.querySelectorAll(".summary-row.selected").forEach((r) => r.classList.remove("selected"));
+}
+document.addEventListener("click", (evt) => {
+  const popup = document.getElementById("node-actions");
+  if (popup.hidden || popup.contains(evt.target)) return;
+  if (evt.target.closest(".node-shape") || evt.target.closest(".summary-row")) return;
+  deselectNode();
+});
+
 // Settings has live fields (a number input, checkboxes) rather than
 // one-shot commands - unlike File/View/Info's own menu-items, clicking
 // inside it shouldn't immediately close it (the generic
@@ -2162,6 +2392,17 @@ document.getElementById("settings-show-grid").addEventListener("change", (evt) =
 
 document.getElementById("settings-snap-grid").addEventListener("change", (evt) => {
   snapToGridEnabled = evt.target.checked;
+});
+
+document.querySelectorAll("#menu-draw .menu-item[data-draw]").forEach((btn) => {
+  btn.addEventListener("click", () => setDrawMode(btn.dataset.draw));
+});
+document.getElementById("draw-clear-btn").addEventListener("click", async () => {
+  if (!drawings.length) return;
+  if (await showConfirm("Clear every drawing from the canvas?", { danger: true, confirmLabel: "Clear" })) {
+    drawings = [];
+    renderDrawings();
+  }
 });
 
 function showTab(name) {
@@ -2252,6 +2493,37 @@ document.getElementById("push-btn").addEventListener("click", async () => {
   handle.addEventListener("pointerdown", (evt) => {
     startY = evt.clientY;
     startHeight = topPanel.getBoundingClientRect().height;
+    handle.classList.add("dragging");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  });
+})();
+
+// Drag #right-panel-resize-handle left/right to resize the whole right
+// panel (Topology Summary + Console/Screen together) - #push-area
+// shares the same --right-panel-width custom property since it slots
+// into the exact same spot when the View menu switches to it.
+(function setupRightPanelResize() {
+  const handle = document.getElementById("right-panel-resize-handle");
+  const rightPanel = document.getElementById("right-panel");
+  let startX = 0;
+  let startWidth = 0;
+
+  function onMove(evt) {
+    const dx = startX - evt.clientX; // dragging left (toward canvas) widens the right panel
+    const min = 220;
+    const max = window.innerWidth - 420;
+    const newWidth = Math.max(min, Math.min(startWidth + dx, max));
+    document.documentElement.style.setProperty("--right-panel-width", `${newWidth}px`);
+  }
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    handle.classList.remove("dragging");
+  }
+  handle.addEventListener("pointerdown", (evt) => {
+    startX = evt.clientX;
+    startWidth = rightPanel.getBoundingClientRect().width;
     handle.classList.add("dragging");
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
