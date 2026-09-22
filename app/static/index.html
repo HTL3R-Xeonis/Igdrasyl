@@ -30,7 +30,6 @@
     --canvas-bg: #ffffff;
     --canvas-grid-dot: #dde1e4;
     --canvas-text: #1f2328;
-    --canvas-status-off-stroke: #9aa0a6;
     --canvas-status-unknown-stroke: #c7cbd1;
     --canvas-link: #9aa2a8;
   }
@@ -60,6 +59,28 @@
     gap: 2px;
   }
   #menubar-menus { display: flex; align-items: center; height: 100%; }
+  /* Loading feedback for slow, live-deploying actions (import project,
+     add node/VM) - shown right next to the menus, not a full-page
+     overlay, since the rest of the app stays usable while these run. */
+  #menubar-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  #menubar-status:empty { display: none; }
+  .menubar-spinner {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: menubar-spin 0.8s linear infinite;
+  }
+  @keyframes menubar-spin { to { transform: rotate(360deg); } }
   .menu { position: relative; height: 100%; }
   .menu-btn {
     height: 100%;
@@ -222,7 +243,8 @@
   .node-select-box { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: 0; }
   .node-shape.selected .node-select-box { opacity: 1; }
   .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-bg); stroke-width: 1.5; }
-  .status-dot.status-off { fill: var(--canvas-bg); stroke: var(--canvas-status-off-stroke); stroke-width: 1.5; }
+  .status-dot.status-off { fill: var(--bad); stroke: var(--canvas-bg); stroke-width: 1.5; }
+  .status-dot.status-starting { fill: var(--warn); stroke: var(--canvas-bg); stroke-width: 1.5; }
   .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
   .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
   .link-line.link-up { stroke: var(--ok); }
@@ -315,7 +337,9 @@
   .summary-row.selected { background: var(--panel-2); }
   .summary-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .summary-dot.status-ok { background: var(--ok); }
-  .summary-dot.status-off { background: transparent; border: 1.5px solid var(--dim); }
+  .summary-dot.status-off { background: var(--bad); }
+  .summary-dot.status-starting { background: var(--warn); }
+  .summary-dot.status-unknown { background: transparent; border: 1.5px solid var(--dim); }
   .summary-icon { display: flex; flex-shrink: 0; }
   .summary-icon svg { display: block; }
   .summary-name { font-weight: 500; }
@@ -538,7 +562,7 @@
     </div>
   </nav>
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
-  <span id="import-project-status" style="font-size: 12px; color: var(--dim);"></span>
+  <div id="menubar-status"></div>
 </header>
 <div id="warning-banner"></div>
 <main>
@@ -951,6 +975,19 @@ function isNodeRunning(node) {
   return status === "started" || status === "poweredOn";
 }
 
+// Shared by the canvas node dot and the Topology Summary list's own
+// dot, so both always agree: red once genuinely stopped, yellow while
+// GNS3 reports a node mid-boot ("starting" - some GNS3 node types,
+// e.g. qemu-backed ones, go through this transition instead of
+// stopped -> started in one jump), green once running, and the
+// original hollow/dim look only for "no live data at all" (a node
+// this app can't currently get a real status for).
+function statusClassFor(node) {
+  if (!node.live) return "status-unknown";
+  if (node.live.status === "starting") return "status-starting";
+  return isNodeRunning(node) ? "status-ok" : "status-off";
+}
+
 function roleForIcon(node) {
   return node.environment === "ON_ESXI" ? "VM" : node.role;
 }
@@ -1085,9 +1122,6 @@ function setLineEndpoints(line, a, b) {
 }
 
 function buildNodeShape(node) {
-  const hasLive = !!node.live;
-  const running = isNodeRunning(node);
-
   const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("class", `node-shape${node.name === selectedName ? " selected" : ""}`);
   g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
@@ -1111,8 +1145,7 @@ function buildNodeShape(node) {
   g.appendChild(icon);
 
   const statusDot = document.createElementNS(SVG_NS, "circle");
-  const statusClass = running ? "status-ok" : (hasLive ? "status-off" : "status-unknown");
-  statusDot.setAttribute("class", `status-dot ${statusClass}`);
+  statusDot.setAttribute("class", `status-dot ${statusClassFor(node)}`);
   statusDot.setAttribute("cx", iconX + NODE_ICON_SIZE - 2);
   statusDot.setAttribute("cy", iconY + NODE_ICON_SIZE - 2);
   statusDot.setAttribute("r", 5);
@@ -1144,14 +1177,13 @@ function renderSummary() {
 
   for (const name of names) {
     const node = nodesData[name];
-    const running = isNodeRunning(node);
     const statusText = node.live && node.live.status ? node.live.status : "no live data";
 
     const li = document.createElement("li");
     li.className = `summary-row${name === selectedName ? " selected" : ""}`;
 
     const dot = document.createElement("span");
-    dot.className = `summary-dot ${running ? "status-ok" : "status-off"}`;
+    dot.className = `summary-dot ${statusClassFor(node)}`;
 
     const iconWrap = document.createElement("span");
     iconWrap.className = "summary-icon";
@@ -1670,6 +1702,7 @@ async function placeNodeAt(point) {
   )) {
     return;
   }
+  setMenubarBusy(`Adding "${name}" (deploying live, may take a while)…`);
   try {
     const resp = await fetch("/nodes", {
       method: "POST",
@@ -1677,6 +1710,7 @@ async function placeNodeAt(point) {
       body: JSON.stringify({ name, role, image }),
     });
     if (!resp.ok) {
+      clearMenubarStatus();
       await showAlert(`Failed to add node: ${(await resp.json()).detail || resp.status}`);
       return;
     }
@@ -1687,7 +1721,9 @@ async function placeNodeAt(point) {
     });
     await loadCanvas();
     fitViewToNodes();
+    setMenubarMessage(`Added "${name}".`);
   } catch (err) {
+    clearMenubarStatus();
     await showAlert(`Failed to add node: ${err}`);
   }
 }
@@ -1707,6 +1743,27 @@ async function initPalette() {
   renderPaletteList();
 }
 
+// Loading feedback for slow, live-deploying actions - shown next to
+// the menu bar's own buttons rather than a full-page overlay, since
+// everything else (canvas, palette, topology list) stays usable while
+// an import or add-node deploy is running in the background.
+function setMenubarBusy(text) {
+  const el = document.getElementById("menubar-status");
+  el.innerHTML = "";
+  const spinner = document.createElement("span");
+  spinner.className = "menubar-spinner";
+  const label = document.createElement("span");
+  label.textContent = text;
+  el.appendChild(spinner);
+  el.appendChild(label);
+}
+function setMenubarMessage(text) {
+  document.getElementById("menubar-status").textContent = text;
+}
+function clearMenubarStatus() {
+  document.getElementById("menubar-status").textContent = "";
+}
+
 document.getElementById("import-project-btn").addEventListener("click", () => {
   document.getElementById("import-project-input").click();
 });
@@ -1717,7 +1774,6 @@ document.getElementById("import-project-input").addEventListener("change", async
   input.value = ""; // allow re-selecting the same file next time
   if (!file) return;
 
-  const statusEl = document.getElementById("import-project-status");
   if (!await showConfirm(
     `Import "${file.name}"?\n\nThis deploys the bundle's topology live, ` +
     `incrementally - it creates whatever's missing and reuses anything ` +
@@ -1729,13 +1785,13 @@ document.getElementById("import-project-input").addEventListener("change", async
     return;
   }
 
-  statusEl.textContent = "Importing (deploying live, may take a while)…";
+  setMenubarBusy("Importing project (deploying live, may take a while)…");
   try {
     const formData = new FormData();
     formData.append("file", file);
     const resp = await fetch("/project/import", { method: "POST", body: formData });
     if (!resp.ok) {
-      statusEl.textContent = `Import failed: ${(await resp.json()).detail || resp.status}`;
+      setMenubarMessage(`Import failed: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     const result = await resp.json();
@@ -1748,10 +1804,10 @@ document.getElementById("import-project-input").addEventListener("change", async
     )) {
       document.getElementById("push-input").value = JSON.stringify(result.configs, null, 2);
     }
-    statusEl.textContent = `Imported "${result.manifest.project_name || file.name}".`;
+    setMenubarMessage(`Imported "${result.manifest.project_name || file.name}".`);
     fitViewToNodes();
   } catch (err) {
-    statusEl.textContent = `Import failed: ${err}`;
+    setMenubarMessage(`Import failed: ${err}`);
   }
 });
 
