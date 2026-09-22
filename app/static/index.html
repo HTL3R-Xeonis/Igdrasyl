@@ -127,6 +127,35 @@
     color: var(--accent);
   }
   .menu-info-line { padding: 7px 10px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .menu-settings-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .menu-settings-row input[type="number"] {
+    width: 55px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+  .menu-settings-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .menu-settings-checkbox:hover { background: var(--panel-2); }
   #warning-banner {
     padding: 8px 20px;
     background: #3a2c14;
@@ -304,11 +333,57 @@
   }
   #topology-summary {
     flex-shrink: 0;
-    max-height: 38%;
+    height: 260px;
     display: flex;
     flex-direction: column;
     border-bottom: 1px solid var(--border);
     min-height: 0;
+    overflow: hidden;
+  }
+  /* Drag up/down to reallocate space between Topology Summary and the
+     Console/Screen area below it - #topology-summary gets an explicit
+     pixel height (dragged), #console-area (flex: 1) just takes
+     whatever's left. */
+  #panel-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: row-resize;
+    background: var(--border);
+  }
+  #panel-resize-handle:hover, #panel-resize-handle.dragging { background: var(--accent); }
+  #console-area-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+  }
+  #popout-btn {
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: normal;
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+  #popout-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #console-area-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--dim);
+    font-size: 13px;
+    text-align: center;
   }
   #topology-summary h2 {
     font-size: 11px;
@@ -525,7 +600,7 @@
   #modal-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
   #modal-message { margin: 0 0 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.4; }
   #modal-field-wrap { margin-bottom: 14px; }
-  #modal-select, #modal-input {
+  #modal-input {
     width: 100%;
     background: var(--bg);
     color: var(--text);
@@ -535,6 +610,28 @@
     font-size: 13px;
   }
   #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  /* A real dropdown, not a popup - no dark overlay, just a small
+     floating box positioned next to whatever was clicked. */
+  .inline-dropdown {
+    position: fixed;
+    z-index: 200;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 8px;
+    min-width: 170px;
+  }
+  .inline-dropdown-title { font-size: 11px; color: var(--dim); margin-bottom: 6px; white-space: nowrap; }
+  .inline-dropdown-select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -558,6 +655,24 @@
       <button class="menu-btn" data-menu="info">Info</button>
       <div class="menu-dropdown" id="menu-info" hidden>
         <div class="menu-info-line" id="project-meta"></div>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="settings">Settings</button>
+      <div class="menu-dropdown" id="menu-settings" hidden>
+        <div class="menu-settings-row">
+          <label for="settings-zoom-input">Zoom</label>
+          <input type="number" id="settings-zoom-input" min="10" max="500" step="5">
+          <span>%</span>
+        </div>
+        <label class="menu-settings-checkbox">
+          <input type="checkbox" id="settings-show-grid" checked>
+          Show grid
+        </label>
+        <label class="menu-settings-checkbox">
+          <input type="checkbox" id="settings-snap-grid">
+          Snap to grid
+        </label>
       </div>
     </div>
   </nav>
@@ -604,7 +719,12 @@
       <h2>Topology Summary</h2>
       <ul id="topology-summary-list"></ul>
     </div>
+    <div id="panel-resize-handle" title="Drag to resize"></div>
     <div id="console-area">
+      <div id="console-area-header">
+        <span>Console / Screen</span>
+        <button id="popout-btn" title="Pop this panel out into its own window">⧉ Pop out</button>
+      </div>
       <div id="node-actions" hidden>
         <span class="env-tag" id="selected-role"></span>
         <strong id="selected-name"></strong>
@@ -649,7 +769,6 @@
     <h3 id="modal-title"></h3>
     <p id="modal-message"></p>
     <div id="modal-field-wrap" hidden>
-      <select id="modal-select" hidden></select>
       <input type="text" id="modal-input" hidden>
     </div>
     <div id="modal-actions">
@@ -782,7 +901,6 @@ function openModal(config) {
     const overlay = document.getElementById("modal-overlay");
     const titleEl = document.getElementById("modal-title");
     const messageEl = document.getElementById("modal-message");
-    const selectEl = document.getElementById("modal-select");
     const inputEl = document.getElementById("modal-input");
     const fieldWrap = document.getElementById("modal-field-wrap");
     const confirmBtn = document.getElementById("modal-confirm-btn");
@@ -790,31 +908,18 @@ function openModal(config) {
 
     const isAlert = config.mode === "alert";
     const isConfirm = config.mode === "confirm";
-    const isSelect = config.mode === "select";
     const isText = config.mode === "text";
 
     titleEl.textContent = config.title || "";
     messageEl.textContent = config.message || "";
-    selectEl.hidden = true;
     inputEl.hidden = true;
-    selectEl.innerHTML = "";
-    fieldWrap.hidden = !(isSelect || isText);
+    fieldWrap.hidden = !isText;
     cancelBtn.hidden = isAlert;
     confirmBtn.textContent = config.confirmLabel || (isConfirm ? "Confirm" : "OK");
     confirmBtn.classList.toggle("danger", !!config.danger);
     confirmBtn.classList.toggle("primary", !config.danger);
 
-    if (isSelect) {
-      selectEl.hidden = false;
-      for (const opt of config.options) {
-        const o = document.createElement("option");
-        o.value = opt.value;
-        o.textContent = opt.label;
-        if (opt.disabled) o.disabled = true;
-        selectEl.appendChild(o);
-      }
-      if (config.defaultValue !== undefined) selectEl.value = config.defaultValue;
-    } else if (isText) {
+    if (isText) {
       inputEl.hidden = false;
       inputEl.value = config.defaultValue || "";
       inputEl.placeholder = config.placeholder || "";
@@ -831,7 +936,6 @@ function openModal(config) {
     function doConfirm() {
       if (isAlert) return finish(undefined);
       if (isConfirm) return finish(true);
-      if (isSelect) return finish(selectEl.value);
       return finish(inputEl.value.trim() || null);
     }
     function doCancel() {
@@ -841,7 +945,7 @@ function openModal(config) {
     }
     function onKeydown(evt) {
       if (evt.key === "Escape") { evt.preventDefault(); doCancel(); }
-      else if (evt.key === "Enter" && document.activeElement !== selectEl) { evt.preventDefault(); doConfirm(); }
+      else if (evt.key === "Enter") { evt.preventDefault(); doConfirm(); }
     }
 
     confirmBtn.onclick = doConfirm;
@@ -851,7 +955,7 @@ function openModal(config) {
 
     overlay.hidden = false;
     setTimeout(() => {
-      const toFocus = isSelect ? selectEl : isText ? inputEl : confirmBtn;
+      const toFocus = isText ? inputEl : confirmBtn;
       toFocus.focus();
       if (isText) inputEl.select();
     }, 0);
@@ -870,15 +974,6 @@ function showConfirm(message, opts = {}) {
     confirmLabel: opts.confirmLabel,
   });
 }
-function showSelectPrompt(message, options, opts = {}) {
-  return openModal({
-    mode: "select",
-    title: opts.title || "Select",
-    message,
-    options,
-    defaultValue: opts.defaultValue,
-  });
-}
 function showTextPrompt(message, opts = {}) {
   return openModal({
     mode: "text",
@@ -889,9 +984,77 @@ function showTextPrompt(message, opts = {}) {
   });
 }
 
+// A real dropdown, not a popup dialog: a small floating box (no dark
+// overlay) positioned near opts.anchor ({x, y} in viewport coords),
+// holding a native <select> that resolves the moment an option is
+// picked - no separate OK button needed. Escape or a click outside it
+// cancels (resolves null). Used for interface-picking during Add Link,
+// which used to be a full modal (a <select> for GNS3 nodes with real
+// live ports, or a blind free-text field for ones without).
+function showInlineDropdown(options, opts = {}) {
+  return new Promise((resolve) => {
+    const pop = document.createElement("div");
+    pop.className = "inline-dropdown";
+
+    if (opts.title) {
+      const label = document.createElement("div");
+      label.className = "inline-dropdown-title";
+      label.textContent = opts.title;
+      pop.appendChild(label);
+    }
+
+    const select = document.createElement("select");
+    select.className = "inline-dropdown-select";
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.disabled) o.disabled = true;
+      select.appendChild(o);
+    }
+    if (opts.defaultValue !== undefined) select.value = opts.defaultValue;
+    pop.appendChild(select);
+
+    document.body.appendChild(pop);
+
+    const anchor = opts.anchor || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    const rect = pop.getBoundingClientRect();
+    const left = Math.max(8, Math.min(anchor.x + 12, window.innerWidth - rect.width - 12));
+    const top = Math.max(8, Math.min(anchor.y + 12, window.innerHeight - rect.height - 12));
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+
+    function finish(result) {
+      document.removeEventListener("mousedown", onOutside, true);
+      document.removeEventListener("keydown", onKeydown, true);
+      pop.remove();
+      resolve(result);
+    }
+    function onOutside(evt) {
+      if (!pop.contains(evt.target)) finish(null);
+    }
+    function onKeydown(evt) {
+      if (evt.key === "Escape") { evt.preventDefault(); finish(null); }
+    }
+    select.addEventListener("change", () => finish(select.value));
+    // Deferred a tick - the same click that opened this dropdown (a
+    // node click in link mode) is still bubbling as a mousedown right
+    // now, and would otherwise immediately look like an "outside
+    // click" and close what it just opened.
+    setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+    document.addEventListener("keydown", onKeydown, true);
+    select.focus();
+  });
+}
+
 const NODE_W = 70;
 const NODE_H = 54;
 const NODE_ICON_SIZE = 32;
+const GRID_SIZE = 40; // matches #grid-pattern's own width/height below
+let snapToGridEnabled = false;
+function snapToGrid(value) {
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
 // GNS3's own real "classic" icon set (GPL-2.0, by the GNS3 project -
 // vendored unmodified from the live GNS3 controller's own
 // /v2/symbols/:/symbols/classic/<name>.svg/raw, the exact same files
@@ -909,6 +1072,7 @@ let nodesData = {};      // name -> {name, role, environment, interfaces, live, 
 let selectedName = null;
 let linkMode = false;
 let linkFirstNode = null;
+let linkFirstAnchor = null; // {x, y} viewport coords of node1's click, for the interface dropdown's position
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;
 let placementRole = null;   // armed device's resolved role, or null if nothing armed
@@ -1210,8 +1374,10 @@ function updateStatusBar(connectionOk) {
   text.textContent = connectionOk
     ? `Connected · ${nodes.length} node${nodes.length === 1 ? "" : "s"}, ${running} running`
     : "Disconnected - failed to reach the server";
-  document.getElementById("zoom-readout").textContent =
-    `${Math.round((1600 / viewBoxState.w) * 100)}%`;
+  const zoomPercent = Math.round((1600 / viewBoxState.w) * 100);
+  document.getElementById("zoom-readout").textContent = `${zoomPercent}%`;
+  const zoomInput = document.getElementById("settings-zoom-input");
+  if (document.activeElement !== zoomInput) zoomInput.value = zoomPercent;
 }
 
 const svg = document.getElementById("canvas");
@@ -1230,6 +1396,17 @@ function zoomBy(scale, center) {
   updateStatusBar(true);
 }
 
+// Settings menu's own zoom field - sets the zoom to an exact percent
+// (matching the same 1600-wide baseline updateStatusBar's own readout
+// uses) instead of a relative +/-/scroll step, centered on whatever's
+// currently in view.
+function setZoomPercent(percent) {
+  if (!isFinite(percent) || percent <= 0) return;
+  const targetWidth = 1600 / (percent / 100);
+  const scale = targetWidth / viewBoxState.w;
+  zoomBy(scale, { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 });
+}
+
 function svgPoint(evt) {
   const pt = svg.createSVGPoint();
   pt.x = evt.clientX;
@@ -1242,7 +1419,7 @@ let dragState = null;
 function startNodeDrag(evt, name) {
   evt.stopPropagation();
   if (linkMode) {
-    handleLinkModeClick(name);
+    handleLinkModeClick(name, { x: evt.clientX, y: evt.clientY });
     return;
   }
   const node = nodesData[name];
@@ -1260,6 +1437,10 @@ function onNodeDrag(evt) {
   const node = nodesData[dragState.name];
   node.x = p.x - dragState.offsetX;
   node.y = p.y - dragState.offsetY;
+  if (snapToGridEnabled) {
+    node.x = snapToGrid(node.x);
+    node.y = snapToGrid(node.y);
+  }
 
   const g = document.querySelector(`.node-shape[data-name="${dragState.name}"]`);
   g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
@@ -1477,46 +1658,63 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
   }
 });
 
-async function promptForInterface(nodeName) {
+async function promptForInterface(nodeName, anchor) {
   let ports = null;
   try {
     const resp = await fetch(`/nodes/${encodeURIComponent(nodeName)}/ports`);
     if (resp.ok) ports = await resp.json();
   } catch (err) {
-    // fall through to the plain text field below
+    // fall through to the topology-known-interfaces fallback below
   }
 
-  if (!ports) {
-    return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
+  let options, defaultValue;
+  if (ports) {
+    const free = ports.filter((p) => !p.in_use);
+    options = ports.map((p) => ({
+      value: p.name,
+      label: `${p.name}${p.in_use ? " (in use)" : ""}`,
+      disabled: p.in_use,
+    }));
+    defaultValue = free.length ? free[0].name : undefined;
+  } else {
+    // No live port enumeration for this node (e.g. an ESXi VM, which
+    // has no GNS3-side port list) - fall back to the interface names
+    // already known from the topology file itself instead of asking
+    // the operator to type one blind.
+    const names = Object.keys(nodesData[nodeName]?.interfaces || {});
+    if (!names.length) {
+      return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
+    }
+    const inUse = (n) => nodesData[nodeName].interfaces[n];
+    const free = names.filter((n) => !inUse(n));
+    options = names.map((n) => ({
+      value: n,
+      label: `${n}${inUse(n) ? " (in use)" : ""}`,
+      disabled: !!inUse(n),
+    }));
+    defaultValue = free.length ? free[0] : undefined;
   }
-
-  const free = ports.filter((p) => !p.in_use);
-  const options = ports.map((p) => ({
-    value: p.name,
-    label: `${p.name}${p.in_use ? " (in use)" : ""}`,
-    disabled: p.in_use,
-  }));
-  return showSelectPrompt(`Interface on ${nodeName}:`, options, {
-    title: "Choose interface",
-    defaultValue: free.length ? free[0].name : undefined,
-  });
+  return showInlineDropdown(options, { title: `Interface on ${nodeName}`, anchor, defaultValue });
 }
 
-async function handleLinkModeClick(name) {
+async function handleLinkModeClick(name, anchor) {
   if (!linkFirstNode) {
     linkFirstNode = name;
+    linkFirstAnchor = anchor;
     document.getElementById("link-mode-hint").textContent =
       `Click the node to connect ${name} to (Esc to cancel)`;
     return;
   }
   const node1 = linkFirstNode;
+  const anchor1 = linkFirstAnchor;
   const node2 = name;
   linkFirstNode = null;
+  linkFirstAnchor = null;
   if (node1 === node2) return;
 
-  const if1 = await promptForInterface(node1);
+  const if1 = await promptForInterface(node1, anchor1);
   if (!if1) { exitLinkMode(); return; }
-  const if2 = await promptForInterface(node2);
+  const if2 = await promptForInterface(node2, anchor);
   if (!if2) { exitLinkMode(); return; }
   if (!await showConfirm(
     `Connect ${node1}:${if1} <-> ${node2}:${if2}?\n\nThis briefly disrupts every ` +
@@ -1566,6 +1764,7 @@ async function deleteLink(node1, node2) {
 function exitLinkMode() {
   linkMode = false;
   linkFirstNode = null;
+  linkFirstAnchor = null;
   document.getElementById("link-mode-btn").classList.remove("active");
   document.getElementById("link-mode-hint").hidden = true;
 }
@@ -1573,6 +1772,7 @@ function exitLinkMode() {
 document.getElementById("link-mode-btn").addEventListener("click", () => {
   linkMode = !linkMode;
   linkFirstNode = null;
+  linkFirstAnchor = null;
   document.getElementById("link-mode-btn").classList.toggle("active", linkMode);
   const hint = document.getElementById("link-mode-hint");
   hint.hidden = !linkMode;
@@ -1689,6 +1889,9 @@ async function placeNodeAt(point) {
   const role = placementRole;
   const image = placementImage;
   clearPlacementMode();
+  if (snapToGridEnabled) {
+    point = { x: snapToGrid(point.x), y: snapToGrid(point.y) };
+  }
   const name = await showTextPrompt(`Name for the new ${image} node:`, {
     title: "Add Node",
     defaultValue: suggestNodeName(role),
@@ -1942,6 +2145,25 @@ document.querySelectorAll(".menu-btn").forEach((btn) => {
 });
 document.addEventListener("click", closeAllMenus);
 
+// Settings has live fields (a number input, checkboxes) rather than
+// one-shot commands - unlike File/View/Info's own menu-items, clicking
+// inside it shouldn't immediately close it (the generic
+// document-click-closes-everything listener above would otherwise
+// close it after every single checkbox toggle).
+document.getElementById("menu-settings").addEventListener("click", (evt) => evt.stopPropagation());
+
+document.getElementById("settings-zoom-input").addEventListener("change", (evt) => {
+  setZoomPercent(parseFloat(evt.target.value));
+});
+
+document.getElementById("settings-show-grid").addEventListener("change", (evt) => {
+  document.querySelector(".grid-bg").style.display = evt.target.checked ? "" : "none";
+});
+
+document.getElementById("settings-snap-grid").addEventListener("change", (evt) => {
+  snapToGridEnabled = evt.target.checked;
+});
+
 function showTab(name) {
   document.getElementById("right-panel").hidden = name !== "console";
   document.getElementById("push-area").hidden = name !== "push";
@@ -2006,6 +2228,68 @@ document.getElementById("push-btn").addEventListener("click", async () => {
     }
     resultsEl.appendChild(box);
   }
+});
+
+// Drag #panel-resize-handle up/down to reallocate space between
+// Topology Summary and the Console/Screen area below it.
+(function setupPanelResize() {
+  const handle = document.getElementById("panel-resize-handle");
+  const topPanel = document.getElementById("topology-summary");
+  let startY = 0;
+  let startHeight = 0;
+
+  function onMove(evt) {
+    const dy = evt.clientY - startY;
+    const min = 80;
+    const max = document.getElementById("right-panel").clientHeight - 120;
+    topPanel.style.height = `${Math.max(min, Math.min(startHeight + dy, max))}px`;
+  }
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    handle.classList.remove("dragging");
+  }
+  handle.addEventListener("pointerdown", (evt) => {
+    startY = evt.clientY;
+    startHeight = topPanel.getBoundingClientRect().height;
+    handle.classList.add("dragging");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  });
+})();
+
+// Pop the whole Console/Screen area out into its own real browser
+// window - moves the actual live DOM subtree (not a copy), so every
+// open xterm.js terminal/VNC screen and its WebSocket keeps running
+// exactly as it was, uninterrupted. Moves it back into the right
+// panel automatically if that window is closed.
+let poppedOutWindow = null;
+document.getElementById("popout-btn").addEventListener("click", () => {
+  if (poppedOutWindow && !poppedOutWindow.closed) {
+    poppedOutWindow.focus();
+    return;
+  }
+  const consoleArea = document.getElementById("console-area");
+  const win = window.open("", "_blank", "width=900,height=650");
+  if (!win) {
+    showAlert("Couldn't open a new window - check your browser's popup blocker.");
+    return;
+  }
+  win.document.title = "TopologyOperator - Console / Screen";
+  win.document.head.innerHTML = document.head.innerHTML;
+  win.document.body.appendChild(consoleArea);
+  poppedOutWindow = win;
+
+  const placeholder = document.createElement("div");
+  placeholder.id = "console-area-placeholder";
+  placeholder.textContent = "Console / Screen is popped out into its own window.";
+  document.getElementById("right-panel").appendChild(placeholder);
+
+  win.addEventListener("beforeunload", () => {
+    document.getElementById("console-area-placeholder")?.remove();
+    document.getElementById("right-panel").appendChild(consoleArea);
+    poppedOutWindow = null;
+  });
 });
 
 loadCanvas().catch((err) => {
