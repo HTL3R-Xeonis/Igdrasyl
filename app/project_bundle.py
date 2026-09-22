@@ -56,6 +56,7 @@ def build_export(app: FastAPI) -> bytes:
         "exported_at": datetime.now(timezone.utc).isoformat(),
     }
     configs = getattr(app.state, "last_config_push", {})
+    drawings = getattr(app.state, "last_drawings", [])
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -63,6 +64,7 @@ def build_export(app: FastAPI) -> bytes:
         zf.writestr("topology.yaml", topology_yaml)
         zf.writestr("settings.yml", yaml.safe_dump(settings_snapshot, sort_keys=False))
         zf.writestr("configs.json", json.dumps({"devices": configs}, indent=2))
+        zf.writestr("drawings.json", json.dumps({"drawings": drawings}, indent=2))
     return buf.getvalue()
 
 
@@ -111,8 +113,18 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise BundleValidationError(f"configs.json isn't valid JSON: {exc}")
 
+    # Optional member - bundles exported before this existed won't have
+    # it, and that's fine, not a validation failure.
+    drawings = []
+    if "drawings.json" in zf.namelist():
+        try:
+            drawings = json.loads(zf.read("drawings.json")).get("drawings", [])
+        except json.JSONDecodeError as exc:
+            raise BundleValidationError(f"drawings.json isn't valid JSON: {exc}")
+
     backend = get_or_create_backend(app)
     backend.deploy_topology(Settings.TOPOLOGY_FILE, topology_yaml_text)
     app.state.graph = load_graph()
+    app.state.last_drawings = drawings
 
-    return {"manifest": manifest, "configs": configs.get("devices", {})}
+    return {"manifest": manifest, "configs": configs.get("devices", {}), "drawings": drawings}

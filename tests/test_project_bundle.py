@@ -23,7 +23,7 @@ from app import project_bundle
 _FIXTURE_TOPOLOGY = Path(__file__).parent / "fixtures" / "topology.yaml"
 
 
-def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=()) -> bytes:
+def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=(), drawings=None) -> bytes:
     manifest = {"format_version": format_version, "project_name": "test", "exported_at": "now"}
     settings = {
         "esxi": {
@@ -38,6 +38,11 @@ def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=()) 
         "settings.yml": yaml.safe_dump(settings),
         "configs.json": json.dumps({"devices": {"R1": ["show version"]}}),
     }
+    # drawings.json is deliberately optional - a bundle exported before
+    # this existed won't have it, and that's not a validation failure
+    # (see apply_import) - only add it here when a test asks for one.
+    if drawings is not None:
+        members["drawings.json"] = json.dumps({"drawings": drawings})
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, content in members.items():
@@ -58,11 +63,14 @@ class _FakeBackend:
 
 def test_build_export_produces_expected_zip_members(app_state, temp_topology_file):
     app_state.last_config_push = {"R1": ["show version"]}
+    app_state.last_drawings = [{"id": 1, "type": "text", "x1": 10, "y1": 20, "text": "hi"}]
 
     data = project_bundle.build_export(_app())
 
     zf = zipfile.ZipFile(io.BytesIO(data))
-    assert set(zf.namelist()) == {"manifest.json", "topology.yaml", "settings.yml", "configs.json"}
+    assert set(zf.namelist()) == {
+        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json",
+    }
 
     manifest = json.loads(zf.read("manifest.json"))
     assert manifest["format_version"] == 1
@@ -76,6 +84,9 @@ def test_build_export_produces_expected_zip_members(app_state, temp_topology_fil
     settings = yaml.safe_load(zf.read("settings.yml"))
     assert settings["esxi"]["ip"] == Settings.ESXI.IP
     assert settings["esxi"]["gns3_vm_name"] == Settings.ESXI.GNS3_VM_NAME
+
+    drawings = json.loads(zf.read("drawings.json"))
+    assert drawings == {"drawings": app_state.last_drawings}
 
 
 def _app():
@@ -96,6 +107,21 @@ def test_apply_import_happy_path_deploys_and_reloads_graph(app_state, temp_topol
     assert result["manifest"]["format_version"] == 1
     assert result["configs"] == {"R1": ["show version"]}
     assert "R1" in app_state.graph.nodes
+    # No drawings.json in this bundle (pre-existing helper default) -
+    # backward-compatible with bundles exported before drawings existed.
+    assert result["drawings"] == []
+    assert app_state.last_drawings == []
+
+
+def test_apply_import_restores_bundled_drawings(app_state, temp_topology_file):
+    app_state.topology_backend = _FakeBackend()
+    bundled_drawings = [{"id": 1, "type": "text", "x1": 5, "y1": 5, "text": "hi"}]
+    bundle = _make_bundle(drawings=bundled_drawings)
+
+    result = project_bundle.apply_import(_app(), bundle)
+
+    assert result["drawings"] == bundled_drawings
+    assert app_state.last_drawings == bundled_drawings
 
 
 def test_apply_import_rejects_mismatched_esxi_target(app_state, temp_topology_file):

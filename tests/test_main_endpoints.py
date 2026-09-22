@@ -118,6 +118,23 @@ def test_layout_post_rejects_unknown_node(client, app_state, tmp_path, monkeypat
     assert resp.status_code == 404
 
 
+def test_drawings_get_reflects_current_state(client, app_state):
+    app_state.last_drawings = []
+    resp = client.get("/drawings")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_drawings_post_then_get_round_trips(client, app_state):
+    drawing = {"id": 1, "type": "rect", "x1": 0, "y1": 0, "x2": 100, "y2": 50, "stroke": "#7cb342"}
+    resp = client.post("/drawings", json={"drawings": [drawing]})
+    assert resp.status_code == 200
+
+    resp = client.get("/drawings")
+    assert resp.json() == [drawing]
+    assert app_state.last_drawings == [drawing]
+
+
 def _valid_bundle(topology_yaml_text: str) -> bytes:
     manifest = {"format_version": 1, "project_name": "test", "exported_at": "now"}
     settings = {
@@ -139,7 +156,7 @@ def test_export_project_returns_zip_with_attachment_header(client, app_state, te
     assert resp.headers["content-type"] == "application/zip"
     assert ".topoproj" in resp.headers["content-disposition"]
     assert set(zipfile.ZipFile(io.BytesIO(resp.content)).namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json",
+        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json",
     }
 
 

@@ -63,6 +63,13 @@ async def lifespan(app: FastAPI):
     # GET /project/export includes this as the bundle's configs.json,
     # since nothing else persists config-push data anywhere.
     app.state.last_config_push = {}
+    # Canvas drawings (rectangles/ellipses/lines/text annotations) -
+    # client-side state the frontend pushes here via POST /drawings
+    # whenever it changes, so a reload restores them and
+    # project_bundle.py's own export can bundle them too. Not synced
+    # with GNS3's own real drawings API - see app/static/index.html's
+    # own notes on that.
+    app.state.last_drawings = []
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
@@ -344,6 +351,27 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     """
     app.state.last_config_push = request.devices
     return push_all(request.devices, app)
+
+
+class DrawingsRequest(BaseModel):
+    drawings: list[dict[str, Any]]
+
+
+@app.get("/drawings")
+def get_drawings() -> list[dict[str, Any]]:
+    """
+    Canvas annotations (rectangles/ellipses/lines/text) - purely
+    client-side data this app just stores and hands back, so a page
+    reload doesn't lose them. Not validated/interpreted server-side,
+    and not synced with GNS3's own real drawings.
+    """
+    return app.state.last_drawings
+
+
+@app.post("/drawings")
+def set_drawings(request: DrawingsRequest) -> dict[str, str]:
+    app.state.last_drawings = request.drawings
+    return {"status": "ok"}
 
 
 @app.get("/project/export")

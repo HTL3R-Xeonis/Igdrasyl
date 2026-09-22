@@ -30,6 +30,7 @@
     --canvas-bg: #ffffff;
     --canvas-grid-dot: #dde1e4;
     --canvas-text: #1f2328;
+    --canvas-dim-text: #7a828c;
     --canvas-status-unknown-stroke: #c7cbd1;
     --canvas-link: #9aa2a8;
   }
@@ -278,15 +279,22 @@
   #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
   #canvas.panning { cursor: grabbing; }
   #canvas.placing, #canvas.drawing { cursor: crosshair; }
-  .drawing-shape { cursor: pointer; }
-  .drawing-rect, .drawing-ellipse {
-    fill: rgba(124, 179, 66, 0.12);
+  /* Colors/widths for rect/ellipse/line/text are all set per-shape as
+     real SVG presentation attributes in JS (buildDrawingShape) - not
+     here, since a stylesheet rule would win over them in the cascade
+     and silently ignore whatever color the operator actually picked. */
+  /* pointer-events: all - without it, an unfilled rect/ellipse
+     (fill="none", the default) only responds to clicks on its thin
+     stroke line, not its interior, which makes it nearly impossible
+     to click in practice. */
+  .drawing-shape { cursor: pointer; pointer-events: all; }
+  .drawing-draft { opacity: 0.6; stroke-dasharray: 4 3; }
+  .drawing-handle {
+    fill: var(--panel);
     stroke: var(--accent);
     stroke-width: 1.5;
+    cursor: nwse-resize;
   }
-  .drawing-line { stroke: var(--accent); stroke-width: 2; }
-  .drawing-text { fill: var(--canvas-text); font-size: 16px; }
-  .drawing-draft { opacity: 0.6; stroke-dasharray: 4 3; }
   .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
   /* GNS3 Desktop's own node look: just the device icon and its label,
@@ -304,6 +312,7 @@
   .link-line.link-up { stroke: var(--ok); }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
   .link-endpoint { fill: var(--accent); pointer-events: none; }
+  .port-label { fill: var(--canvas-dim-text); font-size: 9px; pointer-events: none; user-select: none; }
   #canvas-toolbar {
     position: absolute;
     top: 10px;
@@ -338,17 +347,32 @@
     border-radius: 4px;
     padding: 1px 5px;
   }
-  button.console-btn {
-    font-size: 12px;
-    background: var(--accent);
-    color: #10130f;
-    font-weight: 600;
+  /* Node-actions popup: a vertical, context-menu-style list - a header
+     row with the node's identity, then one full-width row per action,
+     stacked underneath each other instead of wrapping pill buttons. */
+  #node-actions-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  #node-actions button.console-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 13px;
+    background: none;
+    color: var(--text);
+    font-weight: 400;
     border: none;
-    border-radius: 5px;
-    padding: 4px 10px;
+    border-radius: 0;
+    padding: 7px 12px;
     cursor: pointer;
   }
-  button.console-btn:disabled { background: var(--border); color: var(--dim); font-weight: 400; cursor: not-allowed; }
+  #node-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
+  #node-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
   #right-panel {
     width: var(--right-panel-width, 360px);
     flex-shrink: 0;
@@ -459,18 +483,16 @@
   #node-actions {
     position: fixed;
     z-index: 150;
-    max-width: 320px;
+    min-width: 180px;
+    max-width: 240px;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-    padding: 10px 14px;
+    padding: 10px 0;
     font-size: 13px;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    row-gap: 8px;
-    column-gap: 8px;
+    flex-direction: column;
   }
   #console-area {
     flex: 1;
@@ -674,6 +696,52 @@
     padding: 6px 8px;
     font-size: 13px;
   }
+  .drawing-popup { min-width: 160px; }
+  .drawing-style-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .drawing-style-row label { flex: 0 0 40px; color: var(--dim); }
+  .drawing-style-row input[type="color"] {
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+  }
+  .drawing-style-row input[type="number"] {
+    width: 55px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 5px;
+    font-size: 12px;
+  }
+  .drawing-style-clear {
+    margin-left: auto;
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+  .drawing-style-clear:hover { border-color: var(--accent); color: var(--accent); }
+  .drawing-delete-btn {
+    width: calc(100% - 8px);
+    margin: 6px 4px 2px;
+    text-align: center;
+    background: var(--bad);
+    color: #fff;
+  }
 </style>
 </head>
 <body>
@@ -783,9 +851,11 @@
         <button id="popout-btn" title="Pop this panel out into its own window">⧉ Pop out</button>
       </div>
       <div id="node-actions" hidden>
-        <span class="env-tag" id="selected-role"></span>
-        <strong id="selected-name"></strong>
-        <span id="selected-status" style="color: var(--dim);"></span>
+        <div id="node-actions-header">
+          <span class="env-tag" id="selected-role"></span>
+          <strong id="selected-name"></strong>
+          <span id="selected-status" style="color: var(--dim);"></span>
+        </div>
         <button class="console-btn" id="selected-start-btn">Start</button>
         <button class="console-btn" id="selected-stop-btn">Stop</button>
         <button class="console-btn" id="selected-reload-btn">Reload</button>
@@ -1148,8 +1218,10 @@ let drawings = [];
 let drawIdCounter = 0;
 let drawMode = null; // 'rect' | 'ellipse' | 'line' | 'text' | null
 let drawDraft = null; // {type, x1, y1, x2, y2} while dragging out a new shape
+let selectedDrawingId = null; // which drawing shows resize handles right now
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;
+let drawingsLoaded = false; // fetch /drawings once, not on every loadCanvas() refresh
 let placementRole = null;   // armed device's resolved role, or null if nothing armed
 let placementImage = null;  // armed device's exact template/image name
 
@@ -1282,6 +1354,19 @@ async function loadCanvas() {
       initialFitDone = true;
       fitViewToNodes();
     }
+    if (!drawingsLoaded) {
+      drawingsLoaded = true;
+      try {
+        const serverDrawings = await fetch("/drawings").then((r) => (r.ok ? r.json() : []));
+        if (Array.isArray(serverDrawings) && serverDrawings.length) {
+          drawings = serverDrawings;
+          drawIdCounter = Math.max(0, ...drawings.map((d) => d.id || 0));
+          renderDrawings();
+        }
+      } catch (err) {
+        // best-effort - drawings just start empty if this fails
+      }
+    }
     updateStatusBar(true);
   } catch (err) {
     updateStatusBar(false);
@@ -1302,7 +1387,7 @@ function edgePoint(from, to) {
   return { x: from.x + dx * scale, y: from.y + dy * scale };
 }
 
-function appendLinkEndpointDot(layer, nearNode, farNode) {
+function appendLinkEndpointDot(layer, nearNode, farNode, ifName) {
   const p = edgePoint(nearNode, farNode);
   const dot = document.createElementNS(SVG_NS, "circle");
   dot.setAttribute("class", "link-endpoint");
@@ -1312,6 +1397,22 @@ function appendLinkEndpointDot(layer, nearNode, farNode) {
   dot.dataset.for = nearNode.name;
   dot.dataset.other = farNode.name;
   layer.appendChild(dot);
+
+  if (!ifName) return;
+  // A little further out from the dot, in the same direction away
+  // from the icon's own center - reads as "next to the icon" instead
+  // of sitting on top of it.
+  const dx = p.x - nearNode.x;
+  const dy = p.y - nearNode.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const label = document.createElementNS(SVG_NS, "text");
+  label.setAttribute("class", "port-label");
+  label.setAttribute("x", p.x + (dx / len) * 12);
+  label.setAttribute("y", p.y + (dy / len) * 12);
+  label.dataset.for = nearNode.name;
+  label.dataset.other = farNode.name;
+  label.textContent = ifName;
+  layer.appendChild(label);
 }
 
 function setDrawMode(mode) {
@@ -1320,6 +1421,18 @@ function setDrawMode(mode) {
     btn.classList.toggle("active", btn.dataset.draw === drawMode);
   });
   svg.classList.toggle("drawing", !!drawMode);
+}
+
+async function persistDrawings() {
+  try {
+    await fetch("/drawings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drawings }),
+    });
+  } catch (err) {
+    // best-effort - drawings already work locally even if this fails
+  }
 }
 
 function buildDrawingShape(d, isDraft) {
@@ -1334,69 +1447,249 @@ function buildDrawingShape(d, isDraft) {
     el.setAttribute("y", y1);
     el.setAttribute("width", w);
     el.setAttribute("height", h);
+    el.setAttribute("stroke", d.stroke || "#7cb342");
+    el.setAttribute("stroke-width", d.strokeWidth || 2);
+    el.setAttribute("fill", d.fill && d.fill !== "none" ? d.fill : "none");
+    if (d.fill && d.fill !== "none") el.setAttribute("fill-opacity", "0.18");
   } else if (d.type === "ellipse") {
     el = document.createElementNS(SVG_NS, "ellipse");
     el.setAttribute("cx", x1 + w / 2);
     el.setAttribute("cy", y1 + h / 2);
     el.setAttribute("rx", w / 2);
     el.setAttribute("ry", h / 2);
+    el.setAttribute("stroke", d.stroke || "#7cb342");
+    el.setAttribute("stroke-width", d.strokeWidth || 2);
+    el.setAttribute("fill", d.fill && d.fill !== "none" ? d.fill : "none");
+    if (d.fill && d.fill !== "none") el.setAttribute("fill-opacity", "0.18");
   } else if (d.type === "line") {
     el = document.createElementNS(SVG_NS, "line");
     el.setAttribute("x1", d.x1);
     el.setAttribute("y1", d.y1);
     el.setAttribute("x2", d.x2);
     el.setAttribute("y2", d.y2);
+    el.setAttribute("stroke", d.stroke || "#7cb342");
+    el.setAttribute("stroke-width", d.strokeWidth || 2);
   } else {
     el = document.createElementNS(SVG_NS, "text");
     el.setAttribute("x", d.x1);
     el.setAttribute("y", d.y1);
+    el.setAttribute("fill", d.stroke || "#1f2328");
+    el.style.fontSize = `${d.fontSize || 16}px`;
     el.textContent = d.text || "";
   }
   el.setAttribute("class", `drawing-shape drawing-${d.type}${isDraft ? " drawing-draft" : ""}`);
   if (!isDraft) {
     el.dataset.drawId = d.id;
-    el.addEventListener("pointerdown", (evt) => {
-      evt.stopPropagation();
-      if (drawMode) return; // a draw tool is armed - don't hijack the click for selection
-      showDrawingActionsPopup(d.id, { x: evt.clientX, y: evt.clientY });
-    });
+    el.addEventListener("pointerdown", (evt) => startDrawingPointerDown(evt, d));
   }
   return el;
+}
+
+// A pointerdown on an existing drawing could turn into a move (drag
+// its body) or just be a click (open its style/delete popup) - same
+// "wait for real movement before treating it as a drag" pattern used
+// for panning vs. clicking the canvas itself.
+function startDrawingPointerDown(evt, d) {
+  evt.stopPropagation();
+  if (drawMode) return; // a draw tool is armed - don't hijack the click for moving/selecting
+  const startClientX = evt.clientX;
+  const startClientY = evt.clientY;
+  const startPoint = svgPoint(evt);
+  const orig = { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 };
+  let moved = false;
+
+  function onMove(e) {
+    if (!moved && Math.hypot(e.clientX - startClientX, e.clientY - startClientY) < 4) return;
+    moved = true;
+    const p = svgPoint(e);
+    const dx = p.x - startPoint.x;
+    const dy = p.y - startPoint.y;
+    d.x1 = orig.x1 + dx;
+    d.y1 = orig.y1 + dy;
+    if (d.type !== "text") {
+      d.x2 = orig.x2 + dx;
+      d.y2 = orig.y2 + dy;
+    }
+    renderDrawings();
+  }
+  function onUp(e) {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    if (moved) {
+      if (snapToGridEnabled) {
+        d.x1 = snapToGrid(d.x1);
+        d.y1 = snapToGrid(d.y1);
+        if (d.type !== "text") {
+          d.x2 = snapToGrid(d.x2);
+          d.y2 = snapToGrid(d.y2);
+        }
+        renderDrawings();
+      }
+      persistDrawings();
+    } else {
+      selectedDrawingId = d.id;
+      renderDrawings();
+      showDrawingActionsPopup(d.id, { x: e.clientX, y: e.clientY });
+    }
+  }
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function buildDrawingHandles(d) {
+  if (d.type === "text") return [];
+  const handles = [];
+  for (const [xKey, yKey] of [["x1", "y1"], ["x2", "y2"]]) {
+    const h = document.createElementNS(SVG_NS, "circle");
+    h.setAttribute("class", "drawing-handle");
+    h.setAttribute("cx", d[xKey]);
+    h.setAttribute("cy", d[yKey]);
+    h.setAttribute("r", 5);
+    h.addEventListener("pointerdown", (evt) => startDrawingHandleDrag(evt, d, xKey, yKey));
+    handles.push(h);
+  }
+  return handles;
+}
+
+function startDrawingHandleDrag(evt, d, xKey, yKey) {
+  evt.stopPropagation();
+  function onMove(e) {
+    const p = svgPoint(e);
+    d[xKey] = snapToGridEnabled ? snapToGrid(p.x) : p.x;
+    d[yKey] = snapToGridEnabled ? snapToGrid(p.y) : p.y;
+    renderDrawings();
+  }
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    persistDrawings();
+  }
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 
 function renderDrawings() {
   const layer = document.getElementById("drawings-layer");
   layer.innerHTML = "";
-  for (const d of drawings) layer.appendChild(buildDrawingShape(d));
+  for (const d of drawings) {
+    layer.appendChild(buildDrawingShape(d));
+    if (d.id === selectedDrawingId) {
+      for (const handle of buildDrawingHandles(d)) layer.appendChild(handle);
+    }
+  }
   if (drawDraft) layer.appendChild(buildDrawingShape(drawDraft, true));
 }
 
+let closeOpenDrawingPopup = null;
+
 function showDrawingActionsPopup(id, anchor) {
+  if (closeOpenDrawingPopup) closeOpenDrawingPopup();
+  const d = drawings.find((x) => x.id === id);
+  if (!d) return;
+
   const pop = document.createElement("div");
-  pop.className = "inline-dropdown";
+  pop.className = "inline-dropdown drawing-popup";
   const label = document.createElement("div");
   label.className = "inline-dropdown-title";
   label.textContent = "Drawing";
   pop.appendChild(label);
+
+  function addRow(labelText) {
+    const row = document.createElement("div");
+    row.className = "drawing-style-row";
+    const l = document.createElement("label");
+    l.textContent = labelText;
+    row.appendChild(l);
+    pop.appendChild(row);
+    return row;
+  }
+
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  colorInput.value = d.stroke || (d.type === "text" ? "#1f2328" : "#7cb342");
+  colorInput.addEventListener("input", () => {
+    d.stroke = colorInput.value;
+    renderDrawings();
+  });
+  colorInput.addEventListener("change", persistDrawings);
+  addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorInput);
+
+  if (d.type === "rect" || d.type === "ellipse") {
+    const fillRow = addRow("Fill");
+    const fillInput = document.createElement("input");
+    fillInput.type = "color";
+    fillInput.value = d.fill && d.fill !== "none" ? d.fill : "#7cb342";
+    fillInput.addEventListener("input", () => {
+      d.fill = fillInput.value;
+      renderDrawings();
+    });
+    fillInput.addEventListener("change", persistDrawings);
+    fillRow.appendChild(fillInput);
+    const noFillBtn = document.createElement("button");
+    noFillBtn.className = "drawing-style-clear";
+    noFillBtn.textContent = "None";
+    noFillBtn.title = "No fill";
+    noFillBtn.addEventListener("click", () => {
+      d.fill = "none";
+      renderDrawings();
+      persistDrawings();
+    });
+    fillRow.appendChild(noFillBtn);
+  }
+
+  if (d.type !== "text") {
+    const widthInput = document.createElement("input");
+    widthInput.type = "number";
+    widthInput.min = "1";
+    widthInput.max = "20";
+    widthInput.value = d.strokeWidth || 2;
+    widthInput.addEventListener("change", () => {
+      d.strokeWidth = parseFloat(widthInput.value) || 2;
+      renderDrawings();
+      persistDrawings();
+    });
+    addRow("Width").appendChild(widthInput);
+  } else {
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.min = "8";
+    sizeInput.max = "72";
+    sizeInput.value = d.fontSize || 16;
+    sizeInput.addEventListener("change", () => {
+      d.fontSize = parseFloat(sizeInput.value) || 16;
+      renderDrawings();
+      persistDrawings();
+    });
+    addRow("Size").appendChild(sizeInput);
+  }
+
   const del = document.createElement("button");
-  del.className = "menu-item";
+  del.className = "menu-item drawing-delete-btn";
   del.textContent = "Delete";
   pop.appendChild(del);
+
   document.body.appendChild(pop);
   positionNear(pop, anchor);
 
   function close() {
     document.removeEventListener("mousedown", onOutside, true);
     pop.remove();
+    closeOpenDrawingPopup = null;
+    if (selectedDrawingId === id) {
+      selectedDrawingId = null;
+      renderDrawings();
+    }
   }
   function onOutside(evt) {
     if (!pop.contains(evt.target)) close();
   }
   del.addEventListener("click", () => {
-    drawings = drawings.filter((d) => d.id !== id);
+    drawings = drawings.filter((x) => x.id !== id);
     renderDrawings();
+    persistDrawings();
     close();
   });
+  closeOpenDrawingPopup = close;
   setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
 }
 
@@ -1408,13 +1701,15 @@ function renderCanvas() {
 
   const drawnPairs = new Set();
   for (const node of Object.values(nodesData)) {
-    for (const neighbourName of Object.values(node.interfaces)) {
+    for (const [ifName, neighbourName] of Object.entries(node.interfaces)) {
       if (!neighbourName || !nodesData[neighbourName]) continue;
       const pairKey = [node.name, neighbourName].sort().join("|");
       if (drawnPairs.has(pairKey)) continue;
       drawnPairs.add(pairKey);
       const neighbour = nodesData[neighbourName];
       const bothRunning = isNodeRunning(node) && isNodeRunning(neighbour);
+      const neighbourIfEntry = Object.entries(neighbour.interfaces).find(([, n]) => n === node.name);
+      const neighbourIfName = neighbourIfEntry ? neighbourIfEntry[0] : "";
 
       const line = document.createElementNS(SVG_NS, "line");
       line.setAttribute("class", `link-line${bothRunning ? " link-up" : ""}`);
@@ -1427,8 +1722,8 @@ function renderCanvas() {
         if (await showConfirm(`Delete link between ${a} and ${b}?`, { danger: true })) deleteLink(a, b);
       });
       linksLayer.appendChild(line);
-      appendLinkEndpointDot(linksLayer, node, neighbour);
-      appendLinkEndpointDot(linksLayer, neighbour, node);
+      appendLinkEndpointDot(linksLayer, node, neighbour, ifName);
+      appendLinkEndpointDot(linksLayer, neighbour, node, neighbourIfName);
     }
   }
 
@@ -1643,6 +1938,27 @@ svg.addEventListener("wheel", (evt) => {
   zoomBy(evt.deltaY > 0 ? 1.1 : 0.9, p);
 });
 
+// Drag-and-drop a device row straight from the palette onto the
+// canvas - an alternative to click-to-arm-then-click-canvas, not a
+// replacement for it.
+svg.addEventListener("dragover", (evt) => {
+  evt.preventDefault();
+  evt.dataTransfer.dropEffect = "copy";
+});
+svg.addEventListener("drop", (evt) => {
+  evt.preventDefault();
+  let data;
+  try {
+    data = JSON.parse(evt.dataTransfer.getData("application/json"));
+  } catch (err) {
+    return;
+  }
+  if (!data || !data.image) return;
+  placementImage = data.image;
+  placementRole = data.role;
+  placeNodeAt(svgPoint(evt));
+});
+
 let panState = null;
 svg.addEventListener("pointerdown", (evt) => {
   if (evt.target !== svg) return;
@@ -1653,14 +1969,16 @@ svg.addEventListener("pointerdown", (evt) => {
   if (drawMode) {
     const p = svgPoint(evt);
     if (drawMode === "text") {
+      setDrawMode(null);
       showTextPrompt("Text to add:", { title: "Add Text" }).then((text) => {
         if (!text) return;
-        drawings.push({ id: ++drawIdCounter, type: "text", x1: p.x, y1: p.y, text });
+        drawings.push({ id: ++drawIdCounter, type: "text", x1: p.x, y1: p.y, text, stroke: "#1f2328", fontSize: 16 });
         renderDrawings();
+        persistDrawings();
       });
       return;
     }
-    drawDraft = { type: drawMode, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+    drawDraft = { type: drawMode, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke: "#7cb342", fill: "none", strokeWidth: 2 };
     renderDrawings();
     return;
   }
@@ -1694,6 +2012,8 @@ window.addEventListener("pointerup", () => {
     drawings.push({ ...drawDraft, id: ++drawIdCounter });
     drawDraft = null;
     renderDrawings();
+    persistDrawings();
+    setDrawMode(null);
   }
   if (panState) {
     panState = null;
@@ -1983,6 +2303,7 @@ window.addEventListener("keydown", (evt) => {
   if (linkMode) exitLinkMode();
   if (placementImage) clearPlacementMode();
   if (drawMode) { drawDraft = null; renderDrawings(); setDrawMode(null); }
+  if (closeOpenDrawingPopup) closeOpenDrawingPopup();
   closeAllMenus();
   if (!document.getElementById("node-actions").hidden) deselectNode();
 });
@@ -2043,6 +2364,7 @@ function renderPaletteList() {
   for (const entry of entries) {
     const row = document.createElement("div");
     row.className = "palette-device";
+    row.draggable = true;
     if (placementImage === entry.name) row.classList.add("armed");
     const iconWrap = document.createElement("span");
     iconWrap.className = "palette-icon";
@@ -2052,6 +2374,13 @@ function renderPaletteList() {
     row.appendChild(iconWrap);
     row.appendChild(label);
     row.addEventListener("click", () => armPlacement(entry.name, entry.role, row));
+    // Same end result as click-to-arm-then-click-canvas, just via a
+    // real HTML5 drag instead - GNS3 Desktop's own device tree works
+    // the same way (drag a device onto the topology to place it).
+    row.addEventListener("dragstart", (evt) => {
+      evt.dataTransfer.effectAllowed = "copy";
+      evt.dataTransfer.setData("application/json", JSON.stringify({ image: entry.name, role: entry.role }));
+    });
     list.appendChild(row);
   }
 }
@@ -2210,6 +2539,16 @@ document.getElementById("import-project-input").addEventListener("change", async
     }
     const result = await resp.json();
     await loadCanvas();
+    // Import already updated the server's own drawings state - use the
+    // response directly rather than relying on loadCanvas's own
+    // fetch-once guard, which would skip re-fetching here otherwise.
+    if (Array.isArray(result.drawings)) {
+      drawingsLoaded = true;
+      drawings = result.drawings;
+      drawIdCounter = Math.max(0, ...drawings.map((d) => d.id || 0));
+      selectedDrawingId = null;
+      renderDrawings();
+    }
 
     const configEntries = Object.entries(result.configs || {});
     if (configEntries.length && await showConfirm(
@@ -2401,7 +2740,9 @@ document.getElementById("draw-clear-btn").addEventListener("click", async () => 
   if (!drawings.length) return;
   if (await showConfirm("Clear every drawing from the canvas?", { danger: true, confirmLabel: "Clear" })) {
     drawings = [];
+    selectedDrawingId = null;
     renderDrawings();
+    persistDrawings();
   }
 });
 
