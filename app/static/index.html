@@ -32,7 +32,7 @@
     --canvas-text: #1f2328;
     --canvas-dim-text: #7a828c;
     --canvas-status-unknown-stroke: #c7cbd1;
-    --canvas-link: #9aa2a8;
+    --canvas-link: #000000;
   }
   * { box-sizing: border-box; }
   /* Without this, an element with an ID-selector display rule (flex,
@@ -295,6 +295,20 @@
     stroke-width: 1.5;
     cursor: nwse-resize;
   }
+  /* The inline canvas text editor - a plain HTML input positioned
+     right over where its SVG <text> would render, not a modal popup. */
+  .canvas-text-editor {
+    position: fixed;
+    z-index: 250;
+    background: #fff;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: inherit;
+    line-height: 1.3;
+    outline: none;
+    min-width: 60px;
+  }
   .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
   /* GNS3 Desktop's own node look: just the device icon and its label,
@@ -309,10 +323,9 @@
   .status-dot.status-starting { fill: var(--warn); stroke: var(--canvas-bg); stroke-width: 1.5; }
   .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
   .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
-  .link-line.link-up { stroke: var(--ok); }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
-  .link-endpoint { fill: var(--accent); pointer-events: none; }
-  .port-label { fill: var(--canvas-dim-text); font-size: 9px; pointer-events: none; user-select: none; }
+  .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
+  .port-label { fill: var(--canvas-link); font-size: 9px; pointer-events: none; user-select: none; }
   #canvas-toolbar {
     position: absolute;
     top: 10px;
@@ -555,8 +568,29 @@
     text-align: center;
     padding: 16px;
   }
-  #session-panels { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .session-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #session-panels { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+  /* Inactive session panels are NOT display:none - a hidden VM screen
+     (noVNC canvas) genuinely disconnects after a few seconds of that
+     (confirmed live: stays connected indefinitely while display:none
+     is never applied, but drops within ~10s once it is - some
+     rendering/keepalive path noVNC relies on evidently stalls when
+     its container leaves the render tree entirely). visibility:hidden
+     keeps it rendering/connected while genuinely invisible and inert;
+     position:absolute takes it out of #session-panels' own flex flow
+     so only the .active one affects layout. */
+  .session-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .session-panel.active { position: relative; flex: 1; }
+  .session-panel:not(.active) {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
+  }
   .session-panel-header {
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
@@ -687,6 +721,7 @@
     min-width: 170px;
   }
   .inline-dropdown-title { font-size: 11px; color: var(--dim); margin-bottom: 6px; white-space: nowrap; }
+  .inline-dropdown-hint { font-size: 10px; color: var(--dim); margin-top: 5px; white-space: nowrap; }
   .inline-dropdown-select {
     width: 100%;
     background: var(--bg);
@@ -735,6 +770,8 @@
     cursor: pointer;
   }
   .drawing-style-clear:hover { border-color: var(--accent); color: var(--accent); }
+  .drawing-layer-row { display: flex; gap: 4px; padding: 2px 4px; }
+  .drawing-layer-row .menu-item { flex: 1; text-align: center; font-size: 11px; padding: 6px 4px; }
   .drawing-delete-btn {
     width: calc(100% - 8px);
     margin: 6px 4px 2px;
@@ -784,6 +821,15 @@
         <label class="menu-settings-checkbox">
           <input type="checkbox" id="settings-snap-grid">
           Snap to grid
+        </label>
+        <label class="menu-settings-checkbox">
+          <input type="checkbox" id="settings-port-labels" checked>
+          Port labels
+        </label>
+        <div class="menu-separator"></div>
+        <label class="menu-settings-checkbox">
+          <input type="checkbox" id="settings-disruption-warning" checked>
+          Disruption warnings
         </label>
       </div>
     </div>
@@ -953,8 +999,7 @@ function ensureSessionPanel(id, nodeName, title) {
   document.getElementById("session-tabbar").hidden = false;
 
   const panel = document.createElement("div");
-  panel.className = "session-panel";
-  panel.hidden = true;
+  panel.className = "session-panel"; // starts inactive (see the CSS - default is the :not(.active) rule) until switchToSession adds .active
   const header = document.createElement("div");
   header.className = "session-panel-header";
   const titleEl = document.createElement("span");
@@ -988,7 +1033,7 @@ function switchToSession(id) {
   activeSessionId = id;
   for (const s of sessions.values()) {
     const active = s.id === id;
-    s.panelEl.hidden = !active;
+    s.panelEl.classList.toggle("active", active);
     s.tabEl.classList.toggle("active", active);
   }
 }
@@ -1155,6 +1200,11 @@ function showInlineDropdown(options, opts = {}) {
     if (opts.defaultValue !== undefined) select.value = opts.defaultValue;
     pop.appendChild(select);
 
+    const hint = document.createElement("div");
+    hint.className = "inline-dropdown-hint";
+    hint.textContent = "Enter to accept, Esc to cancel";
+    pop.appendChild(hint);
+
     document.body.appendChild(pop);
     positionNear(pop, opts.anchor);
 
@@ -1169,6 +1219,10 @@ function showInlineDropdown(options, opts = {}) {
     }
     function onKeydown(evt) {
       if (evt.key === "Escape") { evt.preventDefault(); finish(null); }
+      // Accept whatever's currently selected (the default, if the
+      // operator never touched the dropdown at all) without forcing
+      // them to actually change the selection first.
+      else if (evt.key === "Enter") { evt.preventDefault(); finish(select.value); }
     }
     select.addEventListener("change", () => finish(select.value));
     // Deferred a tick - the same click that opened this dropdown (a
@@ -1189,6 +1243,18 @@ let snapToGridEnabled = false;
 function snapToGrid(value) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
+
+// Add node/link and project import all warn that the action briefly
+// disrupts every already-running ESXi-bridged Cloud connection -
+// genuinely true, but repetitive once an operator already knows it.
+// Settings > Disruption warnings toggles whether that confirm still
+// appears at all; when off, the action just proceeds directly.
+let showDisruptionWarnings = true;
+let showPortLabels = true;
+function confirmDisruption(message, opts) {
+  if (!showDisruptionWarnings) return Promise.resolve(true);
+  return showConfirm(message, opts);
+}
 // GNS3's own real "classic" icon set (GPL-2.0, by the GNS3 project -
 // vendored unmodified from the live GNS3 controller's own
 // /v2/symbols/:/symbols/classic/<name>.svg/raw, the exact same files
@@ -1206,7 +1272,7 @@ let nodesData = {};      // name -> {name, role, environment, interfaces, live, 
 let selectedName = null;
 let linkMode = false;
 let linkFirstNode = null;
-let linkFirstAnchor = null; // {x, y} viewport coords of node1's click, for the interface dropdown's position
+let linkFirstIf = null; // node1's own already-picked interface name, chosen right when it was clicked
 
 // Draw/Write - GNS3 Desktop's own drawing-toolbar equivalent
 // (rectangle/ellipse/line/text annotations on the canvas). Client-side
@@ -1219,6 +1285,7 @@ let drawIdCounter = 0;
 let drawMode = null; // 'rect' | 'ellipse' | 'line' | 'text' | null
 let drawDraft = null; // {type, x1, y1, x2, y2} while dragging out a new shape
 let selectedDrawingId = null; // which drawing shows resize handles right now
+let editingDrawingId = null; // which text drawing has an inline canvas editor open right now (hidden from the real SVG render while so)
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;
 let drawingsLoaded = false; // fetch /drawings once, not on every loadCanvas() refresh
@@ -1387,6 +1454,18 @@ function edgePoint(from, to) {
   return { x: from.x + dx * scale, y: from.y + dy * scale };
 }
 
+// A little further out from the link-endpoint dot, in the same
+// direction away from the icon's own center - reads as "next to the
+// icon" instead of sitting on top of it. Shared by the initial render
+// and by onNodeDrag's own live repositioning, so both always agree.
+function portLabelPoint(nearNode, farNode) {
+  const p = edgePoint(nearNode, farNode);
+  const dx = p.x - nearNode.x;
+  const dy = p.y - nearNode.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: p.x + (dx / len) * 12, y: p.y + (dy / len) * 12 };
+}
+
 function appendLinkEndpointDot(layer, nearNode, farNode, ifName) {
   const p = edgePoint(nearNode, farNode);
   const dot = document.createElementNS(SVG_NS, "circle");
@@ -1398,17 +1477,12 @@ function appendLinkEndpointDot(layer, nearNode, farNode, ifName) {
   dot.dataset.other = farNode.name;
   layer.appendChild(dot);
 
-  if (!ifName) return;
-  // A little further out from the dot, in the same direction away
-  // from the icon's own center - reads as "next to the icon" instead
-  // of sitting on top of it.
-  const dx = p.x - nearNode.x;
-  const dy = p.y - nearNode.y;
-  const len = Math.hypot(dx, dy) || 1;
+  if (!ifName || !showPortLabels) return;
+  const labelPoint = portLabelPoint(nearNode, farNode);
   const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("class", "port-label");
-  label.setAttribute("x", p.x + (dx / len) * 12);
-  label.setAttribute("y", p.y + (dy / len) * 12);
+  label.setAttribute("x", labelPoint.x);
+  label.setAttribute("y", labelPoint.y);
   label.dataset.for = nearNode.name;
   label.dataset.other = farNode.name;
   label.textContent = ifName;
@@ -1451,6 +1525,7 @@ function buildDrawingShape(d, isDraft) {
     el.setAttribute("stroke-width", d.strokeWidth || 2);
     el.setAttribute("fill", d.fill && d.fill !== "none" ? d.fill : "none");
     if (d.fill && d.fill !== "none") el.setAttribute("fill-opacity", "0.18");
+    el.setAttribute("rx", d.rx || 0);
   } else if (d.type === "ellipse") {
     el = document.createElementNS(SVG_NS, "ellipse");
     el.setAttribute("cx", x1 + w / 2);
@@ -1481,6 +1556,13 @@ function buildDrawingShape(d, isDraft) {
   if (!isDraft) {
     el.dataset.drawId = d.id;
     el.addEventListener("pointerdown", (evt) => startDrawingPointerDown(evt, d));
+    if (d.type === "text") {
+      el.addEventListener("dblclick", (evt) => {
+        evt.stopPropagation();
+        if (closeOpenDrawingPopup) closeOpenDrawingPopup();
+        editTextDrawingInline(d, { isNew: false });
+      });
+    }
   }
   return el;
 }
@@ -1572,12 +1654,79 @@ function renderDrawings() {
   const layer = document.getElementById("drawings-layer");
   layer.innerHTML = "";
   for (const d of drawings) {
+    if (d.id === editingDrawingId) continue; // hidden behind its own inline canvas editor right now
     layer.appendChild(buildDrawingShape(d));
     if (d.id === selectedDrawingId) {
       for (const handle of buildDrawingHandles(d)) layer.appendChild(handle);
     }
   }
   if (drawDraft) layer.appendChild(buildDrawingShape(drawDraft, true));
+}
+
+// Text is edited directly on the canvas, not through a popup - a plain
+// HTML <input> positioned right on top of where the SVG <text> would
+// be (svgToScreenPoint handles the coordinate conversion, including
+// the current zoom level), the real <text> hidden underneath for as
+// long as this is open (see renderDrawings's own editingDrawingId
+// check above). Enter or clicking away commits; Escape cancels - for
+// a brand-new text (opts.isNew), canceling or committing empty removes
+// the drawing entirely rather than leaving a blank annotation behind.
+function editTextDrawingInline(d, opts) {
+  const isNew = !!(opts && opts.isNew);
+  const originalText = d.text || "";
+  editingDrawingId = d.id;
+  renderDrawings();
+
+  const screenPt = svgToScreenPoint(d.x1, d.y1);
+  const scale = svg.clientWidth / viewBoxState.w;
+  const fontSize = Math.max((d.fontSize || 16) * scale, 10);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "canvas-text-editor";
+  input.value = originalText;
+  input.style.left = `${screenPt.x}px`;
+  input.style.top = `${screenPt.y - fontSize}px`;
+  input.style.fontSize = `${fontSize}px`;
+  input.style.color = d.stroke || "#1f2328";
+  document.body.appendChild(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  function cleanup() {
+    input.removeEventListener("keydown", onKeydown);
+    input.removeEventListener("blur", onBlur);
+    input.remove();
+    editingDrawingId = null;
+  }
+  function commit() {
+    if (done) return;
+    done = true;
+    cleanup();
+    const value = input.value.trim();
+    if (!value) {
+      drawings = drawings.filter((x) => x.id !== d.id);
+    } else {
+      d.text = value;
+    }
+    renderDrawings();
+    persistDrawings();
+  }
+  function cancel() {
+    if (done) return;
+    done = true;
+    cleanup();
+    if (isNew) drawings = drawings.filter((x) => x.id !== d.id);
+    renderDrawings();
+  }
+  function onKeydown(evt) {
+    if (evt.key === "Enter") { evt.preventDefault(); commit(); }
+    else if (evt.key === "Escape") { evt.preventDefault(); cancel(); }
+  }
+  function onBlur() { commit(); }
+  input.addEventListener("keydown", onKeydown);
+  input.addEventListener("blur", onBlur);
 }
 
 let closeOpenDrawingPopup = null;
@@ -1613,6 +1762,20 @@ function showDrawingActionsPopup(id, anchor) {
   });
   colorInput.addEventListener("change", persistDrawings);
   addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorInput);
+
+  if (d.type === "rect") {
+    const radiusInput = document.createElement("input");
+    radiusInput.type = "number";
+    radiusInput.min = "0";
+    radiusInput.max = "100";
+    radiusInput.value = d.rx || 0;
+    radiusInput.addEventListener("change", () => {
+      d.rx = parseFloat(radiusInput.value) || 0;
+      renderDrawings();
+      persistDrawings();
+    });
+    addRow("Corners").appendChild(radiusInput);
+  }
 
   if (d.type === "rect" || d.type === "ellipse") {
     const fillRow = addRow("Fill");
@@ -1663,6 +1826,44 @@ function showDrawingActionsPopup(id, anchor) {
     addRow("Size").appendChild(sizeInput);
   }
 
+  if (d.type === "text") {
+    const editTextBtn = document.createElement("button");
+    editTextBtn.className = "menu-item";
+    editTextBtn.textContent = "Edit text";
+    editTextBtn.addEventListener("click", () => {
+      close();
+      editTextDrawingInline(d, { isNew: false });
+    });
+    pop.appendChild(editTextBtn);
+  }
+
+  // Layers - like GNS3's own "Bring to front"/"Send to back": drawings
+  // only ever stack among themselves (the whole #drawings-layer always
+  // sits behind every link/node regardless), so reordering is just
+  // moving this entry within the plain `drawings` array - SVG paints
+  // in document order, and renderDrawings() emits them in array order.
+  const layerRow = document.createElement("div");
+  layerRow.className = "drawing-layer-row";
+  const toBackBtn = document.createElement("button");
+  toBackBtn.className = "menu-item";
+  toBackBtn.textContent = "Send to back";
+  toBackBtn.addEventListener("click", () => {
+    drawings = [d, ...drawings.filter((x) => x.id !== id)];
+    renderDrawings();
+    persistDrawings();
+  });
+  const toFrontBtn = document.createElement("button");
+  toFrontBtn.className = "menu-item";
+  toFrontBtn.textContent = "Bring to front";
+  toFrontBtn.addEventListener("click", () => {
+    drawings = [...drawings.filter((x) => x.id !== id), d];
+    renderDrawings();
+    persistDrawings();
+  });
+  layerRow.appendChild(toBackBtn);
+  layerRow.appendChild(toFrontBtn);
+  pop.appendChild(layerRow);
+
   const del = document.createElement("button");
   del.className = "menu-item drawing-delete-btn";
   del.textContent = "Delete";
@@ -1707,12 +1908,11 @@ function renderCanvas() {
       if (drawnPairs.has(pairKey)) continue;
       drawnPairs.add(pairKey);
       const neighbour = nodesData[neighbourName];
-      const bothRunning = isNodeRunning(node) && isNodeRunning(neighbour);
       const neighbourIfEntry = Object.entries(neighbour.interfaces).find(([, n]) => n === node.name);
       const neighbourIfName = neighbourIfEntry ? neighbourIfEntry[0] : "";
 
       const line = document.createElementNS(SVG_NS, "line");
-      line.setAttribute("class", `link-line${bothRunning ? " link-up" : ""}`);
+      line.setAttribute("class", "link-line");
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, neighbour);
       line.addEventListener("pointerdown", async (evt) => {
@@ -1873,6 +2073,17 @@ function svgPoint(evt) {
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
 
+// The inverse of svgPoint - an SVG user-space point (e.g. a text
+// drawing's own x1/y1) to real viewport/screen pixels, for positioning
+// a plain HTML overlay (the inline text editor) exactly on top of it.
+function svgToScreenPoint(svgX, svgY) {
+  const pt = svg.createSVGPoint();
+  pt.x = svgX;
+  pt.y = svgY;
+  const screenPt = pt.matrixTransform(svg.getScreenCTM());
+  return { x: screenPt.x, y: screenPt.y };
+}
+
 let dragState = null;
 
 function startNodeDrag(evt, name) {
@@ -1915,6 +2126,12 @@ function onNodeDrag(evt) {
     const p2 = edgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other]);
     dot.setAttribute("cx", p2.x);
     dot.setAttribute("cy", p2.y);
+  });
+  document.querySelectorAll(".port-label").forEach((label) => {
+    if (label.dataset.for !== dragState.name && label.dataset.other !== dragState.name) return;
+    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other]);
+    label.setAttribute("x", labelPoint.x);
+    label.setAttribute("y", labelPoint.y);
   });
 }
 
@@ -1970,12 +2187,9 @@ svg.addEventListener("pointerdown", (evt) => {
     const p = svgPoint(evt);
     if (drawMode === "text") {
       setDrawMode(null);
-      showTextPrompt("Text to add:", { title: "Add Text" }).then((text) => {
-        if (!text) return;
-        drawings.push({ id: ++drawIdCounter, type: "text", x1: p.x, y1: p.y, text, stroke: "#1f2328", fontSize: 16 });
-        renderDrawings();
-        persistDrawings();
-      });
+      const d = { id: ++drawIdCounter, type: "text", x1: p.x, y1: p.y, text: "", stroke: "#1f2328", fontSize: 16 };
+      drawings.push(d);
+      editTextDrawingInline(d, { isNew: true });
       return;
     }
     drawDraft = { type: drawMode, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke: "#7cb342", fill: "none", strokeWidth: 2 };
@@ -2218,24 +2432,27 @@ async function promptForInterface(nodeName, anchor) {
 
 async function handleLinkModeClick(name, anchor) {
   if (!linkFirstNode) {
+    // GNS3 Desktop's own link-drawing order: pick this node's port
+    // right away, before the second node is even chosen - not
+    // batched at the end like the old flow used to do.
+    const if1 = await promptForInterface(name, anchor);
+    if (!if1) { exitLinkMode(); return; }
     linkFirstNode = name;
-    linkFirstAnchor = anchor;
+    linkFirstIf = if1;
     document.getElementById("link-mode-hint").textContent =
-      `Click the node to connect ${name} to (Esc to cancel)`;
+      `Click the node to connect ${name}:${if1} to (Esc to cancel)`;
     return;
   }
   const node1 = linkFirstNode;
-  const anchor1 = linkFirstAnchor;
+  const if1 = linkFirstIf;
   const node2 = name;
   linkFirstNode = null;
-  linkFirstAnchor = null;
+  linkFirstIf = null;
   if (node1 === node2) return;
 
-  const if1 = await promptForInterface(node1, anchor1);
-  if (!if1) { exitLinkMode(); return; }
   const if2 = await promptForInterface(node2, anchor);
   if (!if2) { exitLinkMode(); return; }
-  if (!await showConfirm(
+  if (!await confirmDisruption(
     `Connect ${node1}:${if1} <-> ${node2}:${if2}?\n\nThis briefly disrupts every ` +
     `already-running ESXi-bridged Cloud connection, even for just this one link.`,
     { title: "Add link", confirmLabel: "Connect" }
@@ -2283,7 +2500,7 @@ async function deleteLink(node1, node2) {
 function exitLinkMode() {
   linkMode = false;
   linkFirstNode = null;
-  linkFirstAnchor = null;
+  linkFirstIf = null;
   document.getElementById("link-mode-btn").classList.remove("active");
   document.getElementById("link-mode-hint").hidden = true;
 }
@@ -2291,7 +2508,7 @@ function exitLinkMode() {
 document.getElementById("link-mode-btn").addEventListener("click", () => {
   linkMode = !linkMode;
   linkFirstNode = null;
-  linkFirstAnchor = null;
+  linkFirstIf = null;
   document.getElementById("link-mode-btn").classList.toggle("active", linkMode);
   const hint = document.getElementById("link-mode-hint");
   hint.hidden = !linkMode;
@@ -2427,7 +2644,7 @@ async function placeNodeAt(point) {
     defaultValue: suggestNodeName(role),
   });
   if (!name) return;
-  if (!await showConfirm(
+  if (!await confirmDisruption(
     `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
     `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
     `and may take a while.`,
@@ -2517,7 +2734,7 @@ document.getElementById("import-project-input").addEventListener("change", async
   input.value = ""; // allow re-selecting the same file next time
   if (!file) return;
 
-  if (!await showConfirm(
+  if (!await confirmDisruption(
     `Import "${file.name}"?\n\nThis deploys the bundle's topology live, ` +
     `incrementally - it creates whatever's missing and reuses anything ` +
     `already running with a matching name, but never removes anything. ` +
@@ -2731,6 +2948,15 @@ document.getElementById("settings-show-grid").addEventListener("change", (evt) =
 
 document.getElementById("settings-snap-grid").addEventListener("change", (evt) => {
   snapToGridEnabled = evt.target.checked;
+});
+
+document.getElementById("settings-port-labels").addEventListener("change", (evt) => {
+  showPortLabels = evt.target.checked;
+  renderCanvas();
+});
+
+document.getElementById("settings-disruption-warning").addEventListener("change", (evt) => {
+  showDisruptionWarnings = evt.target.checked;
 });
 
 document.querySelectorAll("#menu-draw .menu-item[data-draw]").forEach((btn) => {
