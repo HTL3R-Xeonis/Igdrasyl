@@ -59,24 +59,6 @@
     align-items: center;
     gap: 2px;
   }
-  #menubar-brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    padding-right: 12px;
-    margin-right: 6px;
-    border-right: 1px solid var(--border);
-    height: 22px;
-  }
-  #menubar-brand .brand-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 3px;
-    background: var(--accent);
-    flex-shrink: 0;
-  }
   #menubar-menus { display: flex; align-items: center; height: 100%; }
   .menu { position: relative; height: 100%; }
   .menu-btn {
@@ -123,8 +105,7 @@
     left: 8px;
     color: var(--accent);
   }
-  .menubar-spacer { flex: 1; }
-  header .meta { font-size: 12px; color: var(--dim); }
+  .menu-info-line { padding: 7px 10px; font-size: 12px; color: var(--dim); white-space: nowrap; }
   #warning-banner {
     padding: 8px 20px;
     background: #3a2c14;
@@ -479,10 +460,7 @@
     color: var(--dim);
     gap: 16px;
   }
-  #status-connection { display: flex; align-items: center; gap: 6px; }
-  #status-connection-dot { width: 7px; height: 7px; border-radius: 50%; }
-  #status-connection-dot.status-ok { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
-  #status-connection-dot.status-bad { background: var(--bad); box-shadow: 0 0 4px var(--bad); }
+  #status-connection { padding: 8px 16px 0; font-size: 11px; color: var(--dim); }
   #status-bar .spacer { flex: 1; }
   #status-zoom { display: flex; align-items: center; gap: 6px; }
   #status-zoom button {
@@ -535,7 +513,6 @@
 </head>
 <body>
 <header id="menubar">
-  <div id="menubar-brand"><span class="brand-dot"></span>TopologyOperator</div>
   <nav id="menubar-menus">
     <div class="menu">
       <button class="menu-btn" data-menu="file">File</button>
@@ -551,11 +528,15 @@
         <button class="menu-item" id="tab-push">Config Push</button>
       </div>
     </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="info">Info</button>
+      <div class="menu-dropdown" id="menu-info" hidden>
+        <div class="menu-info-line" id="project-meta"></div>
+      </div>
+    </div>
   </nav>
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
   <span id="import-project-status" style="font-size: 12px; color: var(--dim);"></span>
-  <div class="menubar-spacer"></div>
-  <span class="meta" id="project-meta"></span>
 </header>
 <div id="warning-banner"></div>
 <main>
@@ -593,6 +574,7 @@
   </div>
   <div id="right-panel">
     <div id="topology-summary">
+      <div id="status-connection"><span id="status-connection-text">Connecting…</span></div>
       <h2>Topology Summary</h2>
       <ul id="topology-summary-list"></ul>
     </div>
@@ -627,10 +609,6 @@
   </div>
 </main>
 <footer id="status-bar">
-  <div id="status-connection">
-    <span id="status-connection-dot" class="status-ok"></span>
-    <span id="status-connection-text">Connecting…</span>
-  </div>
   <div class="spacer"></div>
   <div id="status-zoom">
     <span>Zoom</span>
@@ -1194,9 +1172,7 @@ function renderSummary() {
 function updateStatusBar(connectionOk) {
   const nodes = Object.values(nodesData);
   const running = nodes.filter(isNodeRunning).length;
-  const dot = document.getElementById("status-connection-dot");
   const text = document.getElementById("status-connection-text");
-  dot.className = connectionOk ? "status-ok" : "status-bad";
   text.textContent = connectionOk
     ? `Connected · ${nodes.length} node${nodes.length === 1 ? "" : "s"}, ${running} running`
     : "Disconnected - failed to reach the server";
