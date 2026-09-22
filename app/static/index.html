@@ -8,14 +8,14 @@
 <style>
   :root {
     color-scheme: dark;
-    /* Dark, Mint-Y-Dark-inspired base - warmed slightly off pure
-       black/blue for a modern-app feel rather than literal Qt grey. */
-    --bg: #1a1d1f;
-    --panel: #232629;
-    --panel-2: #2b2f32;
-    --border: #383c3f;
-    --text: #e8e6e3;
-    --dim: #9aa0a6;
+    /* Neutral dark grey, GNS3 Desktop's own Qt-Fusion-dark-style base -
+       true R=G=B greys throughout, no blue/green cast in the chrome. */
+    --bg: #2b2b2b;
+    --panel: #333333;
+    --panel-2: #3c3c3c;
+    --border: #4a4a4a;
+    --text: #e0e0e0;
+    --dim: #a0a0a0;
     /* Mint's own green, used for anything interactive/selected. */
     --accent: #7cb342;
     --accent-dim: #567a2e;
@@ -24,19 +24,11 @@
     --ok: #4caf50;
     --warn: #e0a63e;
     --bad: #e05a5a;
-    /* Role colors, kept off both greens above on purpose. */
-    --role-router: #5c9fe0;
-    --role-switch: #4fb3bf;
-    --role-pc: #9aa0a6;
-    --role-fw: #e0895a;
-    --role-vm: #b07cd6;
     /* The canvas itself is a deliberately separate, light surface -
        everything else (header, panels, modals) stays the dark theme
        above; only the SVG drawing area below uses these. */
     --canvas-bg: #ffffff;
     --canvas-grid-dot: #dde1e4;
-    --canvas-card-bg: #f3f4f6;
-    --canvas-card-running-bg: #e3f3e6;
     --canvas-text: #1f2328;
     --canvas-status-off-stroke: #9aa0a6;
     --canvas-status-unknown-stroke: #c7cbd1;
@@ -57,23 +49,81 @@
     display: flex;
     flex-direction: column;
   }
-  header {
-    padding: 12px 20px;
+  /* GNS3 Desktop's own top menu bar: a compact brand mark, then real
+     dropdown menus (File/View) instead of a row of loose buttons. */
+  header#menubar {
+    height: 40px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 2px;
   }
-  header h1 { font-size: 15px; font-weight: 600; margin: 0; }
-  header h1::before {
-    content: "";
-    display: inline-block;
+  #menubar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    padding-right: 12px;
+    margin-right: 6px;
+    border-right: 1px solid var(--border);
+    height: 22px;
+  }
+  #menubar-brand .brand-dot {
     width: 9px;
     height: 9px;
     border-radius: 3px;
     background: var(--accent);
-    margin-right: 8px;
+    flex-shrink: 0;
   }
+  #menubar-menus { display: flex; align-items: center; height: 100%; }
+  .menu { position: relative; height: 100%; }
+  .menu-btn {
+    height: 100%;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+  .menu-btn:hover, .menu-btn.open { background: var(--panel-2); }
+  .menu-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 210px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+    z-index: 20;
+  }
+  .menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 10px 7px 24px;
+    position: relative;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .menu-item:hover { background: var(--panel-2); }
+  .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+  .menu-item.active::before {
+    content: "\2713";
+    position: absolute;
+    left: 8px;
+    color: var(--accent);
+  }
+  .menubar-spacer { flex: 1; }
   header .meta { font-size: 12px; color: var(--dim); }
   #warning-banner {
     padding: 8px 20px;
@@ -183,19 +233,16 @@
   #canvas.placing { cursor: crosshair; }
   .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
-  .node-shape { cursor: pointer; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.18)); }
-  .node-shape rect.node-card { stroke-width: 1.5; fill: var(--canvas-card-bg); transition: stroke-width 0.1s; }
-  .node-shape.selected rect.node-card { stroke-width: 3; }
-  .node-shape:hover rect.node-card { stroke-width: 2.5; }
+  /* GNS3 Desktop's own node look: just the device icon and its label,
+     no card/box around it - only a dashed selection outline when
+     selected, and a small corner dot showing whether it's running. */
+  .node-shape { cursor: pointer; }
   .node-shape text { fill: var(--canvas-text); font-size: 11px; pointer-events: none; user-select: none; }
-  .role-ROUTER rect.node-card { stroke: var(--role-router); }
-  .role-SWITCH rect.node-card { stroke: var(--role-switch); }
-  .role-PC rect.node-card { stroke: var(--role-pc); }
-  .role-FW rect.node-card { stroke: var(--role-fw); }
-  .role-VM rect.node-card { stroke: var(--role-vm); stroke-dasharray: 4 2; }
-  .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-card-bg); stroke-width: 1.5; }
-  .status-dot.status-off { fill: var(--canvas-card-bg); stroke: var(--canvas-status-off-stroke); stroke-width: 1.5; }
-  .status-dot.status-unknown { fill: var(--canvas-card-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
+  .node-select-box { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: 0; }
+  .node-shape.selected .node-select-box { opacity: 1; }
+  .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-bg); stroke-width: 1.5; }
+  .status-dot.status-off { fill: var(--canvas-bg); stroke: var(--canvas-status-off-stroke); stroke-width: 1.5; }
+  .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
   .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
   .link-line.link-up { stroke: var(--ok); }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
@@ -386,18 +433,7 @@
     overflow: auto;
   }
   .session-screen canvas { max-width: 100%; max-height: 100%; }
-  header button.tab-btn {
-    font-size: 12px;
-    background: none;
-    color: var(--dim);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 4px 10px;
-    cursor: pointer;
-    margin-left: auto;
-  }
-  header button.tab-btn.active { color: var(--text); border-color: var(--accent); }
-  #push-area { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
+  #push-area { width: 360px; flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
   #push-area textarea {
     width: 100%;
     height: 140px;
@@ -498,15 +534,28 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>TopologyOperator</h1>
-  <span class="meta" id="project-meta"></span>
-  <a class="toolbar-btn" id="export-project-btn" href="/project/export" download title="Download the current topology + configs as a .topoproj bundle">Export Project</a>
-  <button class="toolbar-btn" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project</button>
+<header id="menubar">
+  <div id="menubar-brand"><span class="brand-dot"></span>TopologyOperator</div>
+  <nav id="menubar-menus">
+    <div class="menu">
+      <button class="menu-btn" data-menu="file">File</button>
+      <div class="menu-dropdown" id="menu-file" hidden>
+        <a class="menu-item" id="export-project-btn" href="/project/export" download title="Download the current topology + configs as a .topoproj bundle">Export Project</a>
+        <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="view">View</button>
+      <div class="menu-dropdown" id="menu-view" hidden>
+        <button class="menu-item active" id="tab-console">Topology</button>
+        <button class="menu-item" id="tab-push">Config Push</button>
+      </div>
+    </div>
+  </nav>
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
   <span id="import-project-status" style="font-size: 12px; color: var(--dim);"></span>
-  <button class="tab-btn active" id="tab-console">Console</button>
-  <button class="tab-btn" id="tab-push">Config Push</button>
+  <div class="menubar-spacer"></div>
+  <span class="meta" id="project-meta"></span>
 </header>
 <div id="warning-banner"></div>
 <main>
@@ -837,7 +886,8 @@ function showTextPrompt(message, opts = {}) {
 }
 
 const NODE_W = 70;
-const NODE_H = 44;
+const NODE_H = 54;
+const NODE_ICON_SIZE = 32;
 // GNS3's own real "classic" icon set (GPL-2.0, by the GNS3 project -
 // vendored unmodified from the live GNS3 controller's own
 // /v2/symbols/:/symbols/classic/<name>.svg/raw, the exact same files
@@ -987,8 +1037,8 @@ function edgePoint(from, to) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   if (dx === 0 && dy === 0) return { x: from.x, y: from.y };
-  const hw = NODE_W / 2;
-  const hh = NODE_H / 2;
+  const hw = NODE_ICON_SIZE / 2;
+  const hh = NODE_ICON_SIZE / 2;
   const scale = Math.min(
     dx !== 0 ? hw / Math.abs(dx) : Infinity,
     dy !== 0 ? hh / Math.abs(dy) : Infinity
@@ -1055,41 +1105,42 @@ function setLineEndpoints(line, a, b) {
 }
 
 function buildNodeShape(node) {
-  const isVM = node.environment === "ON_ESXI";
-  const roleClass = isVM ? "role-VM" : `role-${node.role}`;
   const hasLive = !!node.live;
   const running = isNodeRunning(node);
 
   const g = document.createElementNS(SVG_NS, "g");
-  g.setAttribute("class", `node-shape ${roleClass}${node.name === selectedName ? " selected" : ""}`);
-  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`);
+  g.setAttribute("class", `node-shape${node.name === selectedName ? " selected" : ""}`);
+  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
   g.dataset.name = node.name;
 
-  const rect = document.createElementNS(SVG_NS, "rect");
-  rect.setAttribute("class", "node-card");
-  rect.setAttribute("width", NODE_W);
-  rect.setAttribute("height", NODE_H);
-  rect.setAttribute("rx", 10);
-  rect.setAttribute("fill", running ? "var(--canvas-card-running-bg)" : "var(--canvas-card-bg)");
-  g.appendChild(rect);
+  const iconX = (NODE_W - NODE_ICON_SIZE) / 2;
+  const iconY = 0;
 
-  const iconSize = 22;
-  const icon = buildRoleIconImage(roleForIcon(node), iconSize);
-  icon.setAttribute("x", (NODE_W - iconSize) / 2);
-  icon.setAttribute("y", 2);
+  const selectBox = document.createElementNS(SVG_NS, "rect");
+  selectBox.setAttribute("class", "node-select-box");
+  selectBox.setAttribute("x", iconX - 4);
+  selectBox.setAttribute("y", iconY - 4);
+  selectBox.setAttribute("width", NODE_ICON_SIZE + 8);
+  selectBox.setAttribute("height", NODE_ICON_SIZE + 8);
+  selectBox.setAttribute("rx", 4);
+  g.appendChild(selectBox);
+
+  const icon = buildRoleIconImage(roleForIcon(node), NODE_ICON_SIZE);
+  icon.setAttribute("x", iconX);
+  icon.setAttribute("y", iconY);
   g.appendChild(icon);
 
   const statusDot = document.createElementNS(SVG_NS, "circle");
   const statusClass = running ? "status-ok" : (hasLive ? "status-off" : "status-unknown");
   statusDot.setAttribute("class", `status-dot ${statusClass}`);
-  statusDot.setAttribute("cx", NODE_W - 8);
-  statusDot.setAttribute("cy", 8);
-  statusDot.setAttribute("r", 4);
+  statusDot.setAttribute("cx", iconX + NODE_ICON_SIZE - 2);
+  statusDot.setAttribute("cy", iconY + NODE_ICON_SIZE - 2);
+  statusDot.setAttribute("r", 5);
   g.appendChild(statusDot);
 
   const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("x", NODE_W / 2);
-  label.setAttribute("y", NODE_H - 6);
+  label.setAttribute("y", NODE_ICON_SIZE + 16);
   label.setAttribute("text-anchor", "middle");
   label.textContent = node.name;
   g.appendChild(label);
@@ -1201,7 +1252,7 @@ function onNodeDrag(evt) {
   node.y = p.y - dragState.offsetY;
 
   const g = document.querySelector(`.node-shape[data-name="${dragState.name}"]`);
-  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`);
+  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
 
   document.querySelectorAll(".link-line").forEach((line) => {
     const [a, b] = line.dataset.pair.split("|");
@@ -1522,6 +1573,7 @@ window.addEventListener("keydown", (evt) => {
   if (evt.key !== "Escape") return;
   if (linkMode) exitLinkMode();
   if (placementImage) clearPlacementMode();
+  closeAllMenus();
 });
 
 // Left device palette (GNS3 Desktop's own node-selection dock, adapted
@@ -1833,6 +1885,28 @@ async function openVmScreen(nodeName, opts) {
 
 document.getElementById("tab-console").addEventListener("click", () => showTab("console"));
 document.getElementById("tab-push").addEventListener("click", () => showTab("push"));
+
+// GNS3 Desktop-style menu bar: click a menu-btn to toggle its dropdown,
+// click anywhere else (including a menu-item, which bubbles here after
+// running its own action) to close it - same "click outside closes it"
+// convention as the rest of this app's own popovers.
+function closeAllMenus() {
+  document.querySelectorAll(".menu-dropdown").forEach((m) => { m.hidden = true; });
+  document.querySelectorAll(".menu-btn").forEach((b) => b.classList.remove("open"));
+}
+document.querySelectorAll(".menu-btn").forEach((btn) => {
+  btn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    const menu = document.getElementById(`menu-${btn.dataset.menu}`);
+    const wasOpen = !menu.hidden;
+    closeAllMenus();
+    if (!wasOpen) {
+      menu.hidden = false;
+      btn.classList.add("open");
+    }
+  });
+});
+document.addEventListener("click", closeAllMenus);
 
 function showTab(name) {
   document.getElementById("right-panel").hidden = name !== "console";
