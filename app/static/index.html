@@ -88,14 +88,99 @@
     display: flex;
     min-height: 0;
   }
+  /* Left device-selection dock, GNS3 Desktop's own "Node types" panel -
+     pick a category, click a device, then click the canvas to place it. */
+  #device-palette {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #palette-header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #palette-categories {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    max-height: 170px;
+    overflow-y: auto;
+  }
+  .palette-cat {
+    text-align: left;
+    background: none;
+    border: none;
+    border-left: 3px solid transparent;
+    color: var(--dim);
+    font-size: 12px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  .palette-cat:hover { background: var(--panel-2); color: var(--text); }
+  .palette-cat.active { background: var(--panel-2); color: var(--text); border-left-color: var(--accent); font-weight: 600; }
+  #palette-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    min-height: 0;
+  }
+  .palette-device {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 1px;
+  }
+  .palette-device:hover { background: var(--panel-2); }
+  .palette-device.armed { background: var(--accent-dim); color: #fff; }
+  .palette-icon { display: flex; flex-shrink: 0; width: 20px; height: 20px; align-items: center; justify-content: center; }
+  .palette-icon svg { display: block; }
+  .palette-empty { padding: 10px 8px; color: var(--dim); font-size: 12px; }
+  #palette-hint {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--warn);
+  }
+  #palette-hint-cancel {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #palette-hint-cancel:hover { border-color: var(--bad); color: var(--bad); }
   #canvas-area {
-    width: 62%;
+    flex: 1 1 auto;
+    min-width: 0;
     border-right: 1px solid var(--border);
     position: relative;
     overflow: hidden;
   }
   #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
   #canvas.panning { cursor: grabbing; }
+  #canvas.placing { cursor: crosshair; }
   .grid-dot { fill: var(--canvas-grid-dot); }
   .grid-bg { pointer-events: none; }
   .node-shape { cursor: pointer; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.18)); }
@@ -142,30 +227,6 @@
   button.toolbar-btn.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
   button.toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   #link-mode-hint { font-size: 12px; color: var(--warn); }
-  #add-node-form {
-    position: absolute;
-    top: 48px;
-    left: 10px;
-    z-index: 5;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    width: 320px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  }
-  #add-node-form .form-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
-  #add-node-form label { display: flex; flex-direction: column; font-size: 11px; color: var(--dim); gap: 3px; flex: 1; min-width: 90px; }
-  #add-node-form input, #add-node-form select {
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-size: 12px;
-  }
-  .form-caveat { font-size: 11px; color: var(--warn); margin: 4px 0 8px; }
-  #add-node-status { font-size: 12px; color: var(--dim); }
   .env-tag {
     font-size: 11px;
     color: var(--dim);
@@ -185,7 +246,8 @@
   }
   button.console-btn:disabled { background: var(--border); color: var(--dim); font-weight: 400; cursor: not-allowed; }
   #right-panel {
-    flex: 1;
+    width: 360px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -448,33 +510,26 @@
 </header>
 <div id="warning-banner"></div>
 <main>
+  <div id="device-palette">
+    <div id="palette-header">Devices</div>
+    <div id="palette-categories">
+      <button class="palette-cat active" data-role="ALL">All Devices</button>
+      <button class="palette-cat" data-role="ROUTER">Routers</button>
+      <button class="palette-cat" data-role="SWITCH">Switches</button>
+      <button class="palette-cat" data-role="PC">End Devices</button>
+      <button class="palette-cat" data-role="FW">Security Devices</button>
+      <button class="palette-cat" data-role="VM">VMs</button>
+    </div>
+    <div id="palette-list"></div>
+    <div id="palette-hint" hidden>
+      <span>Click the canvas to place <b id="palette-hint-name"></b></span>
+      <button id="palette-hint-cancel" title="Cancel (Esc)">✕</button>
+    </div>
+  </div>
   <div id="canvas-area">
     <div id="canvas-toolbar">
-      <button class="toolbar-btn" id="add-node-btn">+ Node</button>
       <button class="toolbar-btn" id="link-mode-btn">Link</button>
       <span id="link-mode-hint" hidden>Click two nodes to connect them (Esc to cancel)</span>
-    </div>
-    <div id="add-node-form" hidden>
-      <div class="form-row">
-        <label>Name <input type="text" id="new-node-name"></label>
-        <label>Role
-          <select id="new-node-role">
-            <option value="ALL" selected>All Devices</option>
-            <option value="ROUTER">ROUTER</option>
-            <option value="SWITCH">SWITCH</option>
-            <option value="PC">PC</option>
-            <option value="FW">FW</option>
-            <option value="VM">VM</option>
-          </select>
-        </label>
-        <label>Image <select id="new-node-image"><option value="">(loading templates…)</option></select></label>
-      </div>
-      <p class="form-caveat">Adding a node briefly disrupts every already-running ESXi-bridged Cloud connection, even just for this one node.</p>
-      <div class="form-row">
-        <button class="toolbar-btn primary" id="add-node-submit">Add</button>
-        <button class="toolbar-btn" id="add-node-cancel">Cancel</button>
-        <span id="add-node-status"></span>
-      </div>
     </div>
     <svg id="canvas" viewBox="0 0 1600 900">
       <defs>
@@ -489,7 +544,7 @@
   </div>
   <div id="right-panel">
     <div id="topology-summary">
-      <h2>Topology</h2>
+      <h2>Topology Summary</h2>
       <ul id="topology-summary-list"></ul>
     </div>
     <div id="console-area">
@@ -802,6 +857,8 @@ let linkMode = false;
 let linkFirstNode = null;
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;
+let placementRole = null;   // armed device's resolved role, or null if nothing armed
+let placementImage = null;  // armed device's exact template/image name
 
 // Template-name -> role classifier. There's no real backend link
 // between a template's name and its role (TopologyBuilder's own
@@ -1183,6 +1240,10 @@ svg.addEventListener("wheel", (evt) => {
 let panState = null;
 svg.addEventListener("pointerdown", (evt) => {
   if (evt.target !== svg) return;
+  if (placementImage) {
+    placeNodeAt(svgPoint(evt));
+    return;
+  }
   panState = { startX: evt.clientX, startY: evt.clientY, startVB: { ...viewBoxState } };
   svg.classList.add("panning");
 });
@@ -1283,13 +1344,11 @@ function showNodeActions(name) {
 
   const btn = document.getElementById("selected-action-btn");
   const canConsole = !isVM && live && live.console_type === "telnet" && live.status === "started";
-  const canVmConsole = isVM && running;
-  btn.textContent = isVM ? "Serial Console" : "Console";
-  btn.disabled = isVM ? !canVmConsole : !canConsole;
-  btn.title = isVM
-    ? (canVmConsole ? "Open this VM's serial console (text)" : `VM status: ${status}`)
-    : (canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data"));
-  btn.onclick = () => (isVM ? openVmConsole(name) : openConsole(name));
+  btn.hidden = isVM;
+  btn.textContent = "Console";
+  btn.disabled = !canConsole;
+  btn.title = canConsole ? "Open this node's console" : (live ? `console type: ${live.console_type || "n/a"}, status: ${status}` : "no live data");
+  btn.onclick = () => openConsole(name);
 
   const screenBtn = document.getElementById("selected-screen-btn");
   screenBtn.hidden = !isVM;
@@ -1460,78 +1519,163 @@ document.getElementById("link-mode-btn").addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (evt) => {
-  if (evt.key === "Escape" && linkMode) exitLinkMode();
+  if (evt.key !== "Escape") return;
+  if (linkMode) exitLinkMode();
+  if (placementImage) clearPlacementMode();
 });
 
-async function populateTemplateOptions() {
-  const select = document.getElementById("new-node-image");
-  const roleValue = document.getElementById("new-node-role").value;
-  const roleFilter = roleValue === "ALL" ? null : roleValue;
-  if (availableTemplates) {
-    renderTemplateOptions(select, availableTemplates, roleFilter);
-    return;
-  }
-  select.innerHTML = `<option value="">(loading templates…)</option>`;
+// Left device palette (GNS3 Desktop's own node-selection dock, adapted
+// to this web canvas): pick a category, click a device to arm
+// placement, then click the canvas to drop it there - replaces the
+// old dropdown-based Add Node form. classifyTemplateRole/
+// buildRoleIconStandalone above are shared with the canvas's own node
+// rendering, so the palette's icons/categorization always matches
+// what a placed node actually looks like.
+const PALETTE_CATEGORIES = [
+  ["ALL", "All Devices"],
+  ["ROUTER", "Routers"],
+  ["SWITCH", "Switches"],
+  ["PC", "End Devices"],
+  ["FW", "Security Devices"],
+  ["VM", "VMs"],
+];
+let paletteRoleFilter = "ALL";
+
+async function ensureTemplatesLoaded() {
+  if (availableTemplates) return availableTemplates;
   try {
     const resp = await fetch("/templates");
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     availableTemplates = await resp.json();
-    renderTemplateOptions(select, availableTemplates, roleFilter);
   } catch (err) {
-    select.innerHTML = `<option value="">(failed to load: ${err})</option>`;
+    availableTemplates = { gns3: [], esxi: [], gns3_categories: {}, _error: String(err) };
   }
+  return availableTemplates;
 }
 
-// roleFilter narrows the list to templates classifyTemplateRole guesses
-// match that role (see feature: "role selection shrinks down the
-// available devices to the ones that actually match the role"). If a
-// filter would hide every single template, it's dropped rather than
-// leaving the operator with an unusable empty dropdown.
-function renderTemplateOptions(select, templates, roleFilter) {
-  const previousValue = select.value;
-  select.innerHTML = "";
-  let matchedCount = 0;
-  for (const [label, group] of [["GNS3", "gns3"], ["ESXi", "esxi"]]) {
-    const names = templates[group];
-    if (!names.length) continue;
-    const filtered = roleFilter ? names.filter((n) => classifyTemplateRole(n, group) === roleFilter) : names;
-    if (!filtered.length) continue;
-    matchedCount += filtered.length;
-    const optgroup = document.createElement("optgroup");
-    optgroup.label = label;
-    for (const name of filtered) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      optgroup.appendChild(opt);
-    }
-    select.appendChild(optgroup);
-  }
-  if (roleFilter && !matchedCount) {
-    renderTemplateOptions(select, templates, null);
+function renderPaletteList() {
+  const list = document.getElementById("palette-list");
+  list.innerHTML = "";
+  if (!availableTemplates) {
+    list.innerHTML = `<div class="palette-empty">Loading devices…</div>`;
     return;
   }
-  if ([...select.options].some((o) => o.value === previousValue)) {
-    select.value = previousValue;
+  if (availableTemplates._error) {
+    list.innerHTML = `<div class="palette-empty">Failed to load templates: ${availableTemplates._error}</div>`;
+    return;
+  }
+  const roleFilter = paletteRoleFilter === "ALL" ? null : paletteRoleFilter;
+  const entries = [];
+  for (const group of ["gns3", "esxi"]) {
+    for (const name of availableTemplates[group]) {
+      const role = classifyTemplateRole(name, group) || "PC";
+      if (roleFilter && role !== roleFilter) continue;
+      entries.push({ name, role });
+    }
+  }
+  if (!entries.length) {
+    list.innerHTML = `<div class="palette-empty">No devices in this category.</div>`;
+    return;
+  }
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "palette-device";
+    if (placementImage === entry.name) row.classList.add("armed");
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "palette-icon";
+    iconWrap.appendChild(buildRoleIconStandalone(entry.role, 20));
+    const label = document.createElement("span");
+    label.textContent = entry.name;
+    row.appendChild(iconWrap);
+    row.appendChild(label);
+    row.addEventListener("click", () => armPlacement(entry.name, entry.role, row));
+    list.appendChild(row);
   }
 }
 
-document.getElementById("new-node-role").addEventListener("change", () => {
-  const roleValue = document.getElementById("new-node-role").value;
-  if (availableTemplates) {
-    renderTemplateOptions(
-      document.getElementById("new-node-image"), availableTemplates, roleValue === "ALL" ? null : roleValue
-    );
+function armPlacement(image, role, rowEl) {
+  if (placementImage === image) {
+    clearPlacementMode();
+    return;
   }
+  placementImage = image;
+  placementRole = role;
+  document.querySelectorAll(".palette-device.armed").forEach((el) => el.classList.remove("armed"));
+  rowEl.classList.add("armed");
+  document.getElementById("palette-hint-name").textContent = image;
+  document.getElementById("palette-hint").hidden = false;
+  document.getElementById("canvas").classList.add("placing");
+}
+
+function clearPlacementMode() {
+  placementImage = null;
+  placementRole = null;
+  document.querySelectorAll(".palette-device.armed").forEach((el) => el.classList.remove("armed"));
+  document.getElementById("palette-hint").hidden = true;
+  document.getElementById("canvas").classList.remove("placing");
+}
+
+const ROLE_NAME_PREFIX = { ROUTER: "R", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" };
+function suggestNodeName(role) {
+  const prefix = ROLE_NAME_PREFIX[role] || "Node";
+  let i = 1;
+  while (nodesData[`${prefix}${i}`]) i++;
+  return `${prefix}${i}`;
+}
+
+async function placeNodeAt(point) {
+  const role = placementRole;
+  const image = placementImage;
+  clearPlacementMode();
+  const name = await showTextPrompt(`Name for the new ${image} node:`, {
+    title: "Add Node",
+    defaultValue: suggestNodeName(role),
+  });
+  if (!name) return;
+  if (!await showConfirm(
+    `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
+    `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
+    `and may take a while.`,
+    { title: "Add node", confirmLabel: "Add" }
+  )) {
+    return;
+  }
+  try {
+    const resp = await fetch("/nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, role, image }),
+    });
+    if (!resp.ok) {
+      await showAlert(`Failed to add node: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await fetch("/layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, x: point.x, y: point.y }),
+    });
+    await loadCanvas();
+    fitViewToNodes();
+  } catch (err) {
+    await showAlert(`Failed to add node: ${err}`);
+  }
+}
+
+document.getElementById("palette-hint-cancel").addEventListener("click", clearPlacementMode);
+
+document.querySelectorAll(".palette-cat").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    paletteRoleFilter = btn.dataset.role;
+    document.querySelectorAll(".palette-cat").forEach((b) => b.classList.toggle("active", b === btn));
+    renderPaletteList();
+  });
 });
 
-document.getElementById("new-node-image").addEventListener("change", (evt) => {
-  const roleSelect = document.getElementById("new-node-role");
-  if (roleSelect.value !== "ALL" || !evt.target.value || !availableTemplates) return;
-  const group = availableTemplates.esxi.includes(evt.target.value) ? "esxi" : "gns3";
-  const guessed = classifyTemplateRole(evt.target.value, group);
-  if (guessed) roleSelect.value = guessed;
-});
+async function initPalette() {
+  await ensureTemplatesLoaded();
+  renderPaletteList();
+}
 
 document.getElementById("import-project-btn").addEventListener("click", () => {
   document.getElementById("import-project-input").click();
@@ -1581,77 +1725,6 @@ document.getElementById("import-project-input").addEventListener("change", async
   }
 });
 
-document.getElementById("add-node-btn").addEventListener("click", async () => {
-  const form = document.getElementById("add-node-form");
-  const opening = form.hidden;
-  form.hidden = !opening;
-  if (opening) {
-    document.getElementById("new-node-role").value = "ALL";
-    await populateTemplateOptions();
-  }
-});
-
-document.getElementById("add-node-cancel").addEventListener("click", () => {
-  document.getElementById("add-node-form").hidden = true;
-});
-
-document.getElementById("add-node-submit").addEventListener("click", async () => {
-  const name = document.getElementById("new-node-name").value.trim();
-  let role = document.getElementById("new-node-role").value;
-  const image = document.getElementById("new-node-image").value;
-  const statusEl = document.getElementById("add-node-status");
-  if (!name || !image) {
-    statusEl.textContent = "Name and image are required.";
-    return;
-  }
-  if (role === "ALL") {
-    // "All Devices" is a frontend-only browsing aid, not a real role
-    // the backend accepts - resolve it the same way picking an image
-    // already auto-fills Role, and require a real pick if that can't
-    // classify this specific image confidently.
-    const group = availableTemplates && availableTemplates.esxi.includes(image) ? "esxi" : "gns3";
-    const guessed = classifyTemplateRole(image, group);
-    if (!guessed) {
-      statusEl.textContent = "Couldn't automatically determine a role for this image - pick one from Role.";
-      return;
-    }
-    role = guessed;
-    document.getElementById("new-node-role").value = role;
-  }
-  if (!await showConfirm(
-    `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
-    `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
-    `and may take a while.`,
-    { title: "Add node", confirmLabel: "Add" }
-  )) {
-    return;
-  }
-
-  const submitBtn = document.getElementById("add-node-submit");
-  submitBtn.disabled = true;
-  statusEl.textContent = "Adding node (deploying live, may take a while)…";
-  try {
-    const resp = await fetch("/nodes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, role, image }),
-    });
-    if (!resp.ok) {
-      statusEl.textContent = (await resp.json()).detail || `HTTP ${resp.status}`;
-      return;
-    }
-    document.getElementById("add-node-form").hidden = true;
-    document.getElementById("new-node-name").value = "";
-    statusEl.textContent = "";
-    await loadCanvas();
-    fitViewToNodes();
-  } catch (err) {
-    statusEl.textContent = `${err}`;
-  } finally {
-    submitBtn.disabled = false;
-  }
-});
-
 function openTerminalWebSocket(session, wsUrl) {
   const termHost = document.createElement("div");
   termHost.className = "session-terminal";
@@ -1688,35 +1761,6 @@ function openConsole(nodeName) {
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   openTerminalWebSocket(session, `${proto}//${location.host}/ws/console/${encodeURIComponent(nodeName)}`);
-}
-
-async function openVmConsole(nodeName) {
-  const id = sessionIdFor(nodeName, "vm-console");
-  const session = ensureSessionPanel(id, nodeName, `${nodeName} (serial)`);
-  switchToSession(id);
-  if (session.kind) return;
-  session.kind = "terminal";
-  setSessionStatus(session, "preparing (may power-cycle the VM on first use)…");
-
-  try {
-    const resp = await fetch(`/vm-console/${encodeURIComponent(nodeName)}/prepare`, { method: "POST" });
-    if (!resp.ok) {
-      setSessionStatus(session, `prepare failed: HTTP ${resp.status} ${await resp.text()}`, "status-bad");
-      return;
-    }
-    const data = await resp.json();
-    if (data.guest_console_configured) {
-      setSessionStatus(session, "VM was power-cycled to enable console output, connecting…");
-    } else if (data.power_cycled) {
-      setSessionStatus(session, "VM was power-cycled to enable its console, connecting…");
-    }
-  } catch (err) {
-    setSessionStatus(session, `prepare failed: ${err}`, "status-bad");
-    return;
-  }
-
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  openTerminalWebSocket(session, `${proto}//${location.host}/ws/vm-console/${encodeURIComponent(nodeName)}`);
 }
 
 async function openVmScreen(nodeName, opts) {
@@ -1859,6 +1903,7 @@ document.getElementById("push-btn").addEventListener("click", async () => {
 loadCanvas().catch((err) => {
   document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
 });
+initPalette();
 </script>
 </body>
 </html>

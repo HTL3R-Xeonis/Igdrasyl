@@ -7,10 +7,9 @@ would refuse it outright, or an operator would have to manually trust
 it per-host) - both sidestepped by acquiring the ticket and opening the
 real upstream WebSocket server-side, right when a browser connects,
 then just bridging bytes (see app/ws_bridge.py). Same "proxy through
-our own backend" shape as app/console.py/app/vm_console.py, just with
-a WebSocket-to-WebSocket bridge instead of TCP-to-WebSocket, since
-WebMKS's own transport already is a WebSocket carrying raw RFB (VNC)
-protocol bytes.
+our own backend" shape as app/console.py, just with a WebSocket-to-
+WebSocket bridge instead of TCP-to-WebSocket, since WebMKS's own
+transport already is a WebSocket carrying raw RFB (VNC) protocol bytes.
 
 Historically a dead end on this project's real infrastructure (see
 HANDOFF.md's full investigation): WebMKS and classic VNC both hit the
@@ -18,21 +17,21 @@ exact same "accepted then instantly closed, zero bytes" failure,
 traced to what looked like a genuine build-level bug in vmx's own mks
 subsystem - concluded as infrastructure work beyond this project's own
 scope, and parked in favor of a network-backed serial console instead
-(app/vm_console.py, still the right choice for headless
-troubleshooting/boot logs). Re-verified fresh, independently, before
-building any of this - and found now genuinely working end-to-end: a
-full RFB handshake completes, with a real framebuffer and desktop name
-back from the actual VM. Whatever was broken on the host appears to
-have been resolved since the last investigation (unconfirmed why -
-possibly a host patch, a reboot, or a hostd/rhttpproxy restart that
-happened for unrelated reasons).
+(since removed - this Screen feature alone now covers ESXi VM access).
+Re-verified fresh, independently, before building any of this - and
+found now genuinely working end-to-end: a full RFB handshake
+completes, with a real framebuffer and desktop name back from the
+actual VM. Whatever was broken on the host appears to have been
+resolved since the last investigation (unconfirmed why - possibly a
+host patch, a reboot, or a hostd/rhttpproxy restart that happened for
+unrelated reasons).
 
-Unlike the serial console, this needs no VM reconfiguration and no
-power cycle - WebMKS works for any already-running VM regardless of
-guest OS, so there's no separate "prepare" endpoint here (contrast
-app/vm_console.py's own prepare step, which can take up to ~60s and
-power-cycles the VM the first time). The only precondition is that the
-VM is actually powered on, checked before ever acquiring a ticket.
+This needs no VM reconfiguration and no power cycle - WebMKS works for
+any already-running VM regardless of guest OS, so there's no separate
+"prepare" endpoint here (contrast the removed serial console's own
+prepare step, which could take up to ~60s and power-cycled the VM the
+first time). The only precondition is that the VM is actually powered
+on, checked before ever acquiring a ticket.
 """
 
 from __future__ import annotations

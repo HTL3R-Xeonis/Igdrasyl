@@ -1,9 +1,10 @@
 """
 Shared pyvmomi Guest Operations helpers - credential lookup and one-
-command-at-a-time execution, used by both app/config_push.py (pushing a
-device's raw command list) and app/vm_console.py (the one-off guest-side
-console=ttyS0 setup). Factored out here once a second consumer needed
-the exact same two things, same reasoning as app/tcp_bridge.py.
+command-at-a-time execution, used by app/config_push.py (pushing a
+device's raw command list). Originally factored out once a second
+consumer (a now-removed ESXi VM serial-console feature's one-off
+guest-side console=ttyS0 setup) needed the exact same two things, same
+reasoning as app/tcp_bridge.py.
 """
 
 from __future__ import annotations

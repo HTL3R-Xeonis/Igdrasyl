@@ -1,10 +1,10 @@
 """
-Shared TCP<->WebSocket byte-pumping - both app/console.py (GNS3 Telnet
-consoles) and app/vm_console.py (ESXi VM serial consoles) are the same
-shape of thing underneath: a plain-text TCP stream bridged to a browser
-xterm.js terminal over a WebSocket. Only how each resolves its own
-host/port differs; this is the part that was byte-for-byte duplicated
-between them before there were two consumers of it.
+Shared TCP<->WebSocket byte-pumping for app/console.py's GNS3 Telnet
+console proxy: a plain-text TCP stream bridged to a browser xterm.js
+terminal over a WebSocket. Originally shared with a second consumer, a
+now-removed ESXi VM serial-console feature that was the same shape of
+thing underneath - kept as its own module rather than folded back into
+console.py, since a second consumer could reasonably need it again.
 """
 
 from __future__ import annotations

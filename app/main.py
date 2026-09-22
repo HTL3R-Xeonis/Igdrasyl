@@ -1,6 +1,6 @@
 """
 TopologyOperator's FastAPI backend - Phase 0/1 read-only foundation.
-Everything else (GNS3 console proxy, config push, embedded VM consoles)
+Everything else (GNS3 console proxy, config push, embedded VM screens)
 plugs into the connections/graph this module resolves once at startup.
 
 Run with: uvicorn app.main:app --reload
@@ -25,7 +25,7 @@ from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, lifecycle, project_bundle, topology_write, vm_console, vm_screen
+from app import console, lifecycle, project_bundle, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports
 from app.layout import load_layout, save_position
@@ -59,9 +59,6 @@ async def lifespan(app: FastAPI):
     # not resolved yet, project not deployed yet).
     app.state.graph = load_graph()
     app.state.project_name = resolve_project_name()
-    # vm_name -> assigned serial console port, in-memory for this
-    # process's lifetime - see app/vm_console.py.
-    app.state.vm_console_ports = {}
     # Most recent /config-push request body - project_bundle.py's own
     # GET /project/export includes this as the bundle's configs.json,
     # since nothing else persists config-push data anywhere.
@@ -104,7 +101,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
 app.include_router(console.router)
-app.include_router(vm_console.router)
 app.include_router(vm_screen.router)
 
 
@@ -384,40 +380,6 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
         raise HTTPException(400, str(exc))
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
         raise HTTPException(502, str(exc))
-
-
-@app.post("/vm-console/{node_name}/prepare")
-def prepare_vm_console(node_name: str) -> dict[str, Any]:
-    """
-    Ensures a network-backed serial console is added on this ESXi VM
-    node. The first call for a given VM can take up to ~60s and power-
-    cycles it - see app/vm_console.py. Also makes a best-effort attempt
-    to configure the guest's own GRUB for `console=ttyS0` (needed for
-    the guest to actually send anything there) - never fails the
-    request if that can't be done. Call this before opening
-    /ws/vm-console/{name}; that endpoint refuses to connect until the
-    hardware/network part above has run at least once.
-    """
-    node = app.state.graph.nodes.get(node_name)
-    if node is None or node.env != Environment.ON_ESXI:
-        raise HTTPException(404, f"no ESXi VM node named {node_name!r}")
-    vm = app.state.esxi_connection.get_vm(node_name)
-    if vm is None:
-        raise HTTPException(404, f"VM {node_name!r} not found on ESXi")
-    try:
-        _port, just_enabled = vm_console.ensure_serial_console(
-            vm, app.state.vm_console_ports
-        )
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc))
-
-    # Best-effort, never fails the request - the hardware/network path
-    # above is already the real value even if this can't run (Windows
-    # images, missing guest credentials, guest tools not up yet, etc.).
-    guest_configured = vm_console.ensure_guest_console_configured(
-        vm, node.image, app.state.esxi_connection
-    )
-    return {"power_cycled": just_enabled, "guest_console_configured": guest_configured}
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in
