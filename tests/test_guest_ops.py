@@ -1,6 +1,45 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from app.guest_ops import run_command_in_guest
+from app.guest_ops import guest_credentials_for_image, run_command_in_guest
+
+
+def test_guest_credentials_for_image_prefers_root():
+    """
+    Real bug found live: the first (index-0) user/password pair was
+    always used, but on every Linux template that's the non-root
+    junioradmin account, which has no passwordless sudo configured -
+    config-push commands needing root (nearly all of them) failed
+    silently. root's own credentials are right there in the same
+    response, just at a later index.
+    """
+    templates = {
+        "templates": [
+            {
+                "name": "debian",
+                "users": ["junioradmin", "root"],
+                "passwords": ["junioradmin", "REMOVED"],
+            }
+        ]
+    }
+    with patch("app.guest_ops.APIHandler.get", return_value=templates):
+        assert guest_credentials_for_image("debian") == ("root", "REMOVED")
+
+
+def test_guest_credentials_for_image_falls_back_without_root():
+    templates = {
+        "templates": [
+            {
+                "name": "Windows 10 Pro Education",
+                "users": ["junioradmin"],
+                "passwords": ["junioradmin"],
+            }
+        ]
+    }
+    with patch("app.guest_ops.APIHandler.get", return_value=templates):
+        assert guest_credentials_for_image("Windows 10 Pro Education") == (
+            "junioradmin",
+            "junioradmin",
+        )
 
 
 def test_run_command_in_guest_returns_none_on_method_fault():

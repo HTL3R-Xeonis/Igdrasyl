@@ -22,12 +22,19 @@ _GUEST_OPS_POLL_INTERVAL_SECONDS = 1.0
 
 def guest_credentials_for_image(image: str) -> tuple[str, str] | None:
     """
-    First user/password pair (parallel lists, index-matched) from the
-    ESXi Template-API's per-template metadata for the given image - see
+    The `root` user/password pair (parallel lists, index-matched) from
+    the ESXi Template-API's per-template metadata for the given image,
+    falling back to the first pair if no `root` entry exists (e.g. the
+    Windows templates, which only ever list one non-root account) - see
     HANDOFF.md, confirmed live on this project's real infrastructure
     (e.g. debian: users=[junioradmin, root], passwords=[junioradmin,
-    REMOVED]). Mirrors APIHandler.find_esxi_template_file's own
-    lenient-name-match pattern rather than adding a new endpoint.
+    REMOVED]). Real bug found live: the first pair (junioradmin on
+    every Linux template) has no passwordless sudo configured, so
+    config-push commands needing root - i.e. almost anything that
+    actually configures the guest - failed silently (guest-ops only
+    ever reports an exit code, never *why* a command failed). Mirrors
+    APIHandler.find_esxi_template_file's own lenient-name-match pattern
+    rather than adding a new endpoint.
     """
     data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")
     normalized = normalize_template_name(image)
@@ -36,9 +43,12 @@ def guest_credentials_for_image(image: str) -> tuple[str, str] | None:
             continue
         users = template.get("users") or []
         passwords = template.get("passwords") or []
-        if users and passwords:
-            return users[0], passwords[0]
-        return None
+        if not users or not passwords:
+            return None
+        for user, password in zip(users, passwords):
+            if user.lower() == "root":
+                return user, password
+        return users[0], passwords[0]
     return None
 
 

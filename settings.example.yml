@@ -29,6 +29,14 @@ esxi:
   # VM's trunk interface" if this doesn't match. Same value the
   # TopologyBuilder deploy that created this topology used.
   # trunk_port_group: PG-GNS3-TRUNK
+  # Must be the SAME vSwitch the GNS3 VM's trunk port group actually
+  # lives on - defaults to "internal_network" if omitted, which is only
+  # right if that's genuinely where the trunk NIC is. A mismatch here is
+  # silent: ESXi-hosted nodes deploy and power on fine, but their traffic
+  # never reaches the GNS3 VM at all (two isolated vSwitches, no uplink
+  # between them) - confirmed live the hard way. Same value the
+  # TopologyBuilder deploy that created this topology used.
+  # virtual_switch: vSwitch0
 
 gns3:
   username: gns3
