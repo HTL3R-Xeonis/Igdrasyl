@@ -72,6 +72,23 @@ esxi:
   # Irrelevant (but harmless to set) while incremental_deploy is true,
   # since only a non-incremental deploy ever resets the vSwitch at all.
   # ignore_port_groups: [PG-MGMT]
+  # Local filesystem path to the GNS3 VM's own OVA (an NFS share mounted
+  # locally works fine here, it's just a path). Enables GNS3-VM deploy:
+  # a File menu button to replace the GNS3 VM from this OVA on demand,
+  # and automatic recovery at startup if no VM named gns3_vm_name exists
+  # on the host at all (never if one exists but just isn't reporting an
+  # IP yet, e.g. still booting - only when it's genuinely absent). Unset
+  # (the default) leaves both of those unavailable.
+  # gns3_vm_ova_path: /mnt/nfs/templates/GNS3-VM.ova
+  # ESXi port group for a freshly deployed GNS3 VM's management NIC -
+  # required (alongside gns3_vm_ova_path) for the deploy feature above.
+  # Must be the OVA's first-added network adapter; trunk_port_group
+  # above is reused for the second (trunk) NIC.
+  # gns3_vm_mgmt_network: PG-MGMT
+  # ESXi datastore to place a freshly deployed GNS3 VM on - reuses the
+  # same datastore setting TopologyBuilder's own node deploys use.
+  # Unset auto-picks whichever datastore has the most free space.
+  # datastore: datastore1
 
 gns3:
   username: gns3

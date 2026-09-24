@@ -70,6 +70,81 @@ def test_reload_gns3_project_502s_on_gns3_failure(client, app_state):
     assert resp.status_code == 502
 
 
+def test_deploy_gns3_vm_400s_when_unconfigured(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    with patch(
+        "app.main.gns3_vm_deploy_jobs.start_job",
+        side_effect=gns3_vm_deploy_jobs.NotConfigured("not configured"),
+    ):
+        resp = client.post("/gns3-vm/deploy")
+    assert resp.status_code == 400
+
+
+def test_deploy_gns3_vm_409s_when_already_running(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    with patch(
+        "app.main.gns3_vm_deploy_jobs.start_job",
+        side_effect=gns3_vm_deploy_jobs.AlreadyRunning("already running"),
+    ):
+        resp = client.post("/gns3-vm/deploy")
+    assert resp.status_code == 409
+
+
+def test_deploy_gns3_vm_returns_job_id(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
+    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job):
+        resp = client.post("/gns3-vm/deploy")
+    assert resp.status_code == 200
+    assert resp.json() == {"job_id": "job-1"}
+
+
+def test_gns3_vm_deploy_status_404s_for_unknown_job(client, app_state):
+    app_state.gns3_vm_deploy_job = None
+    resp = client.get("/gns3-vm/deploy/nope")
+    assert resp.status_code == 404
+
+
+def test_gns3_vm_deploy_status_reports_running_stage(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    app_state.gns3_vm_deploy_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(
+        id="job-1", status="running", stage="importing OVA"
+    )
+    resp = client.get("/gns3-vm/deploy/job-1")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "running", "stage": "importing OVA"}
+
+
+def test_gns3_vm_deploy_status_reports_done_with_ip(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    app_state.gns3_vm_deploy_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(
+        id="job-1", status="done", stage="waiting for an IP address", ip_address="10.20.20.233"
+    )
+    resp = client.get("/gns3-vm/deploy/job-1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "done"
+    assert body["ip_address"] == "10.20.20.233"
+
+
+def test_gns3_vm_deploy_status_reports_error(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    app_state.gns3_vm_deploy_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(
+        id="job-1", status="error", error="no IP reported"
+    )
+    resp = client.get("/gns3-vm/deploy/job-1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["error"] == "no IP reported"
+
+
 def test_topology_returns_static_structure_regardless_of_live_state(client, app_state):
     resp = client.get("/topology")
     assert resp.status_code == 200

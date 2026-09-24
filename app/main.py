@@ -25,7 +25,7 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
+from app import console, design, gns3_vm_deploy_jobs, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import (
     NoLiveProject,
@@ -78,10 +78,25 @@ async def lifespan(app: FastAPI):
     # own notes on that.
     app.state.last_drawings = []
 
+    # A separate, never-deployed sketch topology (see app/design.py),
+    # reachable from the landing page independent of whichever host
+    # profile this process happens to be running. In-memory only - lost
+    # on a host switch (a real process re-exec, see settings_profiles.py)
+    # same as any other in-memory state, and otherwise only cleared by
+    # POST /design/reset.
+    app.state.design = design.new_state()
+
     app.state.gns3_vm_ip = None
     app.state.project_id = None
     app.state.startup_warning = None
+    app.state.gns3_vm_deploy_job = None
     try:
+        # Auto-recovery: only when the configured GNS3 VM is genuinely
+        # absent - never when one exists but just isn't reporting an IP
+        # yet (e.g. still booting). See gns3_vm_deploy_jobs's own
+        # docstring for the exact rule and why.
+        gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
+
         gns3_vm_ip = app.state.esxi_connection.get_vm_ip_address(
             Settings.ESXI.GNS3_VM_NAME
         )
@@ -398,6 +413,108 @@ def set_drawings(request: DrawingsRequest) -> dict[str, str]:
     return {"status": "ok"}
 
 
+# --- Offline design canvas (app/design.py) - a never-deployed sketch
+# topology, reachable from the landing page. Same shapes as the live
+# endpoints above so the frontend's one canvas renderer covers both,
+# but nothing here ever touches ESXi/GNS3 or Settings.TOPOLOGY_FILE.
+
+@app.get("/design/templates")
+def design_templates() -> dict[str, Any]:
+    try:
+        return topology_write.list_templates()
+    except TimeoutError as exc:
+        raise HTTPException(503, str(exc))
+
+
+@app.get("/design/topology")
+def design_topology() -> list[dict[str, Any]]:
+    return design.to_topology_view(app.state.design)
+
+
+@app.post("/design/nodes")
+def design_add_node(request: AddNodeRequest) -> dict[str, str]:
+    try:
+        design.add_node(app.state.design, request.name, request.role, request.image)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"status": "ok"}
+
+
+@app.delete("/design/nodes/{name}")
+def design_remove_node(name: str) -> dict[str, str]:
+    try:
+        design.remove_node(app.state.design, name)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/design/links")
+def design_add_link(request: AddLinkRequest) -> dict[str, str]:
+    try:
+        design.add_link(
+            app.state.design, request.node1, request.if1, request.node2, request.if2
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"status": "ok"}
+
+
+@app.delete("/design/links/{node1}/{node2}")
+def design_remove_link(node1: str, node2: str) -> dict[str, str]:
+    try:
+        design.remove_link(app.state.design, node1, node2)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    return {"status": "ok"}
+
+
+@app.get("/design/layout")
+def design_layout() -> dict[str, dict[str, float]]:
+    return app.state.design.layout
+
+
+@app.post("/design/layout")
+def design_update_layout(update: LayoutUpdate) -> dict[str, str]:
+    if update.name not in app.state.design.nodes:
+        raise HTTPException(404, f"no node named {update.name!r}")
+    app.state.design.layout[update.name] = {"x": update.x, "y": update.y}
+    return {"status": "ok"}
+
+
+@app.get("/design/drawings")
+def design_get_drawings() -> list[dict[str, Any]]:
+    return app.state.design.drawings
+
+
+@app.post("/design/drawings")
+def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
+    app.state.design.drawings = request.drawings
+    return {"status": "ok"}
+
+
+@app.post("/design/reset")
+def design_reset() -> dict[str, str]:
+    """Clears the sketch and starts a fresh, empty one."""
+    app.state.design = design.new_state()
+    return {"status": "ok"}
+
+
+@app.get("/design/export")
+def design_export() -> Response:
+    """
+    Downloads the sketch as a `.topoproj` bundle carrying no ESXi/GNS3
+    target - importable later against whichever host is active via the
+    existing POST /project/import.
+    """
+    data = project_bundle.build_design_export(app.state.design, "design")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="design.topoproj"'},
+    )
+
+
 @app.get("/project/export")
 def export_project() -> Response:
     """
@@ -434,6 +551,49 @@ def reload_gns3_project() -> dict[str, str]:
     except (requests.RequestException, TimeoutError) as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
+
+
+@app.post("/gns3-vm/deploy")
+def deploy_gns3_vm() -> dict[str, str]:
+    """
+    Kicks off a background job that replaces the configured GNS3 VM
+    with a freshly imported one from gns3_vm_ova_path - the same action
+    the app's own startup takes automatically when that VM is found
+    completely missing, available here as an explicit, on-demand GUI
+    action (e.g. to recover from a corrupted GNS3 VM without restarting
+    this whole process). An existing same-named VM is powered off and
+    renamed as a timestamped backup, never deleted - see
+    src.gns3_vm_deploy.deploy_fresh_gns3_vm's own docstring. Poll
+    GET /gns3-vm/deploy/{job_id} for progress.
+    """
+    try:
+        job = gns3_vm_deploy_jobs.start_job(app)
+    except gns3_vm_deploy_jobs.NotConfigured as exc:
+        raise HTTPException(400, str(exc))
+    except gns3_vm_deploy_jobs.AlreadyRunning as exc:
+        raise HTTPException(409, str(exc))
+    return {"job_id": job.id}
+
+
+@app.get("/gns3-vm/deploy/{job_id}")
+def gns3_vm_deploy_status(job_id: str) -> dict[str, Any]:
+    """
+    Poll target for POST /gns3-vm/deploy's background job. "status" is
+    "running", "done", or "error". While running: "stage", a short
+    human-readable step name (there's no real percentage available -
+    see gns3_vm_deploy_jobs's own docstring). Once "done": "ip_address".
+    Once "error": "error" (message).
+    """
+    job = getattr(app.state, "gns3_vm_deploy_job", None)
+    if job is None or job.id != job_id:
+        raise HTTPException(404, f"no GNS3 VM deploy job {job_id!r}")
+
+    response: dict[str, Any] = {"status": job.status, "stage": job.stage}
+    if job.status == "error":
+        response["error"] = job.error
+    elif job.status == "done":
+        response["ip_address"] = job.ip_address
+    return response
 
 
 @app.post("/project/import")

@@ -884,6 +884,110 @@
     cursor: pointer;
   }
   .drawing-style-clear:hover { border-color: var(--accent); color: var(--accent); }
+  /* Custom RGBA color field - a checkerboard-backed swatch button that
+     opens a small popover with a native hue/sat picker (still the
+     easiest reliable way to pick a hue - no reason to reinvent a
+     canvas gradient picker for that part), an alpha slider, and a
+     live rgba()/hex text field for direct/paste entry. See
+     buildColorField(). */
+  .color-field { position: relative; }
+  .color-swatch-btn {
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, #808080 25%, transparent 25%),
+      linear-gradient(-45deg, #808080 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #808080 75%),
+      linear-gradient(-45deg, transparent 75%, #808080 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+    background-color: #fff;
+  }
+  .color-swatch-btn:hover, .color-swatch-btn:focus-visible { border-color: var(--accent); outline: none; }
+  .color-swatch-fill { position: absolute; inset: 0; border-radius: 3px; pointer-events: none; }
+  .color-popover {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 6px);
+    left: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 190px;
+  }
+  .color-popover-row { display: flex; align-items: center; gap: 8px; }
+  .color-popover input[type="color"] {
+    width: 30px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .color-alpha-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 12px;
+    border-radius: 6px;
+    background-image:
+      linear-gradient(45deg, #808080 25%, transparent 25%),
+      linear-gradient(-45deg, #808080 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #808080 75%),
+      linear-gradient(-45deg, transparent 75%, #808080 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+    background-color: #fff;
+  }
+  .color-alpha-slider::-webkit-slider-runnable-track { height: 12px; border-radius: 6px; }
+  .color-alpha-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+    margin-top: -1px;
+    cursor: pointer;
+  }
+  .color-alpha-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .color-alpha-readout { flex: 0 0 34px; text-align: right; color: var(--dim); font-size: 11px; }
+  .color-text-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  .color-text-input:focus { border-color: var(--accent); outline: none; }
+  /* Rotate handle - a small circle on a stalk above the shape's own
+     center, wrapped in the same rotate() transform as the shape
+     itself so it visually orbits with its current angle. */
+  .drawing-rotate-line { stroke: var(--accent); stroke-width: 1; }
+  .drawing-rotate-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: grab; }
+  .drawing-rotate-handle:active { cursor: grabbing; }
   .drawing-layer-row { display: flex; gap: 4px; padding: 2px 4px; }
   .drawing-layer-row .menu-item { flex: 1; text-align: center; font-size: 11px; padding: 6px 4px; }
   .drawing-delete-btn {
@@ -907,6 +1011,7 @@
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
+        <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup rather than deleting it">Deploy Fresh GNS3 VM…</button>
       </div>
     </div>
     <div class="menu">
@@ -916,6 +1021,8 @@
         <button class="menu-item" id="tab-push">Config Push</button>
         <div class="menu-separator"></div>
         <button class="menu-item active" id="toggle-devices-btn">Devices</button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="take-screenshot-btn">Take Screenshot</button>
       </div>
     </div>
     <div class="menu">
@@ -1390,8 +1497,17 @@ let showPortLabels = true;
 // the first /health response updates it, so an early confirm dialog
 // (unlikely in practice, but possible) describes the common case.
 let incrementalDeploy = true;
+// True while the canvas is showing the offline design sketch (see
+// app/design.py) instead of a real, deployed host's live topology -
+// reachable from the landing page's own "Design a Topology" tile.
+// Nothing under /design/* ever deploys anything, so every write here
+// is instant and never disruptive.
+let designMode = false;
+function apiPath(path) {
+  return designMode ? `/design${path}` : path;
+}
 function confirmDisruption(message, opts) {
-  if (!showDisruptionWarnings) return Promise.resolve(true);
+  if (designMode || !showDisruptionWarnings) return Promise.resolve(true);
   return showConfirm(message, opts);
 }
 // GNS3's own real "classic" icon set (GPL-2.0, by the GNS3 project -
@@ -1535,14 +1651,22 @@ function buildRoleIconStandalone(role, size) {
   return svgEl;
 }
 
+const DESIGN_HEALTH_STUB = {
+  gns3_project_name: "Untitled design (not deployed)",
+  esxi_ip: "", gns3_vm_ip: null, gns3_project_id: null, warning: null,
+  incremental_deploy: true,
+};
+
 async function loadCanvas() {
   try {
-    const [health, topology, nodesResult, positions] = await Promise.all([
-      fetch("/health").then(r => r.json()),
-      fetch("/topology").then(r => r.json()),
-      fetch("/nodes").then(r => r.ok ? r.json() : null),
-      fetch("/layout").then(r => r.json()),
-    ]);
+    const [health, topology, nodesResult, positions] = designMode
+      ? [DESIGN_HEALTH_STUB, await fetch(apiPath("/topology")).then(r => r.json()), null, await fetch(apiPath("/layout")).then(r => r.json())]
+      : await Promise.all([
+        fetch("/health").then(r => r.json()),
+        fetch("/topology").then(r => r.json()),
+        fetch("/nodes").then(r => r.ok ? r.json() : null),
+        fetch("/layout").then(r => r.json()),
+      ]);
 
     document.getElementById("project-meta").textContent =
       `${health.gns3_project_name} @ ${health.esxi_ip}`;
@@ -1577,7 +1701,7 @@ async function loadCanvas() {
     if (!drawingsLoaded) {
       drawingsLoaded = true;
       try {
-        const serverDrawings = await fetch("/drawings").then((r) => (r.ok ? r.json() : []));
+        const serverDrawings = await fetch(apiPath("/drawings")).then((r) => (r.ok ? r.json() : []));
         if (Array.isArray(serverDrawings) && serverDrawings.length) {
           drawings = serverDrawings;
           drawIdCounter = Math.max(0, ...drawings.map((d) => d.id || 0));
@@ -1652,7 +1776,7 @@ function setDrawMode(mode) {
 
 async function persistDrawings() {
   try {
-    await fetch("/drawings", {
+    await fetch(apiPath("/drawings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ drawings }),
@@ -1660,6 +1784,28 @@ async function persistDrawings() {
   } catch (err) {
     // best-effort - drawings already work locally even if this fails
   }
+}
+
+// True for a color string that already encodes its own alpha
+// (rgba()/#rrggbbaa) - a plain "#rrggbb" has none, so a fill in that
+// format still gets the old hardcoded 18% fallback below, for visual
+// backward compatibility with drawings saved before per-color alpha
+// (buildColorField) existed.
+function hasExplicitAlpha(color) {
+  return /^rgba?\(/i.test(color || "") || /^#[0-9a-f]{8}$/i.test(color || "");
+}
+
+// The point every drawing type rotates around - its own visual center,
+// not necessarily (x1,y1) (a rect/ellipse/image's anchor is a corner,
+// a line's is one endpoint - only text's (x1,y1) already is its own
+// rotation-relevant point, its baseline-left anchor).
+function drawingCenter(d) {
+  if (d.type === "line") return { cx: (d.x1 + d.x2) / 2, cy: (d.y1 + d.y2) / 2 };
+  if (d.type === "text") return { cx: d.x1, cy: d.y1 };
+  return {
+    cx: Math.min(d.x1, d.x2) + Math.abs(d.x2 - d.x1) / 2,
+    cy: Math.min(d.y1, d.y2) + Math.abs(d.y2 - d.y1) / 2,
+  };
 }
 
 function buildDrawingShape(d, isDraft) {
@@ -1677,7 +1823,7 @@ function buildDrawingShape(d, isDraft) {
     el.setAttribute("stroke", d.stroke || "#7cb342");
     el.setAttribute("stroke-width", d.strokeWidth || 2);
     el.setAttribute("fill", d.fill && d.fill !== "none" ? d.fill : "none");
-    if (d.fill && d.fill !== "none") el.setAttribute("fill-opacity", "0.18");
+    if (d.fill && d.fill !== "none" && !hasExplicitAlpha(d.fill)) el.setAttribute("fill-opacity", "0.18");
     el.setAttribute("rx", d.rx || 0);
   } else if (d.type === "ellipse") {
     el = document.createElementNS(SVG_NS, "ellipse");
@@ -1688,7 +1834,7 @@ function buildDrawingShape(d, isDraft) {
     el.setAttribute("stroke", d.stroke || "#7cb342");
     el.setAttribute("stroke-width", d.strokeWidth || 2);
     el.setAttribute("fill", d.fill && d.fill !== "none" ? d.fill : "none");
-    if (d.fill && d.fill !== "none") el.setAttribute("fill-opacity", "0.18");
+    if (d.fill && d.fill !== "none" && !hasExplicitAlpha(d.fill)) el.setAttribute("fill-opacity", "0.18");
   } else if (d.type === "line") {
     el = document.createElementNS(SVG_NS, "line");
     el.setAttribute("x1", d.x1);
@@ -1720,6 +1866,10 @@ function buildDrawingShape(d, isDraft) {
     el.textContent = d.text || "";
   }
   el.setAttribute("class", `drawing-shape drawing-${d.type}${isDraft ? " drawing-draft" : ""}`);
+  if (d.rotation) {
+    const { cx, cy } = drawingCenter(d);
+    el.setAttribute("transform", `rotate(${d.rotation}, ${cx}, ${cy})`);
+  }
   if (!isDraft) {
     el.dataset.drawId = d.id;
     el.addEventListener("pointerdown", (evt) => startDrawingPointerDown(evt, d));
@@ -1786,18 +1936,83 @@ function startDrawingPointerDown(evt, d) {
 }
 
 function buildDrawingHandles(d) {
-  if (d.type === "text") return [];
   const handles = [];
-  for (const [xKey, yKey] of [["x1", "y1"], ["x2", "y2"]]) {
-    const h = document.createElementNS(SVG_NS, "circle");
-    h.setAttribute("class", "drawing-handle");
-    h.setAttribute("cx", d[xKey]);
-    h.setAttribute("cy", d[yKey]);
-    h.setAttribute("r", 5);
-    h.addEventListener("pointerdown", (evt) => startDrawingHandleDrag(evt, d, xKey, yKey));
-    handles.push(h);
+  if (d.type !== "text") {
+    // Rotated purely visually (to stay on the shape's own rotated
+    // corners) - the drag itself still works in the shape's original,
+    // unrotated coordinate space (same simplification every resize
+    // handle here already made before rotation existed).
+    const { cx, cy } = drawingCenter(d);
+    for (const [xKey, yKey] of [["x1", "y1"], ["x2", "y2"]]) {
+      const h = document.createElementNS(SVG_NS, "circle");
+      h.setAttribute("class", "drawing-handle");
+      h.setAttribute("cx", d[xKey]);
+      h.setAttribute("cy", d[yKey]);
+      h.setAttribute("r", 5);
+      if (d.rotation) h.setAttribute("transform", `rotate(${d.rotation}, ${cx}, ${cy})`);
+      h.addEventListener("pointerdown", (evt) => startDrawingHandleDrag(evt, d, xKey, yKey));
+      handles.push(h);
+    }
   }
+  handles.push(buildRotateHandle(d));
   return handles;
+}
+
+// A stalk + circle above the shape's own top (its center for a line/
+// text, which have no real "top"), wrapped in the shape's own current
+// rotate() transform so it visually orbits with it - dragging computes
+// a fresh angle from the live pointer position on every move, entirely
+// independent of the handle's own (rotated) rendered position.
+const ROTATE_HANDLE_OFFSET = 28;
+function rotateHandleAnchor(d) {
+  const { cx, cy } = drawingCenter(d);
+  if (d.type === "line" || d.type === "text") {
+    return { cx, top: cy - ROTATE_HANDLE_OFFSET };
+  }
+  return { cx, top: Math.min(d.y1, d.y2) - ROTATE_HANDLE_OFFSET };
+}
+function buildRotateHandle(d) {
+  const { cx, cy } = drawingCenter(d);
+  const { top } = rotateHandleAnchor(d);
+  const group = document.createElementNS(SVG_NS, "g");
+  if (d.rotation) group.setAttribute("transform", `rotate(${d.rotation}, ${cx}, ${cy})`);
+  const stalk = document.createElementNS(SVG_NS, "line");
+  stalk.setAttribute("class", "drawing-rotate-line");
+  stalk.setAttribute("x1", cx);
+  stalk.setAttribute("y1", cy);
+  stalk.setAttribute("x2", cx);
+  stalk.setAttribute("y2", top);
+  group.appendChild(stalk);
+  const handle = document.createElementNS(SVG_NS, "circle");
+  handle.setAttribute("class", "drawing-rotate-handle");
+  handle.setAttribute("cx", cx);
+  handle.setAttribute("cy", top);
+  handle.setAttribute("r", 5);
+  handle.addEventListener("pointerdown", (evt) => startDrawingRotateDrag(evt, d));
+  group.appendChild(handle);
+  return group;
+}
+function startDrawingRotateDrag(evt, d) {
+  evt.stopPropagation();
+  const { cx, cy } = drawingCenter(d);
+  function angleAt(e) {
+    const p = svgPoint(e);
+    let deg = Math.atan2(p.y - cy, p.x - cx) * (180 / Math.PI) + 90;
+    deg = ((deg % 360) + 360) % 360;
+    if (e.shiftKey) deg = Math.round(deg / 15) * 15 % 360;
+    return deg;
+  }
+  function onMove(e) {
+    d.rotation = angleAt(e);
+    renderDrawings();
+  }
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    persistDrawings();
+  }
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 
 function startDrawingHandleDrag(evt, d, xKey, yKey) {
@@ -1896,6 +2111,152 @@ function editTextDrawingInline(d, opts) {
   input.addEventListener("blur", onBlur);
 }
 
+// --- Color parsing/formatting - SVG's fill/stroke attributes accept
+// CSS rgba() directly (SVG2 uses CSS Color syntax), so a drawing's
+// stroke/fill is just stored as whatever CSS color string the field
+// below produces - "#rrggbb" for old saved drawings (full opacity,
+// backward compatible) or "rgba(r, g, b, a)" once touched through it.
+
+function parseCssColor(str) {
+  const fallback = { r: 124, g: 179, b: 66, a: 1 };
+  if (!str || str === "none") return fallback;
+  const hex = str.match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i);
+  if (hex) {
+    return {
+      r: parseInt(hex[1].slice(0, 2), 16),
+      g: parseInt(hex[1].slice(2, 4), 16),
+      b: parseInt(hex[1].slice(4, 6), 16),
+      a: hex[2] ? parseInt(hex[2], 16) / 255 : 1,
+    };
+  }
+  const rgba = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)/i);
+  if (rgba) {
+    return {
+      r: Math.min(255, +rgba[1]), g: Math.min(255, +rgba[2]), b: Math.min(255, +rgba[3]),
+      a: rgba[4] !== undefined ? Math.max(0, Math.min(1, +rgba[4])) : 1,
+    };
+  }
+  return fallback;
+}
+function rgbaToCss({ r, g, b, a }) {
+  return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
+}
+function rgbaToHex6({ r, g, b }) {
+  const h = (n) => n.toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+// Builds a checkerboard swatch button + popover (native hue/sat picker,
+// an alpha slider, a live rgba()/hex text field) for a stroke/fill
+// color. `initial` is any CSS color string (or "none"/falsy for a
+// field that starts unset); onChange(cssColor) fires on every live
+// edit (drag/type), same "input vs change" live-preview-then-persist
+// split the rest of this popup's fields already use - the caller
+// decides when to persistDrawings().
+function buildColorField(initial, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "color-field";
+  let current = parseCssColor(initial);
+
+  const swatchBtn = document.createElement("button");
+  swatchBtn.type = "button";
+  swatchBtn.className = "color-swatch-btn";
+  const swatchFill = document.createElement("div");
+  swatchFill.className = "color-swatch-fill";
+  swatchBtn.appendChild(swatchFill);
+  wrap.appendChild(swatchBtn);
+
+  let pop = null;
+  function syncSwatch() {
+    swatchFill.style.background = rgbaToCss(current);
+  }
+  syncSwatch();
+
+  function emit() {
+    syncSwatch();
+    onChange(rgbaToCss(current));
+  }
+
+  function closePopover() {
+    if (!pop) return;
+    document.removeEventListener("mousedown", onOutside, true);
+    pop.remove();
+    pop = null;
+  }
+  function onOutside(evt) {
+    if (!wrap.contains(evt.target)) closePopover();
+  }
+
+  function openPopover() {
+    if (pop) return;
+    pop = document.createElement("div");
+    pop.className = "color-popover";
+
+    const hueRow = document.createElement("div");
+    hueRow.className = "color-popover-row";
+    const hueInput = document.createElement("input");
+    hueInput.type = "color";
+    hueInput.value = rgbaToHex6(current);
+    hueInput.addEventListener("input", () => {
+      const rgb = parseCssColor(hueInput.value);
+      current = { ...rgb, a: current.a };
+      textInput.value = rgbaToCss(current);
+      emit();
+    });
+    hueRow.appendChild(hueInput);
+    const textInput = document.createElement("input");
+    textInput.type = "text";
+    textInput.className = "color-text-input";
+    textInput.value = rgbaToCss(current);
+    textInput.spellcheck = false;
+    function applyText() {
+      current = parseCssColor(textInput.value);
+      hueInput.value = rgbaToHex6(current);
+      alphaSlider.value = Math.round(current.a * 100);
+      alphaReadout.textContent = `${alphaSlider.value}%`;
+      emit();
+    }
+    textInput.addEventListener("change", applyText);
+    textInput.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") { evt.preventDefault(); applyText(); }
+    });
+    hueRow.appendChild(textInput);
+    pop.appendChild(hueRow);
+
+    const alphaRow = document.createElement("div");
+    alphaRow.className = "color-popover-row";
+    const alphaSlider = document.createElement("input");
+    alphaSlider.type = "range";
+    alphaSlider.className = "color-alpha-slider";
+    alphaSlider.min = "0";
+    alphaSlider.max = "100";
+    alphaSlider.value = Math.round(current.a * 100);
+    const alphaReadout = document.createElement("span");
+    alphaReadout.className = "color-alpha-readout";
+    alphaReadout.textContent = `${alphaSlider.value}%`;
+    alphaSlider.addEventListener("input", () => {
+      current = { ...current, a: +alphaSlider.value / 100 };
+      textInput.value = rgbaToCss(current);
+      alphaReadout.textContent = `${alphaSlider.value}%`;
+      emit();
+    });
+    alphaRow.appendChild(alphaSlider);
+    alphaRow.appendChild(alphaReadout);
+    pop.appendChild(alphaRow);
+
+    wrap.appendChild(pop);
+    setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+  }
+
+  swatchBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    if (pop) closePopover(); else openPopover();
+  });
+
+  wrap.closeColorPopover = closePopover;
+  return wrap;
+}
+
 let closeOpenDrawingPopup = null;
 
 function showDrawingActionsPopup(id, anchor) {
@@ -1924,15 +2285,12 @@ function showDrawingActionsPopup(id, anchor) {
   // size, both already handled by the generic drag-to-move/resize-
   // handle code every other type also uses.
   if (d.type !== "image") {
-    const colorInput = document.createElement("input");
-    colorInput.type = "color";
-    colorInput.value = d.stroke || (d.type === "text" ? "#1f2328" : "#7cb342");
-    colorInput.addEventListener("input", () => {
-      d.stroke = colorInput.value;
+    const colorField = buildColorField(d.stroke || (d.type === "text" ? "#1f2328" : "#7cb342"), (css) => {
+      d.stroke = css;
       renderDrawings();
+      persistDrawings();
     });
-    colorInput.addEventListener("change", persistDrawings);
-    addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorInput);
+    addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorField);
   }
 
   if (d.type === "rect") {
@@ -1951,15 +2309,12 @@ function showDrawingActionsPopup(id, anchor) {
 
   if (d.type === "rect" || d.type === "ellipse") {
     const fillRow = addRow("Fill");
-    const fillInput = document.createElement("input");
-    fillInput.type = "color";
-    fillInput.value = d.fill && d.fill !== "none" ? d.fill : "#7cb342";
-    fillInput.addEventListener("input", () => {
-      d.fill = fillInput.value;
+    const fillField = buildColorField(d.fill && d.fill !== "none" ? d.fill : "rgba(124, 179, 66, 0.18)", (css) => {
+      d.fill = css;
       renderDrawings();
+      persistDrawings();
     });
-    fillInput.addEventListener("change", persistDrawings);
-    fillRow.appendChild(fillInput);
+    fillRow.appendChild(fillField);
     const noFillBtn = document.createElement("button");
     noFillBtn.className = "drawing-style-clear";
     noFillBtn.textContent = "None";
@@ -1997,6 +2352,18 @@ function showDrawingActionsPopup(id, anchor) {
     });
     addRow("Width").appendChild(widthInput);
   }
+
+  const rotationInput = document.createElement("input");
+  rotationInput.type = "number";
+  rotationInput.min = "0";
+  rotationInput.max = "359";
+  rotationInput.value = Math.round(d.rotation || 0);
+  rotationInput.addEventListener("change", () => {
+    d.rotation = ((parseFloat(rotationInput.value) || 0) % 360 + 360) % 360;
+    renderDrawings();
+    persistDrawings();
+  });
+  addRow("Rotate").appendChild(rotationInput);
 
   if (d.type === "text") {
     const editTextBtn = document.createElement("button");
@@ -2312,7 +2679,7 @@ function endNodeDrag() {
   window.removeEventListener("pointerup", endNodeDrag);
   if (dragState && dragState.moved) {
     const node = nodesData[dragState.name];
-    fetch("/layout", {
+    fetch(apiPath("/layout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: dragState.name, x: node.x, y: node.y }),
@@ -2544,12 +2911,12 @@ async function callLifecycle(action, name) {
 document.getElementById("selected-delete-btn").addEventListener("click", async () => {
   const name = selectedName;
   if (!name) return;
-  if (!await showConfirm(
-    `Delete node "${name}"? This removes its live GNS3/ESXi instance and any links to it.`,
-    { danger: true, confirmLabel: "Delete" }
-  )) return;
+  const deleteMsg = designMode
+    ? `Delete node "${name}"? This also removes any links to it.`
+    : `Delete node "${name}"? This removes its live GNS3/ESXi instance and any links to it.`;
+  if (!await showConfirm(deleteMsg, { danger: true, confirmLabel: "Delete" })) return;
   try {
-    const resp = await fetch(`/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const resp = await fetch(apiPath(`/nodes/${encodeURIComponent(name)}`), { method: "DELETE" });
     if (!resp.ok) {
       await showAlert(`Failed to delete node: ${(await resp.json()).detail || resp.status}`);
       return;
@@ -2566,7 +2933,7 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
 async function promptForInterface(nodeName, anchor) {
   let ports = null;
   try {
-    const resp = await fetch(`/nodes/${encodeURIComponent(nodeName)}/ports`);
+    const resp = await fetch(apiPath(`/nodes/${encodeURIComponent(nodeName)}/ports`));
     if (resp.ok) ports = await resp.json();
   } catch (err) {
     // fall through to the topology-known-interfaces fallback below
@@ -2638,7 +3005,7 @@ async function handleLinkModeClick(name, anchor) {
 async function createLink(node1, if1, node2, if2) {
   exitLinkMode();
   try {
-    const resp = await fetch("/links", {
+    const resp = await fetch(apiPath("/links"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ node1, if1, node2, if2 }),
@@ -2656,7 +3023,7 @@ async function createLink(node1, if1, node2, if2) {
 async function deleteLink(node1, node2) {
   try {
     const resp = await fetch(
-      `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}`,
+      apiPath(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}`),
       { method: "DELETE" }
     );
     if (!resp.ok) {
@@ -2824,9 +3191,9 @@ async function placeNodeAt(point) {
   )) {
     return;
   }
-  setMenubarBusy(`Adding "${name}" (deploying live, may take a while)…`);
+  setMenubarBusy(designMode ? `Adding "${name}"…` : `Adding "${name}" (deploying live, may take a while)…`);
   try {
-    const resp = await fetch("/nodes", {
+    const resp = await fetch(apiPath("/nodes"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, role, image }),
@@ -2836,7 +3203,7 @@ async function placeNodeAt(point) {
       await showAlert(`Failed to add node: ${(await resp.json()).detail || resp.status}`);
       return;
     }
-    await fetch("/layout", {
+    await fetch(apiPath("/layout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, x: point.x, y: point.y }),
@@ -2874,6 +3241,109 @@ document.getElementById("palette-close-btn").addEventListener("click", () => set
 document.getElementById("toggle-devices-btn").addEventListener("click", () => {
   setDevicePaletteVisible(document.getElementById("device-palette").hidden);
 });
+
+// Screenshot export: rasterizes the *whole diagram* (all nodes/links/
+// drawings, auto-fit - not just whatever's currently panned/zoomed into
+// view) as a PNG. Renders through a throwaway <img>/<canvas> rather than
+// any library: a standalone serialized SVG carries none of the page's
+// own external <style>, so a full copy of this page's one <style> block
+// is embedded into the clone first - :root there still resolves the
+// --accent/--canvas-bg/etc custom properties correctly, since :root in a
+// parsed SVG document means the SVG's own root element.
+const SCREENSHOT_PADDING = 40;
+const SCREENSHOT_SCALE = 2;
+const SCREENSHOT_MAX_DIMENSION = 8000;
+
+function unionBBox(boxes) {
+  const real = boxes.filter((b) => b && (b.width > 0 || b.height > 0));
+  if (real.length === 0) return { x: 0, y: 0, width: 100, height: 100 };
+  const minX = Math.min(...real.map((b) => b.x));
+  const minY = Math.min(...real.map((b) => b.y));
+  const maxX = Math.max(...real.map((b) => b.x + b.width));
+  const maxY = Math.max(...real.map((b) => b.y + b.height));
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+async function takeCanvasScreenshot() {
+  const layerIds = ["drawings-layer", "links-layer", "nodes-layer"];
+  const layers = layerIds.map((id) => document.getElementById(id));
+  let content;
+  try {
+    content = unionBBox(layers.map((el) => el.getBBox()));
+  } catch {
+    setMenubarMessage("Nothing to screenshot - canvas is empty.");
+    return;
+  }
+  const vx = content.x - SCREENSHOT_PADDING;
+  const vy = content.y - SCREENSHOT_PADDING;
+  const vw = content.width + SCREENSHOT_PADDING * 2;
+  const vh = content.height + SCREENSHOT_PADDING * 2;
+
+  const exportSvg = document.createElementNS(SVG_NS, "svg");
+  exportSvg.setAttribute("xmlns", SVG_NS);
+  exportSvg.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+  const pixelScale = Math.min(SCREENSHOT_SCALE, SCREENSHOT_MAX_DIMENSION / Math.max(vw, vh, 1));
+  exportSvg.setAttribute("width", Math.round(vw * pixelScale));
+  exportSvg.setAttribute("height", Math.round(vh * pixelScale));
+
+  const styleEl = document.createElementNS(SVG_NS, "style");
+  styleEl.textContent = document.querySelector("style").textContent;
+  exportSvg.appendChild(styleEl);
+
+  const bg = document.createElementNS(SVG_NS, "rect");
+  bg.setAttribute("x", vx);
+  bg.setAttribute("y", vy);
+  bg.setAttribute("width", vw);
+  bg.setAttribute("height", vh);
+  bg.setAttribute("fill", "var(--canvas-bg)");
+  exportSvg.appendChild(bg);
+
+  for (const layer of layers) {
+    exportSvg.appendChild(layer.cloneNode(true));
+  }
+  exportSvg.querySelectorAll("image").forEach((img) => {
+    const href = img.getAttribute("href") || img.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+    if (href && !href.startsWith("data:")) {
+      const absolute = new URL(href, window.location.href).href;
+      img.setAttribute("href", absolute);
+      img.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
+    }
+  });
+
+  const svgText = new XMLSerializer().serializeToString(exportSvg);
+  const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("Failed to rasterize canvas SVG"));
+      image.src = svgUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vw * pixelScale);
+    canvas.height = Math.round(vh * pixelScale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    const pngUrl = URL.createObjectURL(pngBlob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const projectMeta = document.getElementById("project-meta").textContent.split(" @ ")[0].trim();
+    const safeName = (projectMeta || "topology").replace(/[^\w.-]+/g, "_");
+    a.href = pngUrl;
+    a.download = `${safeName}-${stamp}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(pngUrl);
+  } catch (err) {
+    setMenubarMessage(`Screenshot failed: ${err.message}`);
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+}
+document.getElementById("take-screenshot-btn").addEventListener("click", () => { takeCanvasScreenshot(); });
 
 // Loading feedback for slow, live-deploying actions - shown next to
 // the menu bar's own buttons rather than a full-page overlay, since
@@ -2930,6 +3400,50 @@ async function pollImportJob(jobId) {
     await new Promise((resolve) => setTimeout(resolve, IMPORT_POLL_INTERVAL_MS));
   }
 }
+
+// Polls GET /gns3-vm/deploy/{jobId} (see app/gns3_vm_deploy_jobs.py)
+// until it leaves "running". No completed/total here (see that
+// module's own docstring on why) - just a coarse stage name shown as
+// plain busy text instead of a progress bar.
+async function pollGns3VmDeployJob(jobId) {
+  while (true) {
+    const body = await fetch(`/gns3-vm/deploy/${jobId}`).then((r) => r.json());
+    if (body.status !== "running") return body;
+    setMenubarBusy(`Deploying GNS3 VM: ${body.stage}…`);
+    await new Promise((resolve) => setTimeout(resolve, IMPORT_POLL_INTERVAL_MS));
+  }
+}
+
+document.getElementById("deploy-gns3-vm-btn").addEventListener("click", async () => {
+  if (!await showConfirm(
+    `Replace the GNS3 VM with a freshly imported one from its OVA?\n\n` +
+    `If a VM by that name already exists, it's powered off and renamed ` +
+    `as a timestamped backup (never deleted) before the new one is ` +
+    `imported - this takes several minutes and the GNS3 VM (and every ` +
+    `node on it) is unavailable throughout.`,
+    { title: "Deploy Fresh GNS3 VM", confirmLabel: "Deploy", danger: true }
+  )) {
+    return;
+  }
+  setMenubarBusy("Starting GNS3 VM deploy…");
+  try {
+    const resp = await fetch("/gns3-vm/deploy", { method: "POST" });
+    if (!resp.ok) {
+      setMenubarMessage(`Deploy failed: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    const { job_id } = await resp.json();
+    const result = await pollGns3VmDeployJob(job_id);
+    if (result.status === "error") {
+      setMenubarMessage(`GNS3 VM deploy failed: ${result.error}`);
+      return;
+    }
+    setMenubarMessage(`GNS3 VM deployed at ${result.ip_address}.`);
+    await loadCanvas();
+  } catch (err) {
+    setMenubarMessage(`Deploy failed: ${err}`);
+  }
+});
 
 document.getElementById("import-project-btn").addEventListener("click", () => {
   document.getElementById("import-project-input").click();
@@ -3034,9 +3548,36 @@ document.getElementById("import-project-input").addEventListener("change", async
 // its settings file rather than swapping config in place - see that
 // module's own docstring.
 function showLandingView() {
+  designMode = false;
   document.getElementById("app-view").hidden = true;
   document.getElementById("landing-view").hidden = false;
   loadLandingHostGrid();
+}
+
+// Toggles the handful of menu items that only make sense against a
+// real, deployed host - nothing under /design/* has a live GNS3/ESXi
+// connection to import into, reload, or push configs to.
+function applyDesignModeUI() {
+  document.getElementById("export-project-btn").href = designMode ? "/design/export" : "/project/export";
+  document.getElementById("import-project-btn").hidden = designMode;
+  document.getElementById("reload-gns3-btn").hidden = designMode;
+  document.getElementById("deploy-gns3-vm-btn").hidden = designMode;
+  document.getElementById("tab-push").hidden = designMode;
+  if (designMode) showTab("console");
+}
+
+async function enterDesignMode() {
+  designMode = true;
+  drawingsLoaded = false;
+  initialFitDone = false;
+  applyDesignModeUI();
+  document.getElementById("landing-view").hidden = true;
+  document.getElementById("app-view").hidden = false;
+  try {
+    await loadCanvas();
+  } catch (err) {
+    document.getElementById("warning-banner").textContent = `Failed to load design sketch: ${err}`;
+  }
 }
 
 async function loadLandingHostGrid() {
@@ -3052,7 +3593,24 @@ async function loadLandingHostGrid() {
 
   grid.innerHTML = "";
   for (const profile of profiles) grid.appendChild(buildHostTile(profile));
+  grid.appendChild(buildDesignTile());
   grid.appendChild(buildAddHostTile());
+}
+
+function buildDesignTile() {
+  const tile = document.createElement("div");
+  tile.className = "landing-host-tile add-tile";
+  tile.title = "Sketch a topology on the canvas without deploying it, then export it as a .topoproj bundle you can import against a real host later.";
+  const icon = document.createElement("div");
+  icon.className = "landing-host-icon";
+  icon.textContent = "✎";
+  tile.appendChild(icon);
+  const name = document.createElement("div");
+  name.className = "landing-host-name";
+  name.textContent = "Design a Topology";
+  tile.appendChild(name);
+  tile.addEventListener("click", () => enterDesignMode());
+  return tile;
 }
 
 function buildHostTile(profile) {
@@ -3121,6 +3679,10 @@ function buildAddHostTile() {
 
 async function enterHost(filename, isActive) {
   if (isActive) {
+    designMode = false;
+    drawingsLoaded = false;
+    initialFitDone = false;
+    applyDesignModeUI();
     document.getElementById("landing-view").hidden = true;
     document.getElementById("app-view").hidden = false;
     try {

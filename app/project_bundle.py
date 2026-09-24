@@ -46,6 +46,25 @@ class BundleValidationError(ValueError):
     """The uploaded file isn't a usable .topoproj bundle - never reaches TopologyBuilder at all."""
 
 
+def _write_bundle(
+    manifest: dict[str, Any],
+    topology_yaml: str,
+    settings_snapshot: dict[str, Any],
+    configs: dict[str, Any],
+    drawings: list[Any],
+    layout: dict[str, Any],
+) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+        zf.writestr("topology.yaml", topology_yaml)
+        zf.writestr("settings.yml", yaml.safe_dump(settings_snapshot, sort_keys=False))
+        zf.writestr("configs.json", json.dumps({"devices": configs}, indent=2))
+        zf.writestr("drawings.json", json.dumps({"drawings": drawings}, indent=2))
+        zf.writestr("layout.json", json.dumps({"layout": layout}, indent=2))
+    return buf.getvalue()
+
+
 def build_export(app: FastAPI) -> bytes:
     with open(Settings.TOPOLOGY_FILE) as file:
         topology_yaml = file.read()
@@ -74,15 +93,37 @@ def build_export(app: FastAPI) -> bytes:
     drawings = getattr(app.state, "last_drawings", [])
     layout = load_layout(app.state.graph.nodes)
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
-        zf.writestr("topology.yaml", topology_yaml)
-        zf.writestr("settings.yml", yaml.safe_dump(settings_snapshot, sort_keys=False))
-        zf.writestr("configs.json", json.dumps({"devices": configs}, indent=2))
-        zf.writestr("drawings.json", json.dumps({"drawings": drawings}, indent=2))
-        zf.writestr("layout.json", json.dumps({"layout": layout}, indent=2))
-    return buf.getvalue()
+    return _write_bundle(manifest, topology_yaml, settings_snapshot, configs, drawings, layout)
+
+
+def build_design_export(state, project_name: str) -> bytes:
+    """
+    Same bundle format as build_export, for a design.DesignState that
+    was never deployed anywhere - settings.yml carries no ESXi target at
+    all (see apply_import's own has_target check), so the result is
+    importable against whichever host is active when it's later fed to
+    POST /project/import.
+    :param state: a design.DesignState
+    :param project_name: name to record in the bundle's manifest
+    """
+    from app import design
+
+    topology_yaml = yaml.safe_dump(design.to_topology_yaml_dict(state), sort_keys=False)
+    manifest = {
+        "format_version": _FORMAT_VERSION,
+        "project_name": project_name,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "auto_config_push": False,
+        "origin": "design",
+    }
+    return _write_bundle(
+        manifest,
+        topology_yaml,
+        settings_snapshot={},
+        configs={},
+        drawings=state.drawings,
+        layout=state.layout,
+    )
 
 
 def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
@@ -118,7 +159,13 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     except yaml.YAMLError as exc:
         raise BundleValidationError(f"settings.yml isn't valid YAML: {exc}")
     bundled_esxi = bundled_settings.get("esxi", {})
-    if (
+    # A bundle built by the offline design canvas (see app/design.py)
+    # was never targeted at any real host - its settings.yml carries no
+    # "ip"/"gns3_vm_name" at all, rather than a real-but-wrong one - so
+    # it's importable against whichever host happens to be active,
+    # instead of being permanently unimportable everywhere.
+    has_target = "ip" in bundled_esxi or "gns3_vm_name" in bundled_esxi
+    if has_target and (
         bundled_esxi.get("ip") != Settings.ESXI.IP
         or bundled_esxi.get("gns3_vm_name") != Settings.ESXI.GNS3_VM_NAME
     ):

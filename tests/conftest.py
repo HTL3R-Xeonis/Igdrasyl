@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app import design
 from app.topology import load_graph, resolve_project_name
 from src.settings import Settings
 
@@ -74,6 +75,8 @@ def app_state(graph):
     app.state.gns3_vm_ip = "127.0.0.1"
     app.state.project_id = None
     app.state.startup_warning = None
+    app.state.design = design.new_state()
+    app.state.gns3_vm_deploy_job = None
     return app.state
 
 
