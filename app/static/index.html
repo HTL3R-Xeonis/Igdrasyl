@@ -961,12 +961,14 @@
         <button class="menu-item" id="draw-ellipse-btn" data-draw="ellipse">Ellipse</button>
         <button class="menu-item" id="draw-line-btn" data-draw="line">Line</button>
         <button class="menu-item" id="draw-text-btn" data-draw="text">Text</button>
+        <button class="menu-item" id="draw-image-btn">Image…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="draw-clear-btn">Clear all drawings</button>
       </div>
     </div>
   </nav>
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
+  <input type="file" id="draw-image-input" accept="image/*" hidden>
   <div id="menubar-status"></div>
 </header>
 <div id="warning-banner"></div>
@@ -1695,6 +1697,20 @@ function buildDrawingShape(d, isDraft) {
     el.setAttribute("y2", d.y2);
     el.setAttribute("stroke", d.stroke || "#7cb342");
     el.setAttribute("stroke-width", d.strokeWidth || 2);
+  } else if (d.type === "image") {
+    // href is a data: URI (see the draw-image-input handler) - images
+    // are embedded directly into the drawing object itself rather than
+    // uploaded to separate storage, so /drawings and a .topoproj
+    // bundle's own drawings.json already carry them with zero backend
+    // changes (both already treat a drawing as an opaque JSON object -
+    // see app/main.py's own get_drawings/set_drawings docstring).
+    el = document.createElementNS(SVG_NS, "image");
+    el.setAttribute("x", x1);
+    el.setAttribute("y", y1);
+    el.setAttribute("width", w);
+    el.setAttribute("height", h);
+    el.setAttribute("href", d.href || "");
+    el.setAttribute("preserveAspectRatio", "none");
   } else {
     el = document.createElementNS(SVG_NS, "text");
     el.setAttribute("x", d.x1);
@@ -1904,15 +1920,20 @@ function showDrawingActionsPopup(id, anchor) {
     return row;
   }
 
-  const colorInput = document.createElement("input");
-  colorInput.type = "color";
-  colorInput.value = d.stroke || (d.type === "text" ? "#1f2328" : "#7cb342");
-  colorInput.addEventListener("input", () => {
-    d.stroke = colorInput.value;
-    renderDrawings();
-  });
-  colorInput.addEventListener("change", persistDrawings);
-  addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorInput);
+  // Images have no stroke/fill/width of their own - just a position and
+  // size, both already handled by the generic drag-to-move/resize-
+  // handle code every other type also uses.
+  if (d.type !== "image") {
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = d.stroke || (d.type === "text" ? "#1f2328" : "#7cb342");
+    colorInput.addEventListener("input", () => {
+      d.stroke = colorInput.value;
+      renderDrawings();
+    });
+    colorInput.addEventListener("change", persistDrawings);
+    addRow(d.type === "text" ? "Color" : "Stroke").appendChild(colorInput);
+  }
 
   if (d.type === "rect") {
     const radiusInput = document.createElement("input");
@@ -1951,19 +1972,7 @@ function showDrawingActionsPopup(id, anchor) {
     fillRow.appendChild(noFillBtn);
   }
 
-  if (d.type !== "text") {
-    const widthInput = document.createElement("input");
-    widthInput.type = "number";
-    widthInput.min = "1";
-    widthInput.max = "20";
-    widthInput.value = d.strokeWidth || 2;
-    widthInput.addEventListener("change", () => {
-      d.strokeWidth = parseFloat(widthInput.value) || 2;
-      renderDrawings();
-      persistDrawings();
-    });
-    addRow("Width").appendChild(widthInput);
-  } else {
+  if (d.type === "text") {
     const sizeInput = document.createElement("input");
     sizeInput.type = "number";
     sizeInput.min = "8";
@@ -1975,6 +1984,18 @@ function showDrawingActionsPopup(id, anchor) {
       persistDrawings();
     });
     addRow("Size").appendChild(sizeInput);
+  } else if (d.type !== "image") {
+    const widthInput = document.createElement("input");
+    widthInput.type = "number";
+    widthInput.min = "1";
+    widthInput.max = "20";
+    widthInput.value = d.strokeWidth || 2;
+    widthInput.addEventListener("change", () => {
+      d.strokeWidth = parseFloat(widthInput.value) || 2;
+      renderDrawings();
+      persistDrawings();
+    });
+    addRow("Width").appendChild(widthInput);
   }
 
   if (d.type === "text") {
@@ -3372,6 +3393,62 @@ document.getElementById("settings-disruption-warning").addEventListener("change"
 document.querySelectorAll("#menu-draw .menu-item[data-draw]").forEach((btn) => {
   btn.addEventListener("click", () => setDrawMode(btn.dataset.draw));
 });
+
+// "Image" doesn't fit the other tools' click-drag-to-size flow (there's
+// nothing to draw until a file is picked) - picking a file places it
+// immediately, centered in the current view and already selected
+// (resize handles showing) so it can be dragged/resized right away,
+// same as a freshly-drawn rect/ellipse would be.
+const DRAW_IMAGE_MAX_INITIAL_SIZE = 320;
+document.getElementById("draw-image-btn").addEventListener("click", () => {
+  setDrawMode(null);
+  document.getElementById("draw-image-input").click();
+});
+document.getElementById("draw-image-input").addEventListener("change", async (evt) => {
+  const input = evt.target;
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  }).catch((err) => {
+    showAlert(`Couldn't read "${file.name}": ${err}`, { title: "Add image" });
+    return null;
+  });
+  if (!dataUrl) return;
+
+  // Natural size for a sensible default placement - works for GIF/PNG/
+  // JPEG directly; for SVG it depends on the file declaring its own
+  // width/height or viewBox, and falls back to the same default box
+  // rect/ellipse use (via naturalWidth/Height coming back 0) otherwise.
+  const natural = await new Promise((resolve) => {
+    const probe = new Image();
+    probe.onload = () => resolve({ w: probe.naturalWidth, h: probe.naturalHeight });
+    probe.onerror = () => resolve({ w: 0, h: 0 });
+    probe.src = dataUrl;
+  });
+
+  let w = natural.w || 200;
+  let h = natural.h || 150;
+  if (w > DRAW_IMAGE_MAX_INITIAL_SIZE || h > DRAW_IMAGE_MAX_INITIAL_SIZE) {
+    const scale = DRAW_IMAGE_MAX_INITIAL_SIZE / Math.max(w, h);
+    w *= scale;
+    h *= scale;
+  }
+
+  const x1 = viewBoxState.x + viewBoxState.w / 2 - w / 2;
+  const y1 = viewBoxState.y + viewBoxState.h / 2 - h / 2;
+  const d = { id: ++drawIdCounter, type: "image", x1, y1, x2: x1 + w, y2: y1 + h, href: dataUrl };
+  drawings.push(d);
+  selectedDrawingId = d.id;
+  renderDrawings();
+  persistDrawings();
+});
+
 document.getElementById("draw-clear-btn").addEventListener("click", async () => {
   if (!drawings.length) return;
   if (await showConfirm("Clear every drawing from the canvas?", { danger: true, confirmLabel: "Clear" })) {
