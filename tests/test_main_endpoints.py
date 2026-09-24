@@ -36,6 +36,13 @@ def test_health_reports_gns3_port(client, app_state):
     assert resp.json()["gns3_port"] == Settings.GNS3.PORT
 
 
+def test_license_serves_the_repo_root_license_file(client, app_state):
+    resp = client.get("/license")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert "GNU GENERAL PUBLIC LICENSE" in resp.text
+
+
 def test_reload_gns3_project_closes_and_reopens(client, app_state):
     app_state.project_id = "proj-1"
     app_state.gns3_vm_ip = "10.20.20.231"

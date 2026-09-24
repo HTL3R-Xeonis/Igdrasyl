@@ -38,6 +38,7 @@ from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_LICENSE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "LICENSE")
 
 _SETTINGS_ENV_VAR = "TOPOLOGYOPERATOR_SETTINGS"
 
@@ -532,6 +533,17 @@ def activate_settings_profile(filename: str) -> dict[str, str]:
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
     return {"status": "restarting"}
+
+
+@app.get("/license")
+def get_license() -> Response:
+    """
+    The repo-root LICENSE file as plain text, read fresh on every
+    request rather than duplicated into app/static - for the landing
+    page's own "View License" link.
+    """
+    with open(_LICENSE_PATH) as file:
+        return Response(content=file.read(), media_type="text/plain")
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in
