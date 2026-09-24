@@ -32,6 +32,17 @@ topology_file: ./topology_example.yaml
 # import. Only affects /project/import - the canvas's own Add Node/Add
 # Link always deploy incrementally regardless of this setting, since
 # that's inherent to what those two operations are.
+#
+# IMPORTANT if you set this to false: esxi.ignore_port_groups below
+# MUST list your GNS3 VM's own management port group (commonly named
+# something like "PG-MGMT"), or a non-incremental deploy will try to
+# delete it along with everything else on the vSwitch. Confirmed live:
+# ESXi itself refused ("resource is in use") since the GNS3 VM's
+# management NIC was actively using it - but that's the hypervisor's
+# own safety net, not something this tool guarantees, and a different
+# host/timing could plausibly let it through and cut off the GNS3 VM's
+# own management access entirely. Don't rely on ESXi catching this for
+# you - list the port group explicitly.
 incremental_deploy: true
 
 esxi:
@@ -53,6 +64,14 @@ esxi:
   # between them) - confirmed live the hard way. Same value the
   # TopologyBuilder deploy that created this topology used.
   # virtual_switch: vSwitch0
+  # Port groups a non-incremental deploy (incremental_deploy: false
+  # above) must never delete, besides the trunk (always protected) and
+  # ESXi's own built-in "VM Network"/"Management Network" (also always
+  # protected). MUST include your GNS3 VM's own management port group -
+  # see the warning on incremental_deploy above for why this matters.
+  # Irrelevant (but harmless to set) while incremental_deploy is true,
+  # since only a non-incremental deploy ever resets the vSwitch at all.
+  # ignore_port_groups: [PG-MGMT]
 
 gns3:
   username: gns3

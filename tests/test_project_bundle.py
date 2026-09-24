@@ -11,9 +11,10 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 import yaml
 
 from src.settings import Settings
@@ -23,7 +24,9 @@ from app import project_bundle
 _FIXTURE_TOPOLOGY = Path(__file__).parent / "fixtures" / "topology.yaml"
 
 
-def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=(), drawings=None) -> bytes:
+def _make_bundle(
+    *, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=(), drawings=None, layout=None
+) -> bytes:
     manifest = {"format_version": format_version, "project_name": "test", "exported_at": "now"}
     settings = {
         "esxi": {
@@ -38,11 +41,14 @@ def _make_bundle(*, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=(), 
         "settings.yml": yaml.safe_dump(settings),
         "configs.json": json.dumps({"devices": {"R1": ["show version"]}}),
     }
-    # drawings.json is deliberately optional - a bundle exported before
-    # this existed won't have it, and that's not a validation failure
-    # (see apply_import) - only add it here when a test asks for one.
+    # drawings.json/layout.json are deliberately optional - a bundle
+    # exported before they existed won't have them, and that's not a
+    # validation failure (see apply_import) - only add one here when a
+    # test asks for it.
     if drawings is not None:
         members["drawings.json"] = json.dumps({"drawings": drawings})
+    if layout is not None:
+        members["layout.json"] = json.dumps({"layout": layout})
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, content in members.items():
@@ -61,7 +67,10 @@ class _FakeBackend:
         Path(topology_file).write_text(topology_yaml_text)
 
 
-def test_build_export_produces_expected_zip_members(app_state, temp_topology_file):
+def test_build_export_produces_expected_zip_members(
+    app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     app_state.last_config_push = {"R1": ["show version"]}
     app_state.last_drawings = [{"id": 1, "type": "text", "x1": 10, "y1": 20, "text": "hi"}]
 
@@ -69,7 +78,7 @@ def test_build_export_produces_expected_zip_members(app_state, temp_topology_fil
 
     zf = zipfile.ZipFile(io.BytesIO(data))
     assert set(zf.namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json",
+        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json", "layout.json",
     }
 
     manifest = json.loads(zf.read("manifest.json"))
@@ -87,6 +96,12 @@ def test_build_export_produces_expected_zip_members(app_state, temp_topology_fil
 
     drawings = json.loads(zf.read("drawings.json"))
     assert drawings == {"drawings": app_state.last_drawings}
+
+    # No prior drag in this test, so every node falls back to a computed
+    # default position (see app/layout.py's load_layout) - just assert
+    # every node got one, not any specific coordinates.
+    layout = json.loads(zf.read("layout.json"))["layout"]
+    assert set(layout) == set(app_state.graph.nodes)
 
 
 def _app():
@@ -122,6 +137,58 @@ def test_apply_import_restores_bundled_drawings(app_state, temp_topology_file):
 
     assert result["drawings"] == bundled_drawings
     assert app_state.last_drawings == bundled_drawings
+
+
+def test_apply_import_restores_bundled_layout(app_state, temp_topology_file, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    app_state.topology_backend = _FakeBackend()
+    bundle = _make_bundle(layout={"R1": {"x": 42, "y": 84}, "GHOST": {"x": 1, "y": 2}})
+
+    project_bundle.apply_import(_app(), bundle)
+
+    from app.layout import load_layout
+
+    saved = load_layout(app_state.graph.nodes)
+    assert saved["R1"] == {"x": 42, "y": 84}
+    # GHOST isn't a real node (post-deploy graph), so it's dropped rather
+    # than saved as a position pointing at nothing.
+    assert "GHOST" not in saved
+
+
+def test_apply_import_re_resolves_a_project_id_the_deploy_changed(app_state, temp_topology_file):
+    """
+    Real bug found live: a non-incremental deploy deleted and recreated
+    the whole GNS3 project under a new id, but the already-running
+    server kept using the old one (cached at startup) - every GNS3 call
+    404ed until the process was manually restarted. apply_import must
+    re-resolve project_id after every deploy so that doesn't happen.
+    """
+    app_state.topology_backend = _FakeBackend()
+    app_state.gns3_vm_ip = "10.20.20.231"
+    app_state.project_id = "stale-id"
+    bundle = _make_bundle()
+
+    with patch(
+        "app.project_bundle.resolve_project_id", return_value="fresh-id"
+    ) as fake_resolve:
+        project_bundle.apply_import(_app(), bundle)
+
+    fake_resolve.assert_called_once_with("10.20.20.231", app_state.project_name)
+    assert app_state.project_id == "fresh-id"
+
+
+def test_apply_import_keeps_old_project_id_when_gns3_unreachable(app_state, temp_topology_file):
+    app_state.topology_backend = _FakeBackend()
+    app_state.gns3_vm_ip = "10.20.20.231"
+    app_state.project_id = "stale-id"
+    bundle = _make_bundle()
+
+    with patch(
+        "app.project_bundle.resolve_project_id", side_effect=requests.ConnectionError()
+    ):
+        project_bundle.apply_import(_app(), bundle)
+
+    assert app_state.project_id == "stale-id"
 
 
 def test_apply_import_rejects_mismatched_esxi_target(app_state, temp_topology_file):

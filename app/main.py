@@ -21,13 +21,12 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.connections.esxi_connection import ESXiConnection
-from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
 
 from app import console, lifecycle, project_bundle, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
-from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports
+from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports, resolve_project_id
 from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
@@ -85,16 +84,13 @@ async def lifespan(app: FastAPI):
             )
         app.state.gns3_vm_ip = gns3_vm_ip
 
-        projects = GNS3Connection.list_all_projects(gns3_vm_ip, Settings.GNS3.PORT)
-        project = next(
-            (p for p in projects if p["name"] == app.state.project_name), None
-        )
-        if project is None:
+        project_id = resolve_project_id(gns3_vm_ip, app.state.project_name)
+        if project_id is None:
             raise RuntimeError(
                 f"No GNS3 project named '{app.state.project_name}' - has "
                 f"this topology actually been deployed?"
             )
-        app.state.project_id = project["project_id"]
+        app.state.project_id = project_id
     except Exception as exc:
         # Non-fatal: /topology (the static graph) still works without
         # live GNS3 state, so the app comes up in a degraded mode rather
@@ -151,6 +147,20 @@ def nodes() -> list[dict[str, Any]]:
     independent live sources, so a missing GNS3 project (see /health's
     own warning for that) no longer blocks ESXi status from coming
     back, unlike this endpoint's very first version.
+
+    An ON_ESXI node's status always comes from the real ESXi VM lookup,
+    never from a live GNS3 entry, even when one exists (its own
+    `gns3_node_id` is still taken from there, when present, since
+    that's still useful e.g. for delete). Real bug found live: an
+    ESXi-hosted node also gets a GNS3-side Cloud node wrapper once
+    linked into the topology (see TopologyBuilder's own
+    _partially_link_gns3_nodes), and that wrapper's own "status" is
+    just "started" for as long as it exists - it doesn't track the
+    real VM's lifecycle at all. A VM destroyed independently of its
+    Cloud node (e.g. by a non-incremental deploy that resets the ESXi
+    vSwitch but leaves the Cloud node behind) used to still report
+    "started" here, since a live entry existing at all short-circuited
+    the real ESXi lookup entirely.
     """
     try:
         live_by_name = {n["name"]: n for n in list_live_nodes(app)}
@@ -165,7 +175,14 @@ def nodes() -> list[dict[str, Any]]:
             "environment": node.env.name,
         }
         live = live_by_name.get(node.name)
-        if live is not None:
+        if node.env == Environment.ON_ESXI:
+            if live is not None:
+                entry["gns3_node_id"] = live.get("node_id")
+            vm = app.state.esxi_connection.get_vm(node.name)
+            entry["status"] = str(vm.runtime.powerState) if vm is not None else None
+            entry["console_port"] = None
+            entry["console_type"] = None
+        elif live is not None:
             entry.update(
                 {
                     "gns3_node_id": live.get("node_id"),
@@ -174,9 +191,6 @@ def nodes() -> list[dict[str, Any]]:
                     "console_type": live.get("console_type"),
                 }
             )
-        elif node.env == Environment.ON_ESXI:
-            vm = app.state.esxi_connection.get_vm(node.name)
-            entry["status"] = str(vm.runtime.powerState) if vm is not None else None
         result.append(entry)
     return result
 
@@ -380,7 +394,8 @@ def export_project() -> Response:
     """
     Downloads the current topology as a `.topoproj` bundle (a plain
     zip - topology.yaml, a sanitized settings.yml, configs.json from
-    the last config-push, and a manifest) - see app/project_bundle.py.
+    the last config-push, drawings.json, layout.json (node canvas
+    positions), and a manifest) - see app/project_bundle.py.
     """
     data = project_bundle.build_export(app)
     filename = f"{app.state.project_name or 'topology'}.topoproj"
@@ -397,7 +412,9 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
     Deploys a `.topoproj` bundle's topology live - incrementally, same
     as POST /nodes/POST /links (reuses anything already live by name,
     never deletes anything not in the bundle) - then reloads the
-    canvas. Refuses the bundle outright (400) if it targets a
+    canvas. Also restores the bundle's own node canvas positions
+    (layout.json), when present, for whichever nodes actually exist
+    post-deploy. Refuses the bundle outright (400) if it targets a
     different ESXi host/GNS3 VM than this server, or isn't a
     well-formed bundle at all - see app/project_bundle.py's own
     apply_import docstring.

@@ -47,7 +47,7 @@ def test_nodes_merges_live_gns3_data_for_gns3_nodes(client, app_state):
             "console_type": "telnet",
         }
     ]
-    with patch("app.main.GNS3Connection.list_project_nodes", return_value=live):
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live):
         resp = client.get("/nodes")
     assert resp.status_code == 200
     by_name = {n["name"]: n for n in resp.json()}
@@ -64,8 +64,8 @@ def test_node_ports_returns_real_interfaces_for_gns3_node(client, app_state):
             "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
         }
     ]
-    with patch("app.main.GNS3Connection.list_project_nodes", return_value=live), patch(
-        "app.main.GNS3Connection.list_project_links", return_value=[]
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live), patch(
+        "app.gns3_state.GNS3Connection.list_project_links", return_value=[]
     ):
         resp = client.get("/nodes/R1/ports")
     assert resp.status_code == 200
@@ -74,7 +74,7 @@ def test_node_ports_returns_real_interfaces_for_gns3_node(client, app_state):
 
 def test_node_ports_404_for_esxi_node(client, app_state):
     app_state.project_id = "proj-1"
-    with patch("app.main.GNS3Connection.list_project_nodes", return_value=[]):
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]):
         resp = client.get("/nodes/VM1/ports")
     assert resp.status_code == 404
 
@@ -104,6 +104,38 @@ def test_nodes_esxi_status_none_when_vm_not_found(client, app_state):
     assert resp.status_code == 200
     by_name = {n["name"]: n for n in resp.json()}
     assert by_name["VM1"]["status"] is None
+
+
+def test_nodes_esxi_status_ignores_a_stale_gns3_cloud_node_entry(client, app_state):
+    """
+    Real bug found live: an ESXi-hosted node also gets a GNS3-side
+    Cloud node wrapper once linked into the topology, and that
+    wrapper's own "status" is just "started" for as long as it exists
+    - it never tracks the real VM's lifecycle. A VM destroyed
+    independently of its Cloud node (e.g. by a non-incremental deploy
+    resetting the ESXi vSwitch, which doesn't clean up Cloud nodes)
+    used to still report "started" here, since a live GNS3 entry
+    existing at all short-circuited the real ESXi lookup entirely.
+    """
+    app_state.project_id = "proj-1"
+    live = [
+        {
+            "name": "VM1",
+            "node_id": "cloud-1",
+            "status": "started",
+            "console": None,
+            "console_type": "none",
+        }
+    ]
+    app_state.esxi_connection.get_vm.return_value = None
+
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live):
+        resp = client.get("/nodes")
+
+    assert resp.status_code == 200
+    by_name = {n["name"]: n for n in resp.json()}
+    assert by_name["VM1"]["status"] is None
+    assert by_name["VM1"]["gns3_node_id"] == "cloud-1"
 
 
 def test_layout_get_returns_a_position_for_every_node(client, app_state, tmp_path, monkeypatch):
@@ -145,7 +177,7 @@ def test_drawings_post_then_get_round_trips(client, app_state):
     assert app_state.last_drawings == [drawing]
 
 
-def _valid_bundle(topology_yaml_text: str) -> bytes:
+def _valid_bundle(topology_yaml_text: str, layout: dict[str, dict[str, float]] | None = None) -> bytes:
     manifest = {"format_version": 1, "project_name": "test", "exported_at": "now"}
     settings = {
         "esxi": {"ip": Settings.ESXI.IP, "gns3_vm_name": Settings.ESXI.GNS3_VM_NAME},
@@ -157,17 +189,34 @@ def _valid_bundle(topology_yaml_text: str) -> bytes:
         zf.writestr("topology.yaml", topology_yaml_text)
         zf.writestr("settings.yml", yaml.safe_dump(settings))
         zf.writestr("configs.json", json.dumps({"devices": {}}))
+        if layout is not None:
+            zf.writestr("layout.json", json.dumps({"layout": layout}))
     return buf.getvalue()
 
 
-def test_export_project_returns_zip_with_attachment_header(client, app_state, temp_topology_file):
+def test_export_project_returns_zip_with_attachment_header(
+    client, app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     resp = client.get("/project/export")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
     assert ".topoproj" in resp.headers["content-disposition"]
     assert set(zipfile.ZipFile(io.BytesIO(resp.content)).namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json",
+        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json", "layout.json",
     }
+
+
+def test_export_project_includes_current_node_positions(
+    client, app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    client.post("/layout", json={"name": "R1", "x": 111, "y": 222})
+
+    resp = client.get("/project/export")
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    layout = json.loads(zf.read("layout.json"))["layout"]
+    assert layout["R1"] == {"x": 111, "y": 222}
 
 
 def test_import_project_happy_path_returns_manifest_and_configs(
@@ -185,6 +234,28 @@ def test_import_project_happy_path_returns_manifest_and_configs(
     assert resp.status_code == 200, resp.text
     fake.deploy_topology.assert_called_once()
     assert resp.json()["manifest"]["format_version"] == 1
+
+
+def test_import_project_restores_bundled_node_positions(
+    client, app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    fake = MagicMock()
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(
+        temp_topology_file.read_text(),
+        layout={"R1": {"x": 42, "y": 84}, "GHOST": {"x": 1, "y": 2}},
+    )
+
+    resp = client.post(
+        "/project/import",
+        files={"file": ("bundle.topoproj", bundle, "application/zip")},
+    )
+    assert resp.status_code == 200, resp.text
+
+    layout = client.get("/layout").json()
+    assert layout["R1"] == {"x": 42, "y": 84}
+    assert "GHOST" not in layout
 
 
 def test_import_project_bad_bundle_maps_to_400(client, app_state, temp_topology_file):
