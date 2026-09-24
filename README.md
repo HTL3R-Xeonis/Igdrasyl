@@ -12,9 +12,7 @@ rather than duplicating its ESXi/GNS3 connection code.
 **Status: feature-complete and verified end-to-end against real
 infrastructure** - GNS3 console embedding, VM screens (direct VNC),
 config-push, project import/export, and multi-host switching have all
-been exercised live, not just in the test suite. See `HANDOFF.md` for
-the full history, every real bug found along the way, and design
-rationale if picking this up fresh.
+been exercised live, not just in the test suite.
 
 ## Architecture
 
@@ -38,11 +36,12 @@ rationale if picking this up fresh.
   (`RemoteDisplay.vnc.*`), bridged the same way (`app/vm_screen.py`),
   rendered in the browser with open-source `noVNC`.
 - Config push: a second YAML file (raw CLI commands per device, not a
-  structured schema - see `HANDOFF.md` for the rationale), pushed via
-  Netmiko (GNS3 console devices) or `pyvmomi` guest-ops (ESXi VMs), the
-  same transports the interactive console/screen features use. Stops on
-  the first failed command per device, but continues to the next device
-  (`app/config_push.py`).
+  structured schema - a uniform "send this verbatim" transport works
+  across the whole heterogeneous device mix without a per-vendor
+  renderer), pushed via Netmiko (GNS3 console devices) or `pyvmomi`
+  guest-ops (ESXi VMs), the same transports the interactive
+  console/screen features use. Stops on the first failed command per
+  device, but continues to the next device (`app/config_push.py`).
 - Project import/export (`app/project_bundle.py`): a `.topoproj` bundle
   (a plain zip) carries the topology YAML, a sanitized settings
   snapshot (used only as an ESXi/GNS3-target safety check on import,
@@ -102,12 +101,9 @@ pip install -e ".[test]"
 pytest
 ```
 
-149 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+150 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
-needed). Everything here has also been separately verified against real
-infrastructure at least once (see `HANDOFF.md` for exactly what and
-when) - these tests are the permanent, repeatable form of that
-verification, not a replacement for it.
+needed).
 
 ## License
 
