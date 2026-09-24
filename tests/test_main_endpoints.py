@@ -4,6 +4,7 @@ import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
+import requests
 import yaml
 
 from src.settings import Settings
@@ -28,6 +29,38 @@ def test_health_reports_incremental_deploy_setting(client, app_state):
         assert resp.json()["incremental_deploy"] is False
     finally:
         Settings.INCREMENTAL_DEPLOY = original
+
+
+def test_health_reports_gns3_port(client, app_state):
+    resp = client.get("/health")
+    assert resp.json()["gns3_port"] == Settings.GNS3.PORT
+
+
+def test_reload_gns3_project_closes_and_reopens(client, app_state):
+    app_state.project_id = "proj-1"
+    app_state.gns3_vm_ip = "10.20.20.231"
+
+    with patch("app.main.reload_project") as fake_reload:
+        resp = client.post("/project/reload-gns3")
+
+    assert resp.status_code == 200, resp.text
+    fake_reload.assert_called_once_with("10.20.20.231", Settings.GNS3.PORT, "proj-1")
+
+
+def test_reload_gns3_project_503s_when_no_live_project(client, app_state):
+    app_state.project_id = None
+    resp = client.post("/project/reload-gns3")
+    assert resp.status_code == 503
+
+
+def test_reload_gns3_project_502s_on_gns3_failure(client, app_state):
+    app_state.project_id = "proj-1"
+    app_state.gns3_vm_ip = "10.20.20.231"
+
+    with patch("app.main.reload_project", side_effect=requests.ConnectionError("boom")):
+        resp = client.post("/project/reload-gns3")
+
+    assert resp.status_code == 502
 
 
 def test_topology_returns_static_structure_regardless_of_live_state(client, app_state):
@@ -388,4 +421,62 @@ def test_import_project_deploy_failure_maps_to_error_status(client, app_state, t
 
 def test_import_job_status_404s_for_unknown_job(client, app_state):
     resp = client.get("/project/import/nonexistent-job-id")
+    assert resp.status_code == 404
+
+
+def test_settings_profiles_upload_list_and_delete_round_trip(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+
+    resp = client.post(
+        "/settings-profiles",
+        files={"file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")},
+    )
+    assert resp.status_code == 200, resp.text
+
+    profiles = client.get("/settings-profiles").json()
+    assert len(profiles) == 1
+    assert profiles[0]["filename"] == "host-a.yml"
+    assert profiles[0]["esxi_ip"] == "10.0.0.1"
+
+    resp = client.delete("/settings-profiles/host-a.yml")
+    assert resp.status_code == 200, resp.text
+    assert client.get("/settings-profiles").json() == []
+
+
+def test_settings_profiles_upload_rejects_invalid_yaml(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+
+    resp = client.post(
+        "/settings-profiles",
+        files={"file": ("host-a.yml", b"esxi: [unclosed", "application/x-yaml")},
+    )
+    assert resp.status_code == 400
+
+
+def test_settings_profiles_delete_404s_for_unknown_file(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+    resp = client.delete("/settings-profiles/nope.yml")
+    assert resp.status_code == 404
+
+
+def test_settings_profiles_activate_triggers_a_restart(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+    client.post(
+        "/settings-profiles",
+        files={"file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")},
+    )
+
+    with patch("app.settings_profiles._restart_with_settings") as fake_restart:
+        resp = client.post("/settings-profiles/host-a.yml/activate")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "restarting"
+        time.sleep(1.0)
+
+    fake_restart.assert_called_once()
+    assert fake_restart.call_args[0][0].endswith("host-a.yml")
+
+
+def test_settings_profiles_activate_404s_for_unknown_file(client, app_state, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+    resp = client.post("/settings-profiles/nope.yml/activate")
     assert resp.status_code == 404

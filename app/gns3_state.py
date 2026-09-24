@@ -37,6 +37,46 @@ def resolve_project_id(gns3_vm_ip: str, project_name: str) -> str | None:
     return project["project_id"] if project is not None else None
 
 
+def reload_project(gns3_vm_ip: str, port: int, project_id: str) -> None:
+    """
+    Closes then reopens the GNS3 project - refreshes the controller's
+    own in-memory state for it (e.g. picking up changes made directly
+    in GNS3's own web UI, or recovering from a project stuck in a
+    half-loaded state) without touching ESXi or redeploying anything.
+    Real GNS3 v2 API endpoints (.../close, .../open) - not wrapped by
+    TopologyBuilder's own GNS3Connection as a named method, since this
+    is purely an operational/TopologyOperator concern, called directly
+    here via its inherited (static) APIHandler.post.
+
+    GNS3 itself stops every node as part of closing a project, and does
+    NOT restart them on reopen - confirmed live: close() left every
+    node, including ESXi-hosted ones' Cloud-node wrappers, reporting
+    status None/stopped. So this remembers which nodes were actually
+    started beforehand and restarts exactly those after reopening,
+    otherwise "reload" would silently power off the whole topology
+    instead of just refreshing GNS3's state. ESXi VMs are unaffected
+    either way - their real power state lives on ESXi, never on GNS3's
+    own Cloud-node status field (see /nodes's own docstring on why that
+    field is never trusted here) - restarting their Cloud-node wrapper
+    is a no-op for the underlying VM. A single node that fails to
+    restart doesn't stop the rest from being attempted.
+    :raises requests.HTTPError: propagated from close/open.
+    :raises TimeoutError: propagated from close/open.
+    """
+    base = f"http://{gns3_vm_ip}:{port}/v2/projects/{project_id}"
+    nodes_before = GNS3Connection.list_project_nodes(gns3_vm_ip, port, project_id)
+    started_node_ids = [n["node_id"] for n in nodes_before if n.get("status") == "started"]
+
+    GNS3Connection.post(f"{base}/close")
+    GNS3Connection.post(f"{base}/open")
+
+    for node_id in started_node_ids:
+        try:
+            GNS3Connection.start_node(gns3_vm_ip, port, project_id, node_id)
+        except (requests.RequestException, TimeoutError, RuntimeError):
+            pass
+
+
 def list_live_nodes(app: FastAPI) -> list[dict[str, Any]]:
     if app.state.project_id is None:
         raise NoLiveProject(

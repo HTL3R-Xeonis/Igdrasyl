@@ -3,7 +3,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports, resolve_project_id
+from app.gns3_state import (
+    NoLiveProject,
+    list_live_nodes,
+    list_node_ports,
+    reload_project,
+    resolve_project_id,
+)
 
 
 def test_raises_when_no_project_resolved(app_state):
@@ -120,3 +126,66 @@ def test_resolve_project_id_finds_project_by_name():
 def test_resolve_project_id_returns_none_when_not_found():
     with patch("app.gns3_state.GNS3Connection.list_all_projects", return_value=[]):
         assert resolve_project_id("10.0.0.1", "phaseb") is None
+
+
+def test_reload_project_closes_then_opens_in_order():
+    calls = []
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]), patch(
+        "app.gns3_state.GNS3Connection.post", side_effect=lambda url: calls.append(url)
+    ):
+        reload_project("10.0.0.1", 80, "proj-1")
+
+    assert calls == [
+        "http://10.0.0.1:80/v2/projects/proj-1/close",
+        "http://10.0.0.1:80/v2/projects/proj-1/open",
+    ]
+
+
+def test_reload_project_propagates_http_errors_from_close_or_open():
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]), patch(
+        "app.gns3_state.GNS3Connection.post",
+        side_effect=requests.HTTPError("boom"),
+    ):
+        with pytest.raises(requests.HTTPError):
+            reload_project("10.0.0.1", 80, "proj-1")
+
+
+def test_reload_project_restarts_only_nodes_that_were_started_before():
+    """
+    Real bug found live: GNS3 stops every node as part of closing a
+    project and does NOT restart them on reopen - a plain close+open
+    silently powered off the whole topology (including, per GNS3's own
+    node list, the ESXi-hosted nodes' Cloud-node wrappers - though the
+    real VMs underneath were untouched, only their GNS3-side status
+    field). reload_project must remember what was actually running and
+    restart exactly that afterward.
+    """
+    nodes_before = [
+        {"node_id": "n1", "name": "R1", "status": "started"},
+        {"node_id": "n2", "name": "SW1", "status": "stopped"},
+        {"node_id": "n3", "name": "PC1", "status": "started"},
+    ]
+    with patch(
+        "app.gns3_state.GNS3Connection.list_project_nodes", return_value=nodes_before
+    ), patch("app.gns3_state.GNS3Connection.post"), patch(
+        "app.gns3_state.GNS3Connection.start_node"
+    ) as fake_start:
+        reload_project("10.0.0.1", 80, "proj-1")
+
+    started_ids = {call.args[3] for call in fake_start.call_args_list}
+    assert started_ids == {"n1", "n3"}
+
+
+def test_reload_project_continues_restarting_other_nodes_if_one_fails():
+    nodes_before = [
+        {"node_id": "n1", "name": "R1", "status": "started"},
+        {"node_id": "n2", "name": "SW1", "status": "started"},
+    ]
+    with patch(
+        "app.gns3_state.GNS3Connection.list_project_nodes", return_value=nodes_before
+    ), patch("app.gns3_state.GNS3Connection.post"), patch(
+        "app.gns3_state.GNS3Connection.start_node", side_effect=RuntimeError("boom")
+    ) as fake_start:
+        reload_project("10.0.0.1", 80, "proj-1")  # must not raise
+
+    assert fake_start.call_count == 2

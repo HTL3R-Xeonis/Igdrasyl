@@ -15,6 +15,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+import requests
 from fastapi import FastAPI, HTTPException, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -24,9 +25,15 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, import_jobs, lifecycle, project_bundle, topology_write, vm_screen
+from app import console, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
-from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports, resolve_project_id
+from app.gns3_state import (
+    NoLiveProject,
+    list_live_nodes,
+    list_node_ports,
+    reload_project,
+    resolve_project_id,
+)
 from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
@@ -112,6 +119,7 @@ def health() -> dict[str, Any]:
     return {
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
+        "gns3_port": Settings.GNS3.PORT,
         "gns3_project_name": app.state.project_name,
         "gns3_project_id": app.state.project_id,
         "warning": app.state.startup_warning,
@@ -406,6 +414,27 @@ def export_project() -> Response:
     )
 
 
+@app.post("/project/reload-gns3")
+def reload_gns3_project() -> dict[str, str]:
+    """
+    Closes and reopens the live GNS3 project - refreshes GNS3's own
+    in-memory state for it (e.g. after changes made directly in GNS3's
+    web UI) without redeploying anything. Doesn't touch ESXi VMs'
+    actual power state, but does briefly stop every GNS3-native node
+    (GNS3 itself stops everything on close) - restarted automatically
+    once the project reopens, so the net effect is a refresh, not a
+    lasting shutdown. See gns3_state.reload_project's own docstring for
+    the real bug this fixes.
+    """
+    if app.state.gns3_vm_ip is None or app.state.project_id is None:
+        raise HTTPException(503, app.state.startup_warning or "no live GNS3 project resolved")
+    try:
+        reload_project(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
+    except (requests.RequestException, TimeoutError) as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
 @app.post("/project/import")
 async def import_project(file: UploadFile) -> dict[str, Any]:
     """
@@ -452,6 +481,57 @@ def import_job_status(job_id: str) -> dict[str, Any]:
     elif job.status == "done" and job.result is not None:
         response.update(job.result)
     return response
+
+
+@app.get("/settings-profiles")
+def list_settings_profiles() -> list[dict[str, Any]]:
+    """
+    Every uploaded settings.yml profile (see app/settings_profiles.py),
+    each with a best-effort preview (esxi_ip/gns3_vm_name/topology_file/
+    project_name - None or an "error" string if that particular file
+    doesn't parse) and whether it's the one this running process was
+    actually started with.
+    """
+    return settings_profiles.list_profiles()
+
+
+@app.post("/settings-profiles")
+async def upload_settings_profile(file: UploadFile) -> dict[str, str]:
+    """Saves an uploaded settings.yml under its own filename - doesn't activate it."""
+    data = await file.read()
+    try:
+        settings_profiles.save_profile(file.filename, data)
+    except settings_profiles.InvalidProfileName as exc:
+        raise HTTPException(400, str(exc))
+    return {"status": "ok"}
+
+
+@app.delete("/settings-profiles/{filename}")
+def delete_settings_profile(filename: str) -> dict[str, str]:
+    try:
+        settings_profiles.delete_profile(filename)
+    except settings_profiles.InvalidProfileName as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    return {"status": "ok"}
+
+
+@app.post("/settings-profiles/{filename}/activate")
+def activate_settings_profile(filename: str) -> dict[str, str]:
+    """
+    Restarts this same server process against the given profile - see
+    settings_profiles.restart_into_profile's own docstring for why this
+    is a real process re-exec (same PID), not an in-place config swap,
+    and why every open console/screen connection drops when it happens.
+    """
+    try:
+        settings_profiles.restart_into_profile(filename)
+    except settings_profiles.InvalidProfileName as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    return {"status": "restarting"}
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in
