@@ -25,9 +25,21 @@ _FIXTURE_TOPOLOGY = Path(__file__).parent / "fixtures" / "topology.yaml"
 
 
 def _make_bundle(
-    *, format_version=1, esxi_ip=None, esxi_vm_name=None, omit=(), drawings=None, layout=None
+    *,
+    format_version=1,
+    esxi_ip=None,
+    esxi_vm_name=None,
+    omit=(),
+    drawings=None,
+    layout=None,
+    auto_config_push=False,
 ) -> bytes:
-    manifest = {"format_version": format_version, "project_name": "test", "exported_at": "now"}
+    manifest = {
+        "format_version": format_version,
+        "project_name": "test",
+        "exported_at": "now",
+        "auto_config_push": auto_config_push,
+    }
     settings = {
         "esxi": {
             "ip": esxi_ip if esxi_ip is not None else Settings.ESXI.IP,
@@ -94,6 +106,11 @@ def test_build_export_produces_expected_zip_members(
     assert settings["esxi"]["ip"] == Settings.ESXI.IP
     assert settings["esxi"]["gns3_vm_name"] == Settings.ESXI.GNS3_VM_NAME
 
+    # A live export always starts a bundle with auto_config_push off -
+    # opting a specific bundle in is a manual manifest.json edit (or set
+    # when building one by hand), not something export ever infers.
+    assert manifest["auto_config_push"] is False
+
     drawings = json.loads(zf.read("drawings.json"))
     assert drawings == {"drawings": app_state.last_drawings}
 
@@ -126,6 +143,38 @@ def test_apply_import_happy_path_deploys_and_reloads_graph(app_state, temp_topol
     # backward-compatible with bundles exported before drawings existed.
     assert result["drawings"] == []
     assert app_state.last_drawings == []
+    assert result["auto_config_push"] is False
+
+
+def test_apply_import_surfaces_auto_config_push_from_the_manifest(
+    app_state, temp_topology_file
+):
+    app_state.topology_backend = _FakeBackend()
+    bundle = _make_bundle(auto_config_push=True)
+
+    result = project_bundle.apply_import(_app(), bundle)
+
+    assert result["auto_config_push"] is True
+
+
+def test_apply_import_defaults_auto_config_push_false_for_older_bundles(
+    app_state, temp_topology_file
+):
+    """A bundle built before this field existed has no manifest key at all - must default to False, never crash."""
+    app_state.topology_backend = _FakeBackend()
+    bundle = _make_bundle()
+    zf_in = zipfile.ZipFile(io.BytesIO(bundle))
+    manifest = json.loads(zf_in.read("manifest.json"))
+    del manifest["auto_config_push"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf_out:
+        for name in zf_in.namelist():
+            content = json.dumps(manifest) if name == "manifest.json" else zf_in.read(name)
+            zf_out.writestr(name, content)
+
+    result = project_bundle.apply_import(_app(), buf.getvalue())
+
+    assert result["auto_config_push"] is False
 
 
 def test_apply_import_restores_bundled_drawings(app_state, temp_topology_file):
@@ -189,6 +238,41 @@ def test_apply_import_keeps_old_project_id_when_gns3_unreachable(app_state, temp
         project_bundle.apply_import(_app(), bundle)
 
     assert app_state.project_id == "stale-id"
+
+
+def test_apply_import_clears_a_stale_startup_warning_once_the_project_resolves(
+    app_state, temp_topology_file
+):
+    """
+    Real bug found live: startup_warning is set once in lifespan (e.g.
+    "no GNS3 project named X yet") and never revisited elsewhere, so
+    /health's warning field - and the frontend's warning banner - stayed
+    stuck showing that stale message forever, even after a real import
+    successfully created the project it was complaining didn't exist.
+    """
+    app_state.topology_backend = _FakeBackend()
+    app_state.gns3_vm_ip = "10.20.20.231"
+    app_state.startup_warning = "No GNS3 project named 'x' - has this topology actually been deployed?"
+    bundle = _make_bundle()
+
+    with patch("app.project_bundle.resolve_project_id", return_value="fresh-id"):
+        project_bundle.apply_import(_app(), bundle)
+
+    assert app_state.startup_warning is None
+
+
+def test_apply_import_keeps_the_warning_when_project_still_cannot_be_resolved(
+    app_state, temp_topology_file
+):
+    app_state.topology_backend = _FakeBackend()
+    app_state.gns3_vm_ip = "10.20.20.231"
+    app_state.startup_warning = "some pre-existing warning"
+    bundle = _make_bundle()
+
+    with patch("app.project_bundle.resolve_project_id", return_value=None):
+        project_bundle.apply_import(_app(), bundle)
+
+    assert app_state.startup_warning == "some pre-existing warning"
 
 
 def test_apply_import_rejects_mismatched_esxi_target(app_state, temp_topology_file):

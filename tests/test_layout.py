@@ -36,3 +36,57 @@ def test_save_position_does_not_clobber_other_saved_positions(tmp_path, monkeypa
 
     saved = json.loads(path.read_text())
     assert saved == {"R1": {"x": 1, "y": 1}, "SW1": {"x": 2, "y": 2}}
+
+
+def test_save_positions_writes_every_entry_in_one_pass(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(path))
+    layout_mod.save_position("VM1", 9, 9)  # pre-existing, unrelated entry
+
+    layout_mod.save_positions({"R1": {"x": 1, "y": 1}, "SW1": {"x": 2, "y": 2}})
+
+    saved = json.loads(path.read_text())
+    assert saved == {"VM1": {"x": 9, "y": 9}, "R1": {"x": 1, "y": 1}, "SW1": {"x": 2, "y": 2}}
+
+
+def test_apply_imported_layout_uses_bundle_position_when_given(graph, tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    layout_mod.apply_imported_layout(graph.nodes, {"R1": {"x": 42, "y": 84}})
+
+    saved = layout_mod.load_layout(graph.nodes)
+    assert saved["R1"] == {"x": 42, "y": 84}
+
+
+def test_apply_imported_layout_computes_a_default_for_nodes_the_bundle_omits(
+    graph, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    layout_mod.apply_imported_layout(graph.nodes, {"R1": {"x": 42, "y": 84}})
+
+    saved = layout_mod.load_layout(graph.nodes)
+    # SW1/VM1 weren't in the bundle's layout - still got a real position,
+    # not left absent/None.
+    for name in ("SW1", "VM1"):
+        assert isinstance(saved[name]["x"], (int, float))
+        assert isinstance(saved[name]["y"], (int, float))
+
+
+def test_apply_imported_layout_overwrites_a_stale_saved_position(graph, tmp_path, monkeypatch):
+    """
+    Real bug found live: node names get reused across unrelated
+    topology imports (e.g. "R1" in one 3-node test fixture and again in
+    an unrelated 8-device topology). Without this, a node's position
+    from a STRUCTURALLY DIFFERENT earlier topology stuck around and got
+    mixed with freshly-computed positions for that earlier topology's
+    other nodes - a canvas with two unrelated coordinate systems
+    overlaid, looking scattered and nothing like either real topology.
+    apply_imported_layout must always resolve (and overwrite) every
+    current node, never leave a pre-existing entry untouched.
+    """
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    layout_mod.save_position("R1", -999, -999)  # stale, from an unrelated earlier topology
+
+    layout_mod.apply_imported_layout(graph.nodes, {})  # this bundle gives no positions at all
+
+    saved = layout_mod.load_layout(graph.nodes)
+    assert saved["R1"] != {"x": -999, "y": -999}

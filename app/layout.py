@@ -55,8 +55,42 @@ def load_layout(nodes: dict[str, GenericNode]) -> dict[str, dict[str, float]]:
 
 
 def save_position(name: str, x: float, y: float) -> None:
+    save_positions({name: {"x": x, "y": y}})
+
+
+def save_positions(positions_update: dict[str, dict[str, float]]) -> None:
+    """Same as calling save_position for each entry, but a single read-modify-write."""
     positions = _read_saved_positions()
-    positions[name] = {"x": x, "y": y}
+    positions.update(positions_update)
     path = _layout_path()
     with open(path, "w") as f:
         json.dump(positions, f)
+
+
+def apply_imported_layout(
+    nodes: dict[str, GenericNode], bundle_layout: dict[str, Any]
+) -> None:
+    """
+    Sets every post-deploy node's saved position after a project import:
+    the bundle's own value where it gave one (and it's well-formed),
+    otherwise a freshly computed default for the CURRENT graph - never a
+    stale value left over from a previously imported/deployed topology
+    that happened to reuse the same node name. Real bug found live: a
+    node name (e.g. "R1") reused across unrelated topology imports kept
+    whatever position an earlier, structurally different topology had
+    saved for it, while other node names not seen before got a freshly
+    computed position instead - the canvas ended up mixing two
+    unrelated coordinate systems, scattered and barely resembling
+    either topology. Always covering every current node here (bundle or
+    computed, never "leave whatever was there") is what prevents that.
+    """
+    computed = compute_node_positions(nodes, _CANVAS_WIDTH, _CANVAS_HEIGHT)
+    resolved: dict[str, dict[str, float]] = {}
+    for name in nodes:
+        bundle_pos = bundle_layout.get(name)
+        if isinstance(bundle_pos, dict) and "x" in bundle_pos and "y" in bundle_pos:
+            resolved[name] = {"x": bundle_pos["x"], "y": bundle_pos["y"]}
+        else:
+            x, y = computed[name]
+            resolved[name] = {"x": x, "y": y}
+    save_positions(resolved)

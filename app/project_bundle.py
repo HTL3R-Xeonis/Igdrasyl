@@ -34,7 +34,7 @@ from fastapi import FastAPI
 from src.settings import Settings
 
 from app.gns3_state import resolve_project_id
-from app.layout import load_layout, save_position
+from app.layout import apply_imported_layout, load_layout
 from app.topology import load_graph
 from app.topology_write import get_or_create_backend
 
@@ -58,6 +58,17 @@ def build_export(app: FastAPI) -> bytes:
         "format_version": _FORMAT_VERSION,
         "project_name": app.state.project_name,
         "exported_at": datetime.now(timezone.utc).isoformat(),
+        # Whether a future POST /project/import of *this* bundle should
+        # also run its own configs.json through config-push right after
+        # the deploy succeeds, instead of only loading it into the
+        # Config Push panel for a human to review and push manually.
+        # False here (a live export always starts from this default) -
+        # edit the exported file's manifest.json, or set it when
+        # building a bundle by hand, to opt a specific bundle in. Lives
+        # here rather than in settings.yml on purpose: it's a property
+        # of this project file (this exact set of commands, already
+        # trusted enough to bundle), not a standing server policy.
+        "auto_config_push": False,
     }
     configs = getattr(app.state, "last_config_push", {})
     drawings = getattr(app.state, "last_drawings", [])
@@ -78,7 +89,9 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     """
     :raises BundleValidationError: malformed bundle, wrong ESXi/GNS3 target, or invalid topology YAML.
     :raises RuntimeError: propagated from the live deploy on failure - the real topology file is left untouched.
-    :returns: {"manifest": ..., "configs": {name: [cmd, ...]}, "drawings": [...]} from the bundle. Node
+    :returns: {"manifest": ..., "configs": {name: [cmd, ...]}, "drawings": [...], "auto_config_push": bool}
+        from the bundle - the caller (main.py's POST /project/import) is responsible for actually running
+        config-push when auto_config_push is true, this function only deploys the topology itself. Node
         canvas positions are applied as a side effect (written to the local layout file, same as a drag
         via POST /layout) rather than returned - the caller reloads them via GET /layout.
     """
@@ -153,15 +166,27 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     if app.state.gns3_vm_ip is not None:
         try:
             app.state.project_id = resolve_project_id(app.state.gns3_vm_ip, app.state.project_name)
+            # Same staleness bug as project_id itself: startup_warning is
+            # otherwise set once in lifespan and never revisited, so a
+            # perfectly healthy import still leaves /health (and the
+            # frontend's warning banner) stuck showing whatever failure
+            # reason applied at process start - e.g. "no GNS3 project
+            # named X yet" from before this exact import created it.
+            if app.state.project_id is not None:
+                app.state.startup_warning = None
         except (requests.RequestException, TimeoutError):
             pass
 
-    # Best-effort: only restore positions for nodes that actually exist
-    # post-deploy (the bundle's own devices, minus anything that failed
-    # to deploy) - a node deploy_topology dropped shouldn't get a saved
-    # position pointing at nothing.
-    for name, pos in layout.items():
-        if name in app.state.graph.nodes and isinstance(pos, dict) and "x" in pos and "y" in pos:
-            save_position(name, pos["x"], pos["y"])
+    # Every post-deploy node gets a position: the bundle's own value
+    # where it gave one, otherwise a freshly computed default - never
+    # whatever a previous, structurally different topology happened to
+    # leave behind for a reused node name (see apply_imported_layout's
+    # own docstring for the real bug this fixes).
+    apply_imported_layout(app.state.graph.nodes, layout)
 
-    return {"manifest": manifest, "configs": configs.get("devices", {}), "drawings": drawings}
+    return {
+        "manifest": manifest,
+        "configs": configs.get("devices", {}),
+        "drawings": drawings,
+        "auto_config_push": bool(manifest.get("auto_config_push", False)),
+    }
