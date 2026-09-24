@@ -138,6 +138,10 @@
   }
   .menu-item:hover { background: var(--panel-2); }
   .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* For <a class="menu-item"> links that have nowhere to go yet (e.g.
+     the GNS3 Web UI link before any live GNS3 VM is resolved) -
+     :disabled doesn't apply to anchors, so this covers the same look. */
+  .menu-item-disabled { opacity: 0.45; pointer-events: none; }
   .menu-item.active::before {
     content: "\2713";
     position: absolute;
@@ -725,6 +729,99 @@
     font-size: 13px;
   }
   #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  /* Landing page - the app's own entry point, a grid of clickable host
+     tiles (one per uploaded settings.yml profile, see
+     app/settings_profiles.py). #app-view (the whole existing
+     menubar+canvas UI) and #landing-view are mutually exclusive - see
+     showLandingView()/enterHost(). */
+  #landing-view {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 64px 24px;
+    background: var(--bg);
+  }
+  #landing-header { text-align: center; margin-bottom: 36px; }
+  #landing-header h1 { margin: 0 0 6px; font-size: 22px; }
+  .landing-subtitle { margin: 0; font-size: 13px; color: var(--dim); }
+  #landing-host-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 18px;
+    max-width: 760px;
+    width: 100%;
+  }
+  #landing-license-link {
+    margin-top: 40px;
+    font-size: 11px;
+    color: var(--dim);
+    text-decoration: none;
+  }
+  #landing-license-link:hover { color: var(--accent); text-decoration: underline; }
+  .landing-host-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 18px 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .landing-host-tile:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .landing-host-tile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  /* Source SVG fill is a dark slate grey, meant for a light background
+     - brightness(0) flattens it to solid black first (ignoring that
+     original shade), then invert makes it a soft off-white matching
+     the rest of this dark theme's icon/text tones instead of pure
+     white. */
+  .landing-host-icon { width: 46px; height: 46px; filter: brightness(0) invert(0.88); }
+  .landing-host-name {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    word-break: break-word;
+    max-width: 100%;
+  }
+  .landing-host-details { font-size: 10px; color: var(--dim); text-align: center; }
+  .landing-host-active-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 4px;
+  }
+  .landing-host-delete-btn {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    background: none;
+    border: none;
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 4px;
+  }
+  .landing-host-delete-btn:hover { color: var(--bad); background: rgba(255, 255, 255, 0.06); }
+  .landing-host-tile.add-tile { border-style: dashed; color: var(--dim); }
+  .landing-host-tile.add-tile:hover { color: var(--accent); }
+  .landing-host-tile.add-tile .landing-host-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    opacity: 0.7;
+  }
   /* A real dropdown, not a popup - no dark overlay, just a small
      floating box positioned next to whatever was clicked. */
   .inline-dropdown {
@@ -799,13 +896,17 @@
 </style>
 </head>
 <body>
+<div id="app-view" hidden>
 <header id="menubar">
+  <button class="menu-btn" id="home-btn" title="Back to host picker">⌂ Hosts</button>
   <nav id="menubar-menus">
     <div class="menu">
       <button class="menu-btn" data-menu="file">File</button>
       <div class="menu-dropdown" id="menu-file" hidden>
         <a class="menu-item" id="export-project-btn" href="/project/export" download title="Download the current topology + configs as a .topoproj bundle">Export Project</a>
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
       </div>
     </div>
     <div class="menu">
@@ -821,6 +922,9 @@
       <button class="menu-btn" data-menu="info">Info</button>
       <div class="menu-dropdown" id="menu-info" hidden>
         <div class="menu-info-line" id="project-meta"></div>
+        <div class="menu-separator"></div>
+        <a class="menu-item" id="gns3-webui-link" href="#" target="_blank" rel="noopener">Open GNS3 Web UI</a>
+        <a class="menu-item" id="esxi-webui-link" href="#" target="_blank" rel="noopener">Open ESXi Web UI</a>
       </div>
     </div>
     <div class="menu">
@@ -954,6 +1058,16 @@
     <button id="zoom-fit-btn" title="Reset view">Fit</button>
   </div>
 </footer>
+</div>
+<div id="landing-view">
+  <div id="landing-header">
+    <h1>TopologyOperator</h1>
+    <p class="landing-subtitle">Pick a host to manage, or add a new one.</p>
+  </div>
+  <div id="landing-host-grid"></div>
+  <input type="file" id="landing-upload-input" accept=".yml,.yaml" hidden>
+  <a id="landing-license-link" href="/license" target="_blank" rel="noopener">View License</a>
+</div>
 <div id="modal-overlay" hidden>
   <div id="modal-box" role="dialog" aria-modal="true">
     <h3 id="modal-title"></h3>
@@ -1432,6 +1546,19 @@ async function loadCanvas() {
       `${health.gns3_project_name} @ ${health.esxi_ip}`;
     document.getElementById("warning-banner").textContent = health.warning || "";
     incrementalDeploy = health.incremental_deploy !== false;
+
+    const gns3Link = document.getElementById("gns3-webui-link");
+    const esxiLink = document.getElementById("esxi-webui-link");
+    if (health.gns3_vm_ip) {
+      gns3Link.href = health.gns3_project_id
+        ? `http://${health.gns3_vm_ip}:${health.gns3_port}/static/web-ui/server/1/project/${health.gns3_project_id}`
+        : `http://${health.gns3_vm_ip}:${health.gns3_port}/`;
+      gns3Link.classList.remove("menu-item-disabled");
+    } else {
+      gns3Link.href = "#";
+      gns3Link.classList.add("menu-item-disabled");
+    }
+    esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/ui/` : "#";
 
     const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
     nodesData = {};
@@ -2877,6 +3004,193 @@ document.getElementById("import-project-input").addEventListener("change", async
   }
 });
 
+// Landing page - the app's own entry point, a grid of clickable host
+// tiles, one per uploaded settings.yml profile (see
+// app/settings_profiles.py). #app-view (the whole existing
+// menubar+canvas UI) and #landing-view are mutually exclusive.
+// Settings is a process-global loaded once at startup, so entering a
+// host that isn't already active restarts the whole server against
+// its settings file rather than swapping config in place - see that
+// module's own docstring.
+function showLandingView() {
+  document.getElementById("app-view").hidden = true;
+  document.getElementById("landing-view").hidden = false;
+  loadLandingHostGrid();
+}
+
+async function loadLandingHostGrid() {
+  const grid = document.getElementById("landing-host-grid");
+  grid.textContent = "Loading…";
+  let profiles;
+  try {
+    profiles = await fetch("/settings-profiles").then((r) => r.json());
+  } catch (err) {
+    grid.textContent = `Failed to load hosts: ${err}`;
+    return;
+  }
+
+  grid.innerHTML = "";
+  for (const profile of profiles) grid.appendChild(buildHostTile(profile));
+  grid.appendChild(buildAddHostTile());
+}
+
+function buildHostTile(profile) {
+  const tile = document.createElement("div");
+  tile.className = `landing-host-tile${profile.active ? " active" : ""}`;
+  tile.title = profile.error
+    ? `${profile.filename}: ${profile.error}`
+    : `${profile.filename} · ${[profile.esxi_ip, profile.gns3_vm_name].filter(Boolean).join(" · ")}`;
+
+  if (profile.active) {
+    const badge = document.createElement("span");
+    badge.className = "landing-host-active-badge";
+    badge.textContent = "ACTIVE";
+    tile.appendChild(badge);
+  }
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "landing-host-delete-btn";
+  deleteBtn.textContent = "✕";
+  deleteBtn.title = "Delete this settings file";
+  deleteBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    deleteHostProfile(profile.filename);
+  });
+  tile.appendChild(deleteBtn);
+
+  const icon = document.createElement("img");
+  icon.className = "landing-host-icon";
+  icon.src = "/host-server-icon.svg";
+  icon.alt = "";
+  tile.appendChild(icon);
+
+  // The ESXi IP (from inside the settings file) identifies a host far
+  // better than its settings.yml filename does - that's demoted to the
+  // details line below, alongside the GNS3 VM name.
+  const name = document.createElement("div");
+  name.className = "landing-host-name";
+  name.textContent = profile.esxi_ip || profile.filename;
+  tile.appendChild(name);
+
+  const details = document.createElement("div");
+  details.className = "landing-host-details";
+  details.textContent = profile.error
+    ? "invalid settings file"
+    : [profile.gns3_vm_name, profile.filename].filter(Boolean).join(" · ");
+  tile.appendChild(details);
+
+  tile.addEventListener("click", () => enterHost(profile.filename, profile.active));
+  return tile;
+}
+
+function buildAddHostTile() {
+  const tile = document.createElement("div");
+  tile.className = "landing-host-tile add-tile";
+  const icon = document.createElement("div");
+  icon.className = "landing-host-icon";
+  icon.textContent = "+";
+  tile.appendChild(icon);
+  const name = document.createElement("div");
+  name.className = "landing-host-name";
+  name.textContent = "Add host";
+  tile.appendChild(name);
+  tile.addEventListener("click", () => document.getElementById("landing-upload-input").click());
+  return tile;
+}
+
+async function enterHost(filename, isActive) {
+  if (isActive) {
+    document.getElementById("landing-view").hidden = true;
+    document.getElementById("app-view").hidden = false;
+    try {
+      await loadCanvas();
+    } catch (err) {
+      document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
+    }
+    return;
+  }
+
+  if (!await showConfirm(
+    `Switch to "${filename}"? The server restarts against this settings file - any open ` +
+    `console/screen connections drop for a moment.`,
+    { title: "Switch host", confirmLabel: "Switch", danger: true }
+  )) {
+    return;
+  }
+
+  document.getElementById("landing-host-grid").textContent = `Restarting into "${filename}"…`;
+  try {
+    await fetch(`/settings-profiles/${encodeURIComponent(filename)}/activate`, { method: "POST" });
+  } catch (err) {
+    // Expected: the server process re-execs itself shortly after
+    // responding (see restart_into_profile), which can drop this
+    // request's own connection before a response body ever arrives -
+    // that's not a real failure.
+  }
+  // Poll /health until the restarted process answers again, then just
+  // reload the page outright - simplest way to get every piece of
+  // state back in sync with the newly active host, rather than trying
+  // to patch it all in place.
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const resp = await fetch("/health");
+      if (resp.ok) { window.location.reload(); return; }
+    } catch (err) {
+      // still restarting - keep polling
+    }
+  }
+  await showAlert(`Server didn't come back after activating "${filename}" - check it manually.`, { title: "Switch host" });
+  await loadLandingHostGrid();
+}
+
+async function deleteHostProfile(filename) {
+  if (!await showConfirm(`Delete settings file "${filename}"? This doesn't affect a host it's currently active for.`, {
+    title: "Delete host", confirmLabel: "Delete", danger: true,
+  })) {
+    return;
+  }
+  const resp = await fetch(`/settings-profiles/${encodeURIComponent(filename)}`, { method: "DELETE" });
+  if (!resp.ok) {
+    await showAlert(`Delete failed: ${(await resp.json()).detail || resp.status}`, { title: "Delete host" });
+    return;
+  }
+  await loadLandingHostGrid();
+}
+
+document.getElementById("home-btn").addEventListener("click", () => showLandingView());
+document.getElementById("landing-upload-input").addEventListener("change", async (evt) => {
+  const input = evt.target;
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const resp = await fetch("/settings-profiles", { method: "POST", body: formData });
+  if (!resp.ok) {
+    await showAlert(`Upload failed: ${(await resp.json()).detail || resp.status}`, { title: "Add host" });
+    return;
+  }
+  await loadLandingHostGrid();
+});
+
+document.getElementById("reload-gns3-btn").addEventListener("click", async () => {
+  setMenubarBusy("Reloading GNS3 project…");
+  try {
+    const resp = await fetch("/project/reload-gns3", { method: "POST" });
+    if (!resp.ok) {
+      setMenubarMessage(`Reload failed: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await loadCanvas();
+    setMenubarMessage("GNS3 project reloaded.");
+  } catch (err) {
+    setMenubarMessage(`Reload failed: ${err}`);
+  }
+});
+
 function openTerminalWebSocket(session, wsUrl) {
   const termHost = document.createElement("div");
   termHost.className = "session-terminal";
@@ -3232,9 +3546,7 @@ document.getElementById("popout-btn").addEventListener("click", () => {
   });
 });
 
-loadCanvas().catch((err) => {
-  document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
-});
+showLandingView();
 initPalette();
 </script>
 </body>
