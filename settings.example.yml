@@ -18,6 +18,22 @@
 # should exist, before cross-referencing live GNS3/ESXi state.
 topology_file: ./topology_example.yaml
 
+# Whether importing a .topoproj bundle (POST /project/import) deploys
+# incrementally. True (default) reuses anything already live by name and
+# only creates what's new/changed, so one slow or failing device (e.g. a
+# stuck OVA import) doesn't undo devices from the bundle that already
+# deployed successfully - confirmed live: importing a bundle with one
+# broken VM still left every other already-existing device untouched and
+# working. Set to false for a full deploy instead: resets the ESXi
+# vSwitch, deletes ESXi VMs/GNS3 projects not in the imported topology,
+# and redeploys everything from scratch even if a same-named node already
+# exists - slower and more disruptive to whatever's currently live, but
+# guarantees a clean result with nothing left over from a previous
+# import. Only affects /project/import - the canvas's own Add Node/Add
+# Link always deploy incrementally regardless of this setting, since
+# that's inherent to what those two operations are.
+incremental_deploy: true
+
 esxi:
   ip: 10.20.20.202
   username: root
