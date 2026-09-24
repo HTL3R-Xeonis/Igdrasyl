@@ -1251,6 +1251,12 @@ function snapToGrid(value) {
 // appears at all; when off, the action just proceeds directly.
 let showDisruptionWarnings = true;
 let showPortLabels = true;
+// Reflects the server's own Settings.INCREMENTAL_DEPLOY (see /health),
+// which only the server's settings.yml controls - not user-settable
+// from here. Defaults true (matches the server's own default) until
+// the first /health response updates it, so an early confirm dialog
+// (unlikely in practice, but possible) describes the common case.
+let incrementalDeploy = true;
 function confirmDisruption(message, opts) {
   if (!showDisruptionWarnings) return Promise.resolve(true);
   return showConfirm(message, opts);
@@ -1408,6 +1414,7 @@ async function loadCanvas() {
     document.getElementById("project-meta").textContent =
       `${health.gns3_project_name} @ ${health.esxi_ip}`;
     document.getElementById("warning-banner").textContent = health.warning || "";
+    incrementalDeploy = health.incremental_deploy !== false;
 
     const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
     nodesData = {};
@@ -2734,12 +2741,21 @@ document.getElementById("import-project-input").addEventListener("change", async
   input.value = ""; // allow re-selecting the same file next time
   if (!file) return;
 
+  const importWarning = incrementalDeploy
+    ? `This deploys the bundle's topology live, incrementally - it ` +
+      `creates whatever's missing and reuses anything already running ` +
+      `with a matching name, but never removes anything. This briefly ` +
+      `disrupts every already-running ESXi-bridged Cloud connection, ` +
+      `same as adding a node/link, and may take a while.`
+    : `This deploys the bundle's topology live as a FULL, ` +
+      `non-incremental deploy (the server's incremental_deploy setting ` +
+      `is off) - it resets the ESXi vSwitch and redeploys every device ` +
+      `from scratch, even ones that already exist by name. Anything ` +
+      `currently running that isn't in this bundle may be deleted. ` +
+      `This is more disruptive than a normal import and may take a ` +
+      `while.`;
   if (!await confirmDisruption(
-    `Import "${file.name}"?\n\nThis deploys the bundle's topology live, ` +
-    `incrementally - it creates whatever's missing and reuses anything ` +
-    `already running with a matching name, but never removes anything. ` +
-    `This briefly disrupts every already-running ESXi-bridged Cloud ` +
-    `connection, same as adding a node/link, and may take a while.`,
+    `Import "${file.name}"?\n\n${importWarning}`,
     { title: "Import project", confirmLabel: "Import" }
   )) {
     return;

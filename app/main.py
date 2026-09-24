@@ -119,6 +119,7 @@ def health() -> dict[str, Any]:
         "gns3_project_name": app.state.project_name,
         "gns3_project_id": app.state.project_id,
         "warning": app.state.startup_warning,
+        "incremental_deploy": Settings.INCREMENTAL_DEPLOY,
     }
 
 

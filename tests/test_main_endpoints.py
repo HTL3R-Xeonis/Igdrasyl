@@ -17,6 +17,16 @@ def test_health_reports_degraded_state(client, app_state):
     assert body["gns3_project_id"] is None
 
 
+def test_health_reports_incremental_deploy_setting(client, app_state):
+    original = Settings.INCREMENTAL_DEPLOY
+    try:
+        Settings.INCREMENTAL_DEPLOY = False
+        resp = client.get("/health")
+        assert resp.json()["incremental_deploy"] is False
+    finally:
+        Settings.INCREMENTAL_DEPLOY = original
+
+
 def test_topology_returns_static_structure_regardless_of_live_state(client, app_state):
     resp = client.get("/topology")
     assert resp.status_code == 200
