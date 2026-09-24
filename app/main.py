@@ -24,7 +24,7 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, lifecycle, project_bundle, topology_write, vm_screen
+from app import console, import_jobs, lifecycle, project_bundle, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import NoLiveProject, list_live_nodes, list_node_ports, resolve_project_id
 from app.layout import load_layout, save_position
@@ -409,23 +409,49 @@ def export_project() -> Response:
 @app.post("/project/import")
 async def import_project(file: UploadFile) -> dict[str, Any]:
     """
-    Deploys a `.topoproj` bundle's topology live - incrementally, same
-    as POST /nodes/POST /links (reuses anything already live by name,
-    never deletes anything not in the bundle) - then reloads the
-    canvas. Also restores the bundle's own node canvas positions
-    (layout.json), when present, for whichever nodes actually exist
-    post-deploy. Refuses the bundle outright (400) if it targets a
-    different ESXi host/GNS3 VM than this server, or isn't a
-    well-formed bundle at all - see app/project_bundle.py's own
-    apply_import docstring.
+    Kicks off a `.topoproj` bundle's live deploy as a background job and
+    returns immediately - the deploy itself (incrementally, same as
+    POST /nodes/POST /links: reuses anything already live by name, never
+    deletes anything not in the bundle, unless the bundle is a full
+    non-incremental one) can take minutes, so the caller polls GET
+    /project/import/{job_id} for progress and the final result instead
+    of blocking on one long request. See app/import_jobs.py for why the
+    reported progress is an approximation, not a real callback from the
+    deploy itself.
     """
     data = await file.read()
-    try:
-        return project_bundle.apply_import(app, data)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
-        raise HTTPException(502, str(exc))
+    job = import_jobs.start_job(app, data)
+    return {"job_id": job.id, "total": job.total}
+
+
+@app.get("/project/import/{job_id}")
+def import_job_status(job_id: str) -> dict[str, Any]:
+    """
+    Poll target for POST /project/import's background job.
+    "status" is "running", "done", or "error". While running: "total"
+    and "completed" (see app/import_jobs.py's own docstring on how
+    "completed" is derived). Once "done": also carries "manifest",
+    "configs", "drawings", "auto_config_push", and - when the bundle's
+    own manifest.json enabled it - "push_results", exactly the same
+    shape the old synchronous endpoint used to return directly. Once
+    "error": also carries "error" (message) and "error_kind"
+    ("bad_bundle" for a malformed/mistargeted bundle, mirroring the old
+    400; "deploy_failed" for a live deploy failure, mirroring the old
+    502) - the real topology file is left untouched on either.
+    """
+    jobs: dict[str, import_jobs.ImportJob] = getattr(app.state, "import_jobs", {})
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"no import job {job_id!r}")
+
+    completed = import_jobs.poll_progress(app, job)
+    response: dict[str, Any] = {"status": job.status, "total": job.total, "completed": completed}
+    if job.status == "error":
+        response["error"] = job.error
+        response["error_kind"] = job.error_kind
+    elif job.status == "done" and job.result is not None:
+        response.update(job.result)
+    return response
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in

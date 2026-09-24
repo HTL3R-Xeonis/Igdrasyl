@@ -1,11 +1,14 @@
 import io
 import json
+import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
 import yaml
 
 from src.settings import Settings
+
+from app.config_push import DeviceResult
 
 
 def test_health_reports_degraded_state(client, app_state):
@@ -177,8 +180,18 @@ def test_drawings_post_then_get_round_trips(client, app_state):
     assert app_state.last_drawings == [drawing]
 
 
-def _valid_bundle(topology_yaml_text: str, layout: dict[str, dict[str, float]] | None = None) -> bytes:
-    manifest = {"format_version": 1, "project_name": "test", "exported_at": "now"}
+def _valid_bundle(
+    topology_yaml_text: str,
+    layout: dict[str, dict[str, float]] | None = None,
+    configs: dict[str, list[str]] | None = None,
+    auto_config_push: bool = False,
+) -> bytes:
+    manifest = {
+        "format_version": 1,
+        "project_name": "test",
+        "exported_at": "now",
+        "auto_config_push": auto_config_push,
+    }
     settings = {
         "esxi": {"ip": Settings.ESXI.IP, "gns3_vm_name": Settings.ESXI.GNS3_VM_NAME},
         "gns3": {"username": Settings.GNS3.USERNAME, "port": Settings.GNS3.PORT},
@@ -188,7 +201,7 @@ def _valid_bundle(topology_yaml_text: str, layout: dict[str, dict[str, float]] |
         zf.writestr("manifest.json", json.dumps(manifest))
         zf.writestr("topology.yaml", topology_yaml_text)
         zf.writestr("settings.yml", yaml.safe_dump(settings))
-        zf.writestr("configs.json", json.dumps({"devices": {}}))
+        zf.writestr("configs.json", json.dumps({"devices": configs or {}}))
         if layout is not None:
             zf.writestr("layout.json", json.dumps({"layout": layout}))
     return buf.getvalue()
@@ -219,6 +232,22 @@ def test_export_project_includes_current_node_positions(
     assert layout["R1"] == {"x": 111, "y": 222}
 
 
+def _wait_for_import_job(client, job_id: str, timeout: float = 2.0) -> dict:
+    """
+    POST /project/import now only kicks off a background job (see
+    app/import_jobs.py) and returns immediately - tests poll this same
+    way the frontend does instead of asserting on the POST response
+    itself.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        body = client.get(f"/project/import/{job_id}").json()
+        if body["status"] != "running":
+            return body
+        time.sleep(0.01)
+    raise AssertionError(f"import job {job_id!r} still running after {timeout}s")
+
+
 def test_import_project_happy_path_returns_manifest_and_configs(
     client, app_state, temp_topology_file
 ):
@@ -230,10 +259,81 @@ def test_import_project_happy_path_returns_manifest_and_configs(
         "/project/import",
         files={"file": ("bundle.topoproj", bundle, "application/zip")},
     )
-
     assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+
+    result = _wait_for_import_job(client, job_id)
+    assert result["status"] == "done"
     fake.deploy_topology.assert_called_once()
-    assert resp.json()["manifest"]["format_version"] == 1
+    assert result["manifest"]["format_version"] == 1
+
+
+def test_import_project_does_not_auto_push_by_default(client, app_state, temp_topology_file):
+    fake = MagicMock()
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(temp_topology_file.read_text(), configs={"R1": ["show version"]})
+
+    with patch("app.config_push.push_all") as fake_push_all:
+        resp = client.post(
+            "/project/import",
+            files={"file": ("bundle.topoproj", bundle, "application/zip")},
+        )
+        result = _wait_for_import_job(client, resp.json()["job_id"])
+
+    assert result["status"] == "done"
+    fake_push_all.assert_not_called()
+    assert "push_results" not in result
+
+
+def test_import_project_auto_pushes_when_the_bundle_enables_it(
+    client, app_state, temp_topology_file
+):
+    """
+    auto_config_push is a property of the .topoproj bundle itself
+    (its manifest.json - see project_bundle.build_export), not a
+    server-wide setting: a bundle someone else built and asked you to
+    import shouldn't get to silently run commands on your live devices
+    unless it says so itself, and you choose to import it at all.
+    """
+    fake = MagicMock()
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(
+        temp_topology_file.read_text(),
+        configs={"R1": ["show version"]},
+        auto_config_push=True,
+    )
+    fake_result = [DeviceResult(device="R1", transport="netmiko", ok=True)]
+
+    with patch("app.config_push.push_all", return_value=fake_result) as fake_push_all:
+        resp = client.post(
+            "/project/import",
+            files={"file": ("bundle.topoproj", bundle, "application/zip")},
+        )
+        result = _wait_for_import_job(client, resp.json()["job_id"])
+
+    assert result["status"] == "done"
+    assert fake_push_all.call_args[0][0] == {"R1": ["show version"]}
+    assert result["push_results"] == [{"device": "R1", "transport": "netmiko", "ok": True, "commands": [], "error": None}]
+    assert app_state.last_config_push == {"R1": ["show version"]}
+
+
+def test_import_project_skips_auto_push_when_bundle_has_no_configs(
+    client, app_state, temp_topology_file
+):
+    fake = MagicMock()
+    app_state.topology_backend = fake
+    bundle = _valid_bundle(temp_topology_file.read_text(), auto_config_push=True)
+
+    with patch("app.config_push.push_all") as fake_push_all:
+        resp = client.post(
+            "/project/import",
+            files={"file": ("bundle.topoproj", bundle, "application/zip")},
+        )
+        result = _wait_for_import_job(client, resp.json()["job_id"])
+
+    assert result["status"] == "done"
+    fake_push_all.assert_not_called()
+    assert "push_results" not in result
 
 
 def test_import_project_restores_bundled_node_positions(
@@ -252,21 +352,26 @@ def test_import_project_restores_bundled_node_positions(
         files={"file": ("bundle.topoproj", bundle, "application/zip")},
     )
     assert resp.status_code == 200, resp.text
+    result = _wait_for_import_job(client, resp.json()["job_id"])
+    assert result["status"] == "done"
 
     layout = client.get("/layout").json()
     assert layout["R1"] == {"x": 42, "y": 84}
     assert "GHOST" not in layout
 
 
-def test_import_project_bad_bundle_maps_to_400(client, app_state, temp_topology_file):
+def test_import_project_bad_bundle_maps_to_error_status(client, app_state, temp_topology_file):
     resp = client.post(
         "/project/import",
         files={"file": ("bundle.topoproj", b"not a zip", "application/zip")},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200, resp.text
+    result = _wait_for_import_job(client, resp.json()["job_id"])
+    assert result["status"] == "error"
+    assert result["error_kind"] == "bad_bundle"
 
 
-def test_import_project_deploy_failure_maps_to_502(client, app_state, temp_topology_file):
+def test_import_project_deploy_failure_maps_to_error_status(client, app_state, temp_topology_file):
     fake = MagicMock()
     fake.deploy_topology.side_effect = RuntimeError("deploy failed")
     app_state.topology_backend = fake
@@ -276,4 +381,11 @@ def test_import_project_deploy_failure_maps_to_502(client, app_state, temp_topol
         "/project/import",
         files={"file": ("bundle.topoproj", bundle, "application/zip")},
     )
-    assert resp.status_code == 502
+    result = _wait_for_import_job(client, resp.json()["job_id"])
+    assert result["status"] == "error"
+    assert result["error_kind"] == "deploy_failed"
+
+
+def test_import_job_status_404s_for_unknown_job(client, app_state):
+    resp = client.get("/project/import/nonexistent-job-id")
+    assert resp.status_code == 404
