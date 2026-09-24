@@ -82,6 +82,23 @@
     animation: menubar-spin 0.8s linear infinite;
   }
   @keyframes menubar-spin { to { transform: rotate(360deg); } }
+  /* Real (approximated) progress for POST /project/import - see
+     app/import_jobs.py's own docstring on how "completed" is derived.
+     A thin bar rather than the spinner, next to a "N/M" label. */
+  .menubar-progress-track {
+    width: 90px;
+    height: 6px;
+    flex-shrink: 0;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .menubar-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease-out;
+  }
   .menu { position: relative; height: 100%; }
   .menu-btn {
     height: 100%;
@@ -2724,11 +2741,46 @@ function setMenubarBusy(text) {
   el.appendChild(spinner);
   el.appendChild(label);
 }
+// completed/total: see app/import_jobs.py's own docstring - this is a
+// best-effort approximation from live-polling ESXi/GNS3 state, not a
+// real callback from the deploy itself, so it can legitimately dip
+// before climbing (a non-incremental deploy resets everything first).
+function setMenubarProgress(text, completed, total) {
+  const el = document.getElementById("menubar-status");
+  el.innerHTML = "";
+  const track = document.createElement("span");
+  track.className = "menubar-progress-track";
+  const fill = document.createElement("span");
+  fill.className = "menubar-progress-fill";
+  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  fill.style.width = `${pct}%`;
+  track.appendChild(fill);
+  const label = document.createElement("span");
+  label.textContent = total > 0 ? `${text} ${completed}/${total} (${pct}%)` : text;
+  el.appendChild(track);
+  el.appendChild(label);
+}
 function setMenubarMessage(text) {
   document.getElementById("menubar-status").textContent = text;
 }
 function clearMenubarStatus() {
   document.getElementById("menubar-status").textContent = "";
+}
+
+const IMPORT_POLL_INTERVAL_MS = 1200;
+
+// Polls GET /project/import/{jobId} (see app/import_jobs.py) until it
+// leaves "running", updating the menubar progress bar on every tick.
+// Resolves with the final job body either way ("done" or "error") -
+// callers branch on .status rather than this throwing, since a failed
+// import is an expected, handleable outcome, not a network exception.
+async function pollImportJob(jobId) {
+  while (true) {
+    const body = await fetch(`/project/import/${jobId}`).then((r) => r.json());
+    if (body.status !== "running") return body;
+    setMenubarProgress("Importing project…", body.completed, body.total);
+    await new Promise((resolve) => setTimeout(resolve, IMPORT_POLL_INTERVAL_MS));
+  }
 }
 
 document.getElementById("import-project-btn").addEventListener("click", () => {
@@ -2754,14 +2806,22 @@ document.getElementById("import-project-input").addEventListener("change", async
       `currently running that isn't in this bundle may be deleted. ` +
       `This is more disruptive than a normal import and may take a ` +
       `while.`;
+  // Whether this push happens automatically is the bundle's own choice
+  // (manifest.json's auto_config_push, set when it was built), not
+  // something visible here before upload - the note stays generic
+  // rather than claiming either way.
+  const autoPushNote = ` If this project file has auto_config_push ` +
+    `enabled, its device configs also get pushed automatically right ` +
+    `after the deploy succeeds - you'll see the results in the Config ` +
+    `Push panel afterward either way.`;
   if (!await confirmDisruption(
-    `Import "${file.name}"?\n\n${importWarning}`,
+    `Import "${file.name}"?\n\n${importWarning}${autoPushNote}`,
     { title: "Import project", confirmLabel: "Import" }
   )) {
     return;
   }
 
-  setMenubarBusy("Importing project (deploying live, may take a while)…");
+  setMenubarBusy("Starting import…");
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -2770,7 +2830,12 @@ document.getElementById("import-project-input").addEventListener("change", async
       setMenubarMessage(`Import failed: ${(await resp.json()).detail || resp.status}`);
       return;
     }
-    const result = await resp.json();
+    const { job_id } = await resp.json();
+    const result = await pollImportJob(job_id);
+    if (result.status === "error") {
+      setMenubarMessage(`Import failed: ${result.error}`);
+      return;
+    }
     await loadCanvas();
     // Import already updated the server's own drawings state - use the
     // response directly rather than relying on loadCanvas's own
@@ -2783,14 +2848,29 @@ document.getElementById("import-project-input").addEventListener("change", async
       renderDrawings();
     }
 
-    const configEntries = Object.entries(result.configs || {});
-    if (configEntries.length && await showConfirm(
-      `Load ${configEntries.length} device config(s) from this project into Config Push?`,
-      { title: "Import project", confirmLabel: "Load" }
-    )) {
+    if (Array.isArray(result.push_results)) {
+      // The bundle's own manifest.json had auto_config_push enabled -
+      // the server already ran config-push itself, so show what
+      // happened instead of asking to load-then-manually-push.
       document.getElementById("push-input").value = JSON.stringify(result.configs, null, 2);
+      renderPushResults(result.push_results);
+      showTab("push");
+      const failed = result.push_results.filter((r) => !r.ok).length;
+      setMenubarMessage(
+        `Imported "${result.manifest.project_name || file.name}" and pushed ` +
+        `${result.push_results.length} device config(s)` +
+        (failed ? ` (${failed} failed)` : "") + "."
+      );
+    } else {
+      const configEntries = Object.entries(result.configs || {});
+      if (configEntries.length && await showConfirm(
+        `Load ${configEntries.length} device config(s) from this project into Config Push?`,
+        { title: "Import project", confirmLabel: "Load" }
+      )) {
+        document.getElementById("push-input").value = JSON.stringify(result.configs, null, 2);
+      }
+      setMenubarMessage(`Imported "${result.manifest.project_name || file.name}".`);
     }
-    setMenubarMessage(`Imported "${result.manifest.project_name || file.name}".`);
     fitViewToNodes();
   } catch (err) {
     setMenubarMessage(`Import failed: ${err}`);
@@ -2995,34 +3075,8 @@ function showTab(name) {
   document.getElementById("tab-push").classList.toggle("active", name === "push");
 }
 
-document.getElementById("push-btn").addEventListener("click", async () => {
+function renderPushResults(deviceResults) {
   const resultsEl = document.getElementById("push-results");
-  let devices;
-  try {
-    devices = JSON.parse(document.getElementById("push-input").value);
-  } catch (err) {
-    resultsEl.textContent = `Invalid JSON: ${err}`;
-    return;
-  }
-  resultsEl.textContent = "Pushing…";
-
-  let deviceResults;
-  try {
-    const resp = await fetch("/config-push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ devices }),
-    });
-    if (!resp.ok) {
-      resultsEl.textContent = `Request failed: HTTP ${resp.status}`;
-      return;
-    }
-    deviceResults = await resp.json();
-  } catch (err) {
-    resultsEl.textContent = `Request failed: ${err}`;
-    return;
-  }
-
   resultsEl.innerHTML = "";
   for (const result of deviceResults) {
     const box = document.createElement("div");
@@ -3052,6 +3106,37 @@ document.getElementById("push-btn").addEventListener("click", async () => {
     }
     resultsEl.appendChild(box);
   }
+}
+
+document.getElementById("push-btn").addEventListener("click", async () => {
+  const resultsEl = document.getElementById("push-results");
+  let devices;
+  try {
+    devices = JSON.parse(document.getElementById("push-input").value);
+  } catch (err) {
+    resultsEl.textContent = `Invalid JSON: ${err}`;
+    return;
+  }
+  resultsEl.textContent = "Pushing…";
+
+  let deviceResults;
+  try {
+    const resp = await fetch("/config-push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ devices }),
+    });
+    if (!resp.ok) {
+      resultsEl.textContent = `Request failed: HTTP ${resp.status}`;
+      return;
+    }
+    deviceResults = await resp.json();
+  } catch (err) {
+    resultsEl.textContent = `Request failed: ${err}`;
+    return;
+  }
+
+  renderPushResults(deviceResults);
 });
 
 // Drag #panel-resize-handle up/down to reallocate space between
