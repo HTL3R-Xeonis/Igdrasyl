@@ -187,8 +187,12 @@ def test_templates_returns_gns3_and_esxi_names(client, app_state):
         "app.topology_write.APIHandler.get_esxi_template_names",
         return_value={"debian", "pfSense"},
     ), patch(
+        "app.topology_write._fetch_gns3_templates", return_value=[]
+    ), patch(
         "app.topology_write._gns3_template_categories",
         return_value={"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
+    ), patch(
+        "app.topology_write._gns3_template_port_specs", return_value={}
     ):
         resp = client.get("/templates")
 
@@ -197,6 +201,7 @@ def test_templates_returns_gns3_and_esxi_names(client, app_state):
         "gns3": ["Cisco IOSv 15.6(1)T", "VPCS"],
         "esxi": ["debian", "pfSense"],
         "gns3_categories": {"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
+        "gns3_port_specs": {},
     }
 
 
@@ -210,14 +215,13 @@ def test_templates_timeout_maps_to_503(client, app_state):
     assert resp.status_code == 503
 
 
-def test_gns3_template_categories_returns_name_to_category_mapping(app_state):
+def test_fetch_gns3_templates_returns_raw_template_list(app_state):
     from app import topology_write
 
     fake_response = {
         "templates": [
             {"name": "Cisco IOSv 15.9(3)M6", "category": "router"},
             {"name": "Cisco IOSvL2 15.2.1", "category": "switch"},
-            {"name": "no category here"},
         ]
     }
     # LITERAL_API_VALUES is forced "true" for the whole suite (see this
@@ -226,15 +230,12 @@ def test_gns3_template_categories_returns_name_to_category_mapping(app_state):
     with patch.object(
         topology_write.Settings.API, "LITERAL_API_VALUES", False
     ), patch("app.topology_write.APIHandler.get", return_value=fake_response):
-        result = topology_write._gns3_template_categories()
+        result = topology_write._fetch_gns3_templates()
 
-    assert result == {
-        "Cisco IOSv 15.9(3)M6": "router",
-        "Cisco IOSvL2 15.2.1": "switch",
-    }
+    assert result == fake_response["templates"]
 
 
-def test_gns3_template_categories_tolerates_server_failure(app_state):
+def test_fetch_gns3_templates_tolerates_server_failure(app_state):
     from app import topology_write
 
     with patch.object(
@@ -243,16 +244,82 @@ def test_gns3_template_categories_tolerates_server_failure(app_state):
         "app.topology_write.APIHandler.get",
         side_effect=TimeoutError("template server slow"),
     ):
-        result = topology_write._gns3_template_categories()
+        result = topology_write._fetch_gns3_templates()
 
-    assert result == {}
+    assert result == []
 
 
-def test_gns3_template_categories_short_circuits_in_literal_mode(app_state):
+def test_fetch_gns3_templates_short_circuits_in_literal_mode(app_state):
     from app import topology_write
 
     with patch("app.topology_write.APIHandler.get") as mock_get:
-        result = topology_write._gns3_template_categories()
+        result = topology_write._fetch_gns3_templates()
 
-    assert result == {}
+    assert result == []
     mock_get.assert_not_called()
+
+
+def test_gns3_template_categories_returns_name_to_category_mapping(app_state):
+    from app import topology_write
+
+    templates = [
+        {"name": "Cisco IOSv 15.9(3)M6", "category": "router"},
+        {"name": "Cisco IOSvL2 15.2.1", "category": "switch"},
+        {"name": "no category here"},
+    ]
+
+    assert topology_write._gns3_template_categories(templates) == {
+        "Cisco IOSv 15.9(3)M6": "router",
+        "Cisco IOSvL2 15.2.1": "switch",
+    }
+
+
+def test_gns3_template_port_specs_includes_templates_with_a_fixed_port_format(app_state):
+    from app import topology_write
+
+    templates = [
+        {
+            "name": "Cisco IOSv 15.6(1)T",
+            "adapters": 4,
+            "port_name_format": "Gi0/{0}",
+            "port_segment_size": 0,
+            "first_port_name": "",
+        },
+        {
+            "name": "Cisco IOSvL2 15.2.1",
+            "adapters": 16,
+            "port_name_format": "Gi{1}/{0}",
+            "port_segment_size": 4,
+            "first_port_name": "",
+        },
+    ]
+
+    assert topology_write._gns3_template_port_specs(templates) == {
+        "Cisco IOSv 15.6(1)T": {
+            "adapters": 4,
+            "port_name_format": "Gi0/{0}",
+            "port_segment_size": 0,
+            "first_port_name": "",
+        },
+        "Cisco IOSvL2 15.2.1": {
+            "adapters": 16,
+            "port_name_format": "Gi{1}/{0}",
+            "port_segment_size": 4,
+            "first_port_name": "",
+        },
+    }
+
+
+def test_gns3_template_port_specs_excludes_templates_with_no_fixed_format(app_state):
+    from app import topology_write
+
+    # VPCS/Ethernet switch/Cloud/... and Docker-based templates all look
+    # like this on the real Template-API server - GNS3 names their ports
+    # dynamically, there's no fixed format to compute from.
+    templates = [
+        {"name": "VPCS", "adapters": None, "port_name_format": None},
+        {"name": "Ethernet switch", "adapters": None, "port_name_format": None},
+        {"name": "alpine", "adapters": 1, "port_name_format": None},
+    ]
+
+    assert topology_write._gns3_template_port_specs(templates) == {}

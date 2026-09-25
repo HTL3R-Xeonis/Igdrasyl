@@ -728,6 +728,18 @@
     padding: 6px 8px;
     font-size: 13px;
   }
+  #modal-textarea {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+  }
   #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
   /* Landing page - the app's own entry point, a grid of clickable host
      tiles (one per uploaded settings.yml profile, see
@@ -1183,6 +1195,7 @@
     <p id="modal-message"></p>
     <div id="modal-field-wrap" hidden>
       <input type="text" id="modal-input" hidden>
+      <textarea id="modal-textarea" rows="4" hidden></textarea>
     </div>
     <div id="modal-actions">
       <button class="toolbar-btn" id="modal-cancel-btn">Cancel</button>
@@ -1314,6 +1327,7 @@ function openModal(config) {
     const titleEl = document.getElementById("modal-title");
     const messageEl = document.getElementById("modal-message");
     const inputEl = document.getElementById("modal-input");
+    const textareaEl = document.getElementById("modal-textarea");
     const fieldWrap = document.getElementById("modal-field-wrap");
     const confirmBtn = document.getElementById("modal-confirm-btn");
     const cancelBtn = document.getElementById("modal-cancel-btn");
@@ -1321,11 +1335,13 @@ function openModal(config) {
     const isAlert = config.mode === "alert";
     const isConfirm = config.mode === "confirm";
     const isText = config.mode === "text";
+    const isTextarea = config.mode === "textarea";
 
     titleEl.textContent = config.title || "";
     messageEl.textContent = config.message || "";
     inputEl.hidden = true;
-    fieldWrap.hidden = !isText;
+    textareaEl.hidden = true;
+    fieldWrap.hidden = !isText && !isTextarea;
     cancelBtn.hidden = isAlert;
     confirmBtn.textContent = config.confirmLabel || (isConfirm ? "Confirm" : "OK");
     confirmBtn.classList.toggle("danger", !!config.danger);
@@ -1335,6 +1351,10 @@ function openModal(config) {
       inputEl.hidden = false;
       inputEl.value = config.defaultValue || "";
       inputEl.placeholder = config.placeholder || "";
+    } else if (isTextarea) {
+      textareaEl.hidden = false;
+      textareaEl.value = config.defaultValue || "";
+      textareaEl.placeholder = config.placeholder || "";
     }
 
     function finish(result) {
@@ -1348,6 +1368,7 @@ function openModal(config) {
     function doConfirm() {
       if (isAlert) return finish(undefined);
       if (isConfirm) return finish(true);
+      if (isTextarea) return finish(textareaEl.value.trim() || null);
       return finish(inputEl.value.trim() || null);
     }
     function doCancel() {
@@ -1357,6 +1378,11 @@ function openModal(config) {
     }
     function onKeydown(evt) {
       if (evt.key === "Escape") { evt.preventDefault(); doCancel(); }
+      // A plain Enter in the textarea types a newline instead of
+      // submitting - Ctrl/Cmd+Enter submits it, same convention as
+      // most chat/comment boxes. Every other mode still submits on a
+      // plain Enter.
+      else if (evt.key === "Enter" && isTextarea && !(evt.ctrlKey || evt.metaKey)) return;
       else if (evt.key === "Enter") { evt.preventDefault(); doConfirm(); }
     }
 
@@ -1367,7 +1393,7 @@ function openModal(config) {
 
     overlay.hidden = false;
     setTimeout(() => {
-      const toFocus = isText ? inputEl : confirmBtn;
+      const toFocus = isText ? inputEl : isTextarea ? textareaEl : confirmBtn;
       toFocus.focus();
       if (isText) inputEl.select();
     }, 0);
@@ -1393,6 +1419,16 @@ function showTextPrompt(message, opts = {}) {
     message,
     defaultValue: opts.defaultValue,
     placeholder: opts.placeholder,
+  });
+}
+function showTextareaPrompt(message, opts = {}) {
+  return openModal({
+    mode: "textarea",
+    title: opts.title || "Enter value",
+    message,
+    defaultValue: opts.defaultValue,
+    placeholder: opts.placeholder,
+    confirmLabel: opts.confirmLabel,
   });
 }
 
@@ -2930,13 +2966,35 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
   }
 });
 
+// Reproduces GNS3's own adapter-naming rule (see app/topology_write.py's
+// _gns3_template_port_specs docstring for where port_name_format/
+// port_segment_size/first_port_name come from and why this is safe to
+// compute without ever deploying the node): adapter index i's name is
+// port_name_format with {0}/{1} filled in from (port-within-segment,
+// segment number) - or first_port_name verbatim for index 0, when the
+// template gives one.
+function computeGns3PortNames(spec) {
+  const segSize = spec.port_segment_size || 0;
+  const names = [];
+  for (let i = 0; i < spec.adapters; i++) {
+    if (i === 0 && spec.first_port_name) {
+      names.push(spec.first_port_name);
+      continue;
+    }
+    const portInSegment = segSize ? i % segSize : i;
+    const segment = segSize ? Math.floor(i / segSize) : 0;
+    names.push(spec.port_name_format.replaceAll("{0}", portInSegment).replaceAll("{1}", segment));
+  }
+  return names;
+}
+
 async function promptForInterface(nodeName, anchor) {
   let ports = null;
   try {
     const resp = await fetch(apiPath(`/nodes/${encodeURIComponent(nodeName)}/ports`));
     if (resp.ok) ports = await resp.json();
   } catch (err) {
-    // fall through to the topology-known-interfaces fallback below
+    // fall through to the fallbacks below
   }
 
   let options, defaultValue;
@@ -2949,15 +3007,22 @@ async function promptForInterface(nodeName, anchor) {
     }));
     defaultValue = free.length ? free[0].name : undefined;
   } else {
-    // No live port enumeration for this node (e.g. an ESXi VM, which
-    // has no GNS3-side port list) - fall back to the interface names
-    // already known from the topology file itself instead of asking
-    // the operator to type one blind.
-    const names = Object.keys(nodesData[nodeName]?.interfaces || {});
+    const node = nodesData[nodeName];
+    const knownInterfaces = node?.interfaces || {};
+    const templates = await ensureTemplatesLoaded();
+    const spec = node ? templates.gns3_port_specs?.[node.image] : null;
+    // Every port GNS3 would actually create for this image (computed,
+    // never deployed - see computeGns3PortNames), with any already-
+    // linked interface folded in and marked in-use even if it somehow
+    // isn't one of the computed names (a link made before this image's
+    // spec was available, or a spec that's since changed upstream).
+    const names = spec
+      ? Array.from(new Set([...computeGns3PortNames(spec), ...Object.keys(knownInterfaces)]))
+      : Object.keys(knownInterfaces);
     if (!names.length) {
       return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
     }
-    const inUse = (n) => nodesData[nodeName].interfaces[n];
+    const inUse = (n) => knownInterfaces[n];
     const free = names.filter((n) => !inUse(n));
     options = names.map((n) => ({
       value: n,
