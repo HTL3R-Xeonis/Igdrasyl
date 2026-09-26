@@ -55,6 +55,21 @@ def test_load_generated_topology_builds_design_state():
     assert state.links == [("R1", "Gi0/0", "PC1", "Ethernet0")]
 
 
+def test_load_generated_topology_gives_every_node_a_distinct_position():
+    # Real bug: without this, every generated node fell back to the
+    # frontend's own (100, 100) default (nothing placed them, unlike
+    # the click-to-place flow every other node creation path uses) and
+    # rendered as one fully overlapping stack of icons.
+    nodes = [
+        {"names": ["R1", "R2", "R3", "R4"], "role": "ROUTER", "image": "Cisco IOSv 15.6(1)T"},
+    ]
+    state = generate_jobs._load_generated_topology(nodes, [])
+
+    assert set(state.layout) == {"R1", "R2", "R3", "R4"}
+    positions = [(p["x"], p["y"]) for p in state.layout.values()]
+    assert len(set(positions)) == 4
+
+
 def test_run_generate_job_succeeds_on_first_valid_attempt(app_state):
     app = _fake_app(app_state)
     job = generate_jobs.GenerateJob(id="job-1", max_attempts=3)

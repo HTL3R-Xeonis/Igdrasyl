@@ -129,6 +129,44 @@ def test_to_topology_yaml_dict_groups_by_role_and_image():
     assert data["edges"] == [["R1", "eth0", "R2", "eth0"]]
 
 
+def test_auto_layout_gives_every_node_a_distinct_position():
+    # Real bug this replaced a grid-based workaround for: a topology
+    # created all at once (see app/generate_jobs.py) has nowhere for
+    # the operator to click each node into place, so without an
+    # explicit layout every node fell back to the same default
+    # position and rendered as one fully overlapping stack.
+    state = design.new_state()
+    for name in ["R1", "SW1", "SW2", "PC1"]:
+        design.add_node(state, name, "ROUTER", "Cisco IOSv 15.6(1)T")
+    design.add_link(state, "R1", "eth0", "SW1", "eth0")
+    design.add_link(state, "SW1", "eth1", "PC1", "eth0")
+
+    design.auto_layout(state)
+
+    assert set(state.layout) == {"R1", "SW1", "SW2", "PC1"}
+    positions = [(p["x"], p["y"]) for p in state.layout.values()]
+    assert len(set(positions)) == 4
+
+
+def test_auto_layout_places_directly_linked_nodes_closer_together():
+    # A loose sanity check on the force-directed algorithm actually
+    # being wired up (not just "produces distinct points") - two
+    # directly-linked nodes should end up closer than two with no path
+    # between them at all.
+    state = design.new_state()
+    for name in ["R1", "SW1", "Isolated"]:
+        design.add_node(state, name, "ROUTER", "Cisco IOSv 15.6(1)T")
+    design.add_link(state, "R1", "eth0", "SW1", "eth0")
+
+    design.auto_layout(state)
+
+    def distance(a, b):
+        pa, pb = state.layout[a], state.layout[b]
+        return ((pa["x"] - pb["x"]) ** 2 + (pa["y"] - pb["y"]) ** 2) ** 0.5
+
+    assert distance("R1", "SW1") < distance("R1", "Isolated")
+
+
 # --- HTTP layer ---
 
 

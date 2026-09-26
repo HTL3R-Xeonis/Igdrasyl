@@ -29,6 +29,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.graph.environment import Environment
+from src.graph.layout import compute_node_positions
+
+_CANVAS_WIDTH = 1600.0
+_CANVAS_HEIGHT = 900.0
 
 
 @dataclass
@@ -134,3 +138,54 @@ def to_topology_yaml_dict(state: DesignState) -> dict[str, Any]:
         ],
         "edges": [[n1, if1, n2, if2] for n1, if1, n2, if2 in state.links],
     }
+
+
+class _NeighbourView:
+    """Just enough of GenericNode's shape for _build_adjacency's own `neighbour.name` lookup."""
+
+    __slots__ = ("name",)
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _NodeView:
+    """
+    Minimal GenericNode-shaped read-only view over a DesignNode, for
+    src.graph.layout.compute_node_positions's own adjacency-building
+    (_build_adjacency calls node.get_neighbour(interface_name) and
+    expects a `.name` back) - DesignNode itself stores a neighbour as
+    just a name string, not a live node reference, so it has no real
+    get_neighbour() of its own to call directly.
+    """
+
+    __slots__ = ("name", "interfaces", "_state")
+
+    def __init__(self, node: DesignNode, state: DesignState) -> None:
+        self.name = node.name
+        self.interfaces = node.interfaces
+        self._state = state
+
+    def get_neighbour(self, interface_name: str) -> _NeighbourView | None:
+        neighbour_name = self.interfaces.get(interface_name)
+        if neighbour_name is None or neighbour_name not in self._state.nodes:
+            return None
+        return _NeighbourView(neighbour_name)
+
+
+def auto_layout(state: DesignState) -> None:
+    """
+    Computes a real force-directed layout for every node in state - the
+    same algorithm (and canvas size) a deployed topology's own missing
+    positions already fall back to (see app/layout.py's load_layout) -
+    and writes it into state.layout. Used when a whole topology is
+    created at once with nowhere for the operator to click each node
+    into place individually (see app/generate_jobs.py, right after a
+    successful LLM generation): without an explicit layout, every node
+    would otherwise land on the same frontend-side default position and
+    render as one fully overlapping stack.
+    """
+    views = {name: _NodeView(node, state) for name, node in state.nodes.items()}
+    positions = compute_node_positions(views, _CANVAS_WIDTH, _CANVAS_HEIGHT)
+    for name, (x, y) in positions.items():
+        state.layout[name] = {"x": x, "y": y}

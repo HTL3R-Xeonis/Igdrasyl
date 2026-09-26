@@ -64,6 +64,7 @@ def _load_generated_topology(nodes: list[dict], edges: list[list[str]]) -> desig
             design.add_node(state, name, role, image)
     for node1, if1, node2, if2 in edges:
         design.add_link(state, node1, if1, node2, if2)
+    design.auto_layout(state)
     return state
 
 
