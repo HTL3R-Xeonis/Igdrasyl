@@ -18,6 +18,13 @@
 # should exist, before cross-referencing live GNS3/ESXi state.
 topology_file: ./topology_example.yaml
 
+# Where this process's own log file is written (rotated at 10MB) -
+# same setting, same format, as TopologyBuilder's own CLI logging (see
+# TopologyBuilder's main.py). The View menu's Logs panel (GET /logs)
+# tails this file, so it's what you'd point `topologybuilder logs -n`
+# at too if you wanted the CLI's own view of the same entries.
+# log_file_path: ./logs/app.log
+
 # Whether importing a .topoproj bundle (POST /project/import) deploys
 # incrementally. True (default) reuses anything already live by name and
 # only creates what's new/changed, so one slow or failing device (e.g. a

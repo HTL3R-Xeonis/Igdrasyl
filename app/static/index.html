@@ -668,6 +668,41 @@
   .device-result td { border-bottom: 1px solid var(--border); }
   .cmd-ok { color: var(--ok); }
   .cmd-fail { color: var(--bad); }
+  /* View > Logs - tails Settings.LOG_FILE_PATH (see app/logs.py),
+     colored the same way loguru's own colorized console output would
+     be for TopologyBuilder's identical log format (see
+     app/logging_setup.py - kept byte-for-byte the same on purpose). */
+  #logs-area { width: var(--right-panel-width, 360px); flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow: hidden; }
+  #logs-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-shrink: 0; }
+  #logs-toolbar .toolbar-btn { font-size: 12px; padding: 4px 10px; }
+  #logs-output {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  /* Two rows per entry, not one wide one - the sidebar's own width
+     (var(--right-panel-width), typically 360px) isn't enough to fit a
+     full timestamp + level + location + message on a single line
+     without squeezing the message into an unreadably narrow column. */
+  .log-line { margin-bottom: 4px; }
+  .log-line-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .log-line-time { color: var(--ok); flex-shrink: 0; }
+  .log-line-level { flex-shrink: 0; width: 8ch; font-weight: 700; }
+  .log-line-location { color: var(--accent); }
+  .log-line-message { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .log-level-INFO { color: var(--text); }
+  .log-level-DEBUG, .log-level-TRACE { color: var(--dim); }
+  .log-level-SUCCESS { color: var(--ok); }
+  .log-level-WARNING { color: var(--warn); }
+  .log-level-ERROR, .log-level-CRITICAL { color: var(--bad); }
+  .log-line-raw { color: var(--dim); white-space: pre-wrap; word-break: break-word; }
+  #logs-empty { color: var(--dim); font-size: 12px; }
   #status-bar {
     flex-shrink: 0;
     height: 28px;
@@ -1047,6 +1082,7 @@
       <div class="menu-dropdown" id="menu-view" hidden>
         <button class="menu-item active" id="tab-console">Topology</button>
         <button class="menu-item" id="tab-push">Config Push</button>
+        <button class="menu-item" id="tab-logs">Logs</button>
         <div class="menu-separator"></div>
         <button class="menu-item active" id="toggle-devices-btn">Devices</button>
         <div class="menu-separator"></div>
@@ -1183,6 +1219,16 @@
 }</textarea>
     <button class="push-btn" id="push-btn">Push</button>
     <div id="push-results"></div>
+  </div>
+  <div id="logs-area" hidden>
+    <div id="logs-toolbar">
+      <label class="menu-settings-checkbox">
+        <input type="checkbox" id="logs-auto-refresh" checked>
+        Auto-refresh
+      </label>
+      <button class="toolbar-btn" id="logs-refresh-btn">Refresh</button>
+    </div>
+    <div id="logs-output"></div>
   </div>
 </main>
 <footer id="status-bar">
@@ -4053,6 +4099,7 @@ async function openVmScreen(nodeName, opts) {
 
 document.getElementById("tab-console").addEventListener("click", () => showTab("console"));
 document.getElementById("tab-push").addEventListener("click", () => showTab("push"));
+document.getElementById("tab-logs").addEventListener("click", () => showTab("logs"));
 
 // GNS3 Desktop-style menu bar: click a menu-btn to toggle its dropdown,
 // click anywhere else (including a menu-item, which bubbles here after
@@ -4195,9 +4242,95 @@ document.getElementById("draw-clear-btn").addEventListener("click", async () => 
 function showTab(name) {
   document.getElementById("right-panel").hidden = name !== "console";
   document.getElementById("push-area").hidden = name !== "push";
+  document.getElementById("logs-area").hidden = name !== "logs";
   document.getElementById("tab-console").classList.toggle("active", name === "console");
   document.getElementById("tab-push").classList.toggle("active", name === "push");
+  document.getElementById("tab-logs").classList.toggle("active", name === "logs");
+  if (name === "logs") startLogsAutoRefresh(); else stopLogsAutoRefresh();
 }
+
+const LOGS_AUTO_REFRESH_INTERVAL_MS = 3000;
+let logsAutoRefreshTimer = null;
+
+async function loadLogs() {
+  const output = document.getElementById("logs-output");
+  let lines;
+  try {
+    lines = await fetch("/logs").then((r) => r.json());
+  } catch (err) {
+    output.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.id = "logs-empty";
+    empty.textContent = `Failed to load logs: ${err}`;
+    output.appendChild(empty);
+    return;
+  }
+
+  // Auto-scroll only if already at (or near) the bottom - otherwise a
+  // periodic auto-refresh would keep yanking the view back down while
+  // someone's trying to read an earlier entry.
+  const wasAtBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 20;
+
+  output.innerHTML = "";
+  if (!lines.length) {
+    const empty = document.createElement("div");
+    empty.id = "logs-empty";
+    empty.textContent = "No log entries yet.";
+    output.appendChild(empty);
+    return;
+  }
+  for (const entry of lines) {
+    output.appendChild(buildLogLine(entry));
+  }
+  if (wasAtBottom) output.scrollTop = output.scrollHeight;
+}
+
+function buildLogLine(entry) {
+  const row = document.createElement("div");
+  row.className = "log-line";
+  if (!entry.time) {
+    // A line that didn't match the expected format (e.g. a traceback's
+    // continuation lines) - shown verbatim, dimmed, no columns.
+    row.classList.add("log-line-raw");
+    row.textContent = entry.message;
+    return row;
+  }
+  const meta = document.createElement("div");
+  meta.className = "log-line-meta";
+  const time = document.createElement("span");
+  time.className = "log-line-time";
+  time.textContent = entry.time;
+  const level = document.createElement("span");
+  level.className = `log-line-level log-level-${entry.level}`;
+  level.textContent = entry.level;
+  const location = document.createElement("span");
+  location.className = "log-line-location";
+  location.textContent = entry.location;
+  meta.append(time, level, location);
+
+  const message = document.createElement("div");
+  message.className = `log-line-message log-level-${entry.level}`;
+  message.textContent = entry.message;
+
+  row.append(meta, message);
+  return row;
+}
+
+function startLogsAutoRefresh() {
+  loadLogs();
+  stopLogsAutoRefresh();
+  if (document.getElementById("logs-auto-refresh").checked) {
+    logsAutoRefreshTimer = setInterval(loadLogs, LOGS_AUTO_REFRESH_INTERVAL_MS);
+  }
+}
+function stopLogsAutoRefresh() {
+  if (logsAutoRefreshTimer) {
+    clearInterval(logsAutoRefreshTimer);
+    logsAutoRefreshTimer = null;
+  }
+}
+document.getElementById("logs-refresh-btn").addEventListener("click", () => loadLogs());
+document.getElementById("logs-auto-refresh").addEventListener("change", () => startLogsAutoRefresh());
 
 function renderPushResults(deviceResults) {
   const resultsEl = document.getElementById("push-results");

@@ -25,7 +25,8 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, design, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
+from app import console, design, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, logs, project_bundle, settings_profiles, topology_write, vm_screen
+from app.logging_setup import configure_logging
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import (
     NoLiveProject,
@@ -48,6 +49,10 @@ async def lifespan(app: FastAPI):
     settings_path = os.getenv(_SETTINGS_ENV_VAR)
     if settings_path:
         Settings.initialise_settings(settings_path)
+
+    # After initialise_settings, so a settings.yml's own log_file_path
+    # override (if any) is already in effect - see app/logging_setup.py.
+    configure_logging()
 
     # Opens a real, persistent pyvmomi session - done once here and
     # reused for the app's lifetime rather than per-request, same
@@ -141,6 +146,18 @@ def health() -> dict[str, Any]:
         "warning": app.state.startup_warning,
         "incremental_deploy": Settings.INCREMENTAL_DEPLOY,
     }
+
+
+@app.get("/logs")
+def get_logs(lines: int = 300) -> list[dict[str, Any]]:
+    """
+    The most recent `lines` entries from Settings.LOG_FILE_PATH,
+    parsed for the View menu's Logs panel (see app/logs.py) - same log
+    file and format TopologyBuilder's own `logs` CLI command reads,
+    just with a more generous default line count for a scrollable GUI
+    panel instead of a terminal.
+    """
+    return logs.tail_log_lines(lines)
 
 
 @app.get("/topology")
