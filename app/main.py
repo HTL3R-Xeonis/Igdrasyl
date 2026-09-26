@@ -25,7 +25,7 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, design, gns3_vm_deploy_jobs, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
+from app import console, design, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, project_bundle, settings_profiles, topology_write, vm_screen
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import (
     NoLiveProject,
@@ -513,6 +513,51 @@ def design_export() -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="design.topoproj"'},
     )
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/design/generate")
+def generate_design(request: GenerateRequest) -> dict[str, str]:
+    """
+    Kicks off a background job that asks the Topology Generator API (an
+    LLM-backed service, see src.connections.topology_generator_client)
+    for a topology matching the given natural-language prompt, retrying
+    on an invalid result the same way TopologyBuilder's own `generate`
+    CLI command does - and on success, REPLACES the current design
+    sketch with the generated one (see app/generate_jobs.py). Poll
+    GET /design/generate/{job_id} for progress.
+    """
+    if not request.prompt.strip():
+        raise HTTPException(400, "prompt must not be empty")
+    job = generate_jobs.start_job(app, request.prompt)
+    return {"job_id": job.id}
+
+
+@app.get("/design/generate/{job_id}")
+def generate_design_status(job_id: str) -> dict[str, Any]:
+    """
+    Poll target for POST /design/generate's background job. "status" is
+    "running", "done", or "error". While running: "attempt"/
+    "max_attempts" and any "warnings" the most recent attempt reported.
+    Once "error": "error" (message).
+    """
+    jobs: dict[str, generate_jobs.GenerateJob] = getattr(app.state, "generate_jobs", {})
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"no generate job {job_id!r}")
+
+    response: dict[str, Any] = {
+        "status": job.status,
+        "attempt": job.attempt,
+        "max_attempts": job.max_attempts,
+        "warnings": job.warnings,
+    }
+    if job.status == "error":
+        response["error"] = job.error
+    return response
 
 
 @app.get("/project/export")

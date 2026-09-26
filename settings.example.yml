@@ -101,3 +101,11 @@ gns3:
 api:
   esxi_template_server_url: http://10.20.20.171:8000
   gns3_template_server_url: http://10.20.20.171:8001
+  # Powers the landing page's "Generate via LLM" action (POST
+  # /design/generate) - an LLM-backed service that turns a natural-
+  # language prompt into a topology config, same one TopologyBuilder's
+  # own `generate`/`generate-deploy` CLI commands use. Defaults to
+  # TopologyBuilder's own hardcoded default (http://10.20.20.172:8002)
+  # if omitted - only set this if your lab's generator service lives
+  # somewhere else.
+  # topology_generator_url: http://10.20.20.172:8002

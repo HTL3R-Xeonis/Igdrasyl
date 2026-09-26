@@ -757,13 +757,33 @@
   #landing-header { text-align: center; margin-bottom: 36px; }
   #landing-header h1 { margin: 0 0 6px; font-size: 22px; }
   .landing-subtitle { margin: 0; font-size: 13px; color: var(--dim); }
-  #landing-host-grid {
+  #landing-host-grid, #landing-actions-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 18px;
     max-width: 760px;
     width: 100%;
   }
+  .landing-section-label {
+    width: 100%;
+    max-width: 760px;
+    margin: 32px 0 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  #landing-generate-status {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--dim);
+    text-align: center;
+    max-width: 500px;
+  }
+  #landing-generate-status .landing-generate-warning { color: var(--warn); }
   #landing-license-link {
     margin-top: 40px;
     font-size: 11px;
@@ -785,7 +805,6 @@
     transition: border-color 0.15s, transform 0.1s;
   }
   .landing-host-tile:hover { border-color: var(--accent); transform: translateY(-2px); }
-  .landing-host-tile.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   /* Source SVG fill is a dark slate grey, meant for a light background
      - brightness(0) flattens it to solid black first (ignoring that
      original shade), then invert makes it a soft off-white matching
@@ -799,17 +818,14 @@
     word-break: break-word;
     max-width: 100%;
   }
-  .landing-host-details { font-size: 10px; color: var(--dim); text-align: center; }
-  .landing-host-active-badge {
+  .landing-host-active-dot {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    font-size: 9px;
-    font-weight: 600;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-    border-radius: 3px;
-    padding: 1px 4px;
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
   }
   .landing-host-delete-btn {
     position: absolute;
@@ -1186,6 +1202,9 @@
     <p class="landing-subtitle">Pick a host to manage, or add a new one.</p>
   </div>
   <div id="landing-host-grid"></div>
+  <div class="landing-section-label">Design</div>
+  <div id="landing-actions-grid"></div>
+  <div id="landing-generate-status" hidden></div>
   <input type="file" id="landing-upload-input" accept=".yml,.yaml" hidden>
   <a id="landing-license-link" href="/license" target="_blank" rel="noopener">View License</a>
 </div>
@@ -3645,6 +3664,78 @@ async function enterDesignMode() {
   }
 }
 
+const GENERATE_POLL_INTERVAL_MS = 1500;
+
+function setLandingGenerateStatus(text, warnings) {
+  const el = document.getElementById("landing-generate-status");
+  if (!text) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.textContent = text;
+  for (const warning of warnings || []) {
+    const w = document.createElement("div");
+    w.className = "landing-generate-warning";
+    w.textContent = warning;
+    el.appendChild(w);
+  }
+}
+
+// POST /design/generate replaces whatever design sketch currently
+// exists (see app/generate_jobs.py) - confirm first, same as any other
+// destructive action, rather than silently discarding in-progress work.
+async function promptAndGenerateTopology() {
+  const existing = await fetch("/design/topology").then((r) => r.ok ? r.json() : []).catch(() => []);
+  if (existing.length && !await showConfirm(
+    `Generating a new topology replaces the current design sketch ` +
+    `(${existing.length} node(s)). Continue?`,
+    { title: "Generate via LLM", confirmLabel: "Replace", danger: true }
+  )) {
+    return;
+  }
+
+  const prompt = await showTextareaPrompt(
+    "Describe the topology you want (e.g. \"a small office network with " +
+    "2 routers, 3 switches, and 5 PCs\"):",
+    { title: "Generate via LLM", placeholder: "Describe the topology…", confirmLabel: "Generate" }
+  );
+  if (!prompt) return;
+
+  setLandingGenerateStatus("Starting generation…");
+  try {
+    const resp = await fetch("/design/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!resp.ok) {
+      setLandingGenerateStatus(null);
+      await showAlert(`Generate failed: ${(await resp.json()).detail || resp.status}`, { title: "Generate via LLM" });
+      return;
+    }
+    const { job_id } = await resp.json();
+
+    let body;
+    while (true) {
+      body = await fetch(`/design/generate/${job_id}`).then((r) => r.json());
+      if (body.status !== "running") break;
+      setLandingGenerateStatus(
+        `Generating (attempt ${body.attempt}/${body.max_attempts})…`,
+        body.warnings
+      );
+      await new Promise((resolve) => setTimeout(resolve, GENERATE_POLL_INTERVAL_MS));
+    }
+
+    setLandingGenerateStatus(null);
+    if (body.status === "error") {
+      await showAlert(`Generate failed: ${body.error}`, { title: "Generate via LLM" });
+      return;
+    }
+    await enterDesignMode();
+  } catch (err) {
+    setLandingGenerateStatus(null);
+    await showAlert(`Generate failed: ${err}`, { title: "Generate via LLM" });
+  }
+}
+
 async function loadLandingHostGrid() {
   const grid = document.getElementById("landing-host-grid");
   grid.textContent = "Loading…";
@@ -3658,8 +3749,12 @@ async function loadLandingHostGrid() {
 
   grid.innerHTML = "";
   for (const profile of profiles) grid.appendChild(buildHostTile(profile));
-  grid.appendChild(buildDesignTile());
   grid.appendChild(buildAddHostTile());
+
+  const actionsGrid = document.getElementById("landing-actions-grid");
+  actionsGrid.innerHTML = "";
+  actionsGrid.appendChild(buildDesignTile());
+  actionsGrid.appendChild(buildGenerateTile());
 }
 
 function buildDesignTile() {
@@ -3678,18 +3773,37 @@ function buildDesignTile() {
   return tile;
 }
 
+function buildGenerateTile() {
+  const tile = document.createElement("div");
+  tile.className = "landing-host-tile add-tile";
+  tile.title = "Describe a topology in plain language and have an LLM generate it - opens into the design canvas for review, editing, and export, same as a hand-built sketch.";
+  const icon = document.createElement("div");
+  icon.className = "landing-host-icon";
+  icon.textContent = "✨";
+  tile.appendChild(icon);
+  const name = document.createElement("div");
+  name.className = "landing-host-name";
+  name.textContent = "Generate via LLM";
+  tile.appendChild(name);
+  tile.addEventListener("click", () => promptAndGenerateTopology());
+  return tile;
+}
+
 function buildHostTile(profile) {
   const tile = document.createElement("div");
-  tile.className = `landing-host-tile${profile.active ? " active" : ""}`;
+  tile.className = "landing-host-tile";
+  // The filename/GNS3 VM name are no longer shown on the tile itself
+  // (just the ESXi IP) - still surfaced on hover for anyone who needs
+  // to tell apart two hosts with similar IPs.
   tile.title = profile.error
     ? `${profile.filename}: ${profile.error}`
     : `${profile.filename} · ${[profile.esxi_ip, profile.gns3_vm_name].filter(Boolean).join(" · ")}`;
 
   if (profile.active) {
-    const badge = document.createElement("span");
-    badge.className = "landing-host-active-badge";
-    badge.textContent = "ACTIVE";
-    tile.appendChild(badge);
+    const dot = document.createElement("span");
+    dot.className = "landing-host-active-dot";
+    dot.title = "Active";
+    tile.appendChild(dot);
   }
 
   const deleteBtn = document.createElement("button");
@@ -3709,19 +3823,11 @@ function buildHostTile(profile) {
   tile.appendChild(icon);
 
   // The ESXi IP (from inside the settings file) identifies a host far
-  // better than its settings.yml filename does - that's demoted to the
-  // details line below, alongside the GNS3 VM name.
+  // better than its settings.yml filename does.
   const name = document.createElement("div");
   name.className = "landing-host-name";
-  name.textContent = profile.esxi_ip || profile.filename;
+  name.textContent = profile.error ? "invalid settings file" : (profile.esxi_ip || profile.filename);
   tile.appendChild(name);
-
-  const details = document.createElement("div");
-  details.className = "landing-host-details";
-  details.textContent = profile.error
-    ? "invalid settings file"
-    : [profile.gns3_vm_name, profile.filename].filter(Boolean).join(" · ");
-  tile.appendChild(details);
 
   tile.addEventListener("click", () => enterHost(profile.filename, profile.active));
   return tile;

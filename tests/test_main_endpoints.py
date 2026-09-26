@@ -562,3 +562,53 @@ def test_settings_profiles_activate_404s_for_unknown_file(client, app_state, tmp
     monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
     resp = client.post("/settings-profiles/nope.yml/activate")
     assert resp.status_code == 404
+
+
+def test_generate_design_400s_for_empty_prompt(client, app_state):
+    resp = client.post("/design/generate", json={"prompt": "   "})
+    assert resp.status_code == 400
+
+
+def test_generate_design_returns_job_id(client, app_state):
+    from app import generate_jobs
+
+    fake_job = generate_jobs.GenerateJob(id="job-1", max_attempts=4)
+    with patch("app.main.generate_jobs.start_job", return_value=fake_job):
+        resp = client.post("/design/generate", json={"prompt": "a small office network"})
+    assert resp.status_code == 200
+    assert resp.json() == {"job_id": "job-1"}
+
+
+def test_generate_design_status_404s_for_unknown_job(client, app_state):
+    resp = client.get("/design/generate/nope")
+    assert resp.status_code == 404
+
+
+def test_generate_design_status_reports_running_attempt(client, app_state):
+    from app import generate_jobs
+
+    app_state.generate_jobs = {
+        "job-1": generate_jobs.GenerateJob(
+            id="job-1", status="running", attempt=2, max_attempts=4, warnings=["hmm"]
+        )
+    }
+    resp = client.get("/design/generate/job-1")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "running", "attempt": 2, "max_attempts": 4, "warnings": ["hmm"],
+    }
+
+
+def test_generate_design_status_reports_error(client, app_state):
+    from app import generate_jobs
+
+    app_state.generate_jobs = {
+        "job-1": generate_jobs.GenerateJob(
+            id="job-1", status="error", attempt=4, max_attempts=4, error="no valid topology"
+        )
+    }
+    resp = client.get("/design/generate/job-1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["error"] == "no valid topology"
