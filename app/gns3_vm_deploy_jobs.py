@@ -97,7 +97,7 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
 
-def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob) -> None:
+def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = False) -> None:
     try:
         datastore_name = Settings.ESXI.DATASTORE
         if datastore_name is None:
@@ -111,6 +111,7 @@ def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob) -> None:
             Settings.ESXI.GNS3_VM_MGMT_NETWORK,
             Settings.ESXI.TRUNK_PORT_GROUP,
             on_stage=lambda stage: setattr(job, "stage", stage),
+            delete_old_vm=delete_old_vm,
         )
         job.ip_address = ip_address
         app.state.gns3_vm_ip = ip_address
@@ -135,8 +136,14 @@ def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob) -> None:
         logger.warning(f"GNS3 VM deploy job {job.id} failed: {exc}")
 
 
-def start_job(app: FastAPI) -> GNS3VMDeployJob:
+def start_job(app: FastAPI, delete_old_vm: bool = False) -> GNS3VMDeployJob:
     """
+    :param delete_old_vm: forwarded to deploy_fresh_gns3_vm - permanently
+        deletes the existing same-named VM (if any) once the new one has
+        confirmed itself alive, instead of leaving it as a powered-off,
+        timestamped backup indefinitely. See that function's own
+        docstring for why this only ever happens after the new VM is
+        proven up, never before.
     :raises NotConfigured: gns3_vm_ova_path/gns3_vm_mgmt_network aren't set
     :raises AlreadyRunning: a job for this app is already in progress
     """
@@ -147,6 +154,8 @@ def start_job(app: FastAPI) -> GNS3VMDeployJob:
 
     job = GNS3VMDeployJob(id=str(uuid.uuid4()))
     app.state.gns3_vm_deploy_job = job
-    thread = threading.Thread(target=run_deploy_job, args=(app, job), daemon=True)
+    thread = threading.Thread(
+        target=run_deploy_job, args=(app, job, delete_old_vm), daemon=True
+    )
     thread.start()
     return job

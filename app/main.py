@@ -747,21 +747,27 @@ def reload_gns3_project() -> dict[str, str]:
     return {"status": "ok"}
 
 
+class DeployGns3VmRequest(BaseModel):
+    delete_old_vm: bool = False
+
+
 @app.post("/gns3-vm/deploy")
-def deploy_gns3_vm() -> dict[str, str]:
+def deploy_gns3_vm(request: DeployGns3VmRequest = DeployGns3VmRequest()) -> dict[str, str]:
     """
     Kicks off a background job that replaces the configured GNS3 VM
     with a freshly imported one from gns3_vm_ova_path - the same action
     the app's own startup takes automatically when that VM is found
     completely missing, available here as an explicit, on-demand GUI
     action (e.g. to recover from a corrupted GNS3 VM without restarting
-    this whole process). An existing same-named VM is powered off and
-    renamed as a timestamped backup, never deleted - see
-    src.gns3_vm_deploy.deploy_fresh_gns3_vm's own docstring. Poll
-    GET /gns3-vm/deploy/{job_id} for progress.
+    this whole process). An existing same-named VM is always powered off
+    and renamed as a timestamped backup first; request.delete_old_vm
+    additionally deletes that backup permanently, but only once the new
+    VM has confirmed itself alive - see
+    src.gns3_vm_deploy.deploy_fresh_gns3_vm's own docstring for why that
+    ordering matters. Poll GET /gns3-vm/deploy/{job_id} for progress.
     """
     try:
-        job = gns3_vm_deploy_jobs.start_job(app)
+        job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=request.delete_old_vm)
     except gns3_vm_deploy_jobs.NotConfigured as exc:
         raise HTTPException(400, str(exc))
     except gns3_vm_deploy_jobs.AlreadyRunning as exc:

@@ -1186,7 +1186,7 @@
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
-        <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup rather than deleting it">Deploy Fresh GNS3 VM…</button>
+        <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup, with an option to permanently delete it once the new VM is confirmed working">Deploy Fresh GNS3 VM…</button>
       </div>
     </div>
     <div class="menu">
@@ -4194,16 +4194,34 @@ document.getElementById("deploy-gns3-vm-btn").addEventListener("click", async ()
   if (!await showConfirm(
     `Replace the GNS3 VM with a freshly imported one from its OVA?\n\n` +
     `If a VM by that name already exists, it's powered off and renamed ` +
-    `as a timestamped backup (never deleted) before the new one is ` +
-    `imported - this takes several minutes and the GNS3 VM (and every ` +
-    `node on it) is unavailable throughout.`,
+    `as a timestamped backup before the new one is imported - this ` +
+    `takes several minutes and the GNS3 VM (and every node on it) is ` +
+    `unavailable throughout.`,
     { title: "Deploy Fresh GNS3 VM", confirmLabel: "Deploy", danger: true }
   )) {
     return;
   }
+
+  // A second, separate confirmation - deleting the old VM is permanent
+  // and irreversible, unlike the deploy itself (which always leaves the
+  // old one as a recoverable backup on its own). Declining this still
+  // proceeds with the deploy, just without deleting the backup - same
+  // as before this option existed.
+  const deleteOldVm = await showConfirm(
+    `Also permanently delete the old VM once the new one is confirmed ` +
+    `working, instead of leaving it as a powered-off backup?\n\n` +
+    `This cannot be undone. If declined, the old VM is kept as a ` +
+    `timestamped backup as usual.`,
+    { title: "Delete old VM?", confirmLabel: "Delete old VM", danger: true }
+  );
+
   setMenubarBusy("Starting GNS3 VM deploy…");
   try {
-    const resp = await fetch("/gns3-vm/deploy", { method: "POST" });
+    const resp = await fetch("/gns3-vm/deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete_old_vm: deleteOldVm }),
+    });
     if (!resp.ok) {
       setMenubarMessage(`Deploy failed: ${(await resp.json()).detail || resp.status}`);
       return;
@@ -4214,7 +4232,10 @@ document.getElementById("deploy-gns3-vm-btn").addEventListener("click", async ()
       setMenubarMessage(`GNS3 VM deploy failed: ${result.error}`);
       return;
     }
-    setMenubarMessage(`GNS3 VM deployed at ${result.ip_address}.`);
+    setMenubarMessage(
+      `GNS3 VM deployed at ${result.ip_address}` +
+      (deleteOldVm ? " (old VM deleted)." : ".")
+    );
     await loadCanvas();
   } catch (err) {
     setMenubarMessage(`Deploy failed: ${err}`);

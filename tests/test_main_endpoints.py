@@ -102,6 +102,26 @@ def test_deploy_gns3_vm_returns_job_id(client, app_state):
     assert resp.json() == {"job_id": "job-1"}
 
 
+def test_deploy_gns3_vm_defaults_to_keeping_the_old_vm(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
+    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job) as fake_start:
+        resp = client.post("/gns3-vm/deploy")
+    assert resp.status_code == 200
+    assert fake_start.call_args.kwargs == {"delete_old_vm": False}
+
+
+def test_deploy_gns3_vm_forwards_delete_old_vm(client, app_state):
+    from app import gns3_vm_deploy_jobs
+
+    fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
+    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job) as fake_start:
+        resp = client.post("/gns3-vm/deploy", json={"delete_old_vm": True})
+    assert resp.status_code == 200
+    assert fake_start.call_args.kwargs == {"delete_old_vm": True}
+
+
 def test_gns3_vm_deploy_status_404s_for_unknown_job(client, app_state):
     app_state.gns3_vm_deploy_job = None
     resp = client.get("/gns3-vm/deploy/nope")

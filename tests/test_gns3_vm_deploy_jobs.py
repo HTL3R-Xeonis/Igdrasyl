@@ -85,6 +85,40 @@ def test_run_deploy_job_marks_done_and_updates_app_state(app_state):
     assert args[3] == "datastore1"
     assert args[4] == "PG-MGMT"
     assert "on_stage" in kwargs
+    assert kwargs["delete_old_vm"] is False
+
+
+def test_run_deploy_job_forwards_delete_old_vm(app_state):
+    Settings.ESXI.GNS3_VM_OVA_PATH = "/mnt/nfs/gns3.ova"
+    Settings.ESXI.GNS3_VM_MGMT_NETWORK = "PG-MGMT"
+    Settings.ESXI.DATASTORE = "datastore1"
+    app = _fake_app(app_state)
+    job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
+
+    with patch(
+        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+        gns3_vm_deploy_jobs.run_deploy_job(app, job, delete_old_vm=True)
+
+    assert fake_deploy.call_args.kwargs["delete_old_vm"] is True
+
+
+def test_start_job_forwards_delete_old_vm_to_run_deploy_job(app_state):
+    Settings.ESXI.GNS3_VM_OVA_PATH = "/mnt/nfs/gns3.ova"
+    Settings.ESXI.GNS3_VM_MGMT_NETWORK = "PG-MGMT"
+    Settings.ESXI.DATASTORE = "datastore1"
+    app = _fake_app(app_state)
+
+    with patch(
+        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+        job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=True)
+        deadline = time.monotonic() + 2
+        while job.status == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    assert job.status == "done"
+    assert fake_deploy.call_args.kwargs["delete_old_vm"] is True
 
 
 def test_run_deploy_job_auto_picks_biggest_datastore_when_unset(app_state):
