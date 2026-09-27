@@ -167,6 +167,58 @@ def test_auto_layout_places_directly_linked_nodes_closer_together():
     assert distance("R1", "SW1") < distance("R1", "Isolated")
 
 
+def test_to_dict_and_from_dict_roundtrip():
+    state = design.new_state()
+    design.add_node(state, "R1", "ROUTER", "Cisco IOSv 15.6(1)T")
+    design.add_node(state, "SW1", "SWITCH", "VPCS")
+    design.add_link(state, "R1", "eth0", "SW1", "Ethernet0")
+    state.layout["R1"] = {"x": 1.5, "y": 2.5}
+    state.drawings = [{"id": 1, "type": "text", "text": "hi"}]
+
+    restored = design.from_dict(design.to_dict(state))
+
+    assert restored.nodes.keys() == state.nodes.keys()
+    for name, node in state.nodes.items():
+        restored_node = restored.nodes[name]
+        assert restored_node.role == node.role
+        assert restored_node.image == node.image
+        assert restored_node.environment == node.environment
+        assert restored_node.interfaces == node.interfaces
+    assert restored.links == state.links
+    assert restored.layout == state.layout
+    assert restored.drawings == state.drawings
+
+
+@pytest.mark.no_templates_fixture
+def test_from_dict_does_not_call_the_template_service():
+    """
+    The whole reason app/design_store.py exists: restoring a saved sketch
+    (e.g. right after a restart) must survive a template-service outage,
+    not just avoid re-validating for style reasons - from_dict must never
+    call Environment.get_environment at all.
+    """
+    data = {
+        "nodes": [
+            {
+                "name": "R1",
+                "role": "ROUTER",
+                "image": "Cisco IOSv 15.6(1)T",
+                "environment": "ON_GNS3",
+                "interfaces": {},
+            }
+        ],
+        "links": [],
+        "layout": {},
+        "drawings": [],
+    }
+    with patch(
+        "src.graph.environment.APIHandler.get_gns3_template_names",
+        side_effect=TimeoutError("template service unreachable"),
+    ):
+        restored = design.from_dict(data)
+    assert restored.nodes["R1"].environment == "ON_GNS3"
+
+
 # --- HTTP layer ---
 
 

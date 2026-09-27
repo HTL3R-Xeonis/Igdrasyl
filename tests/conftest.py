@@ -28,6 +28,19 @@ from src.settings import Settings
 _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
 
 
+@pytest.fixture(autouse=True)
+def _design_store_tmp_file(tmp_path, monkeypatch):
+    """
+    Every /design/* mutation now autosaves (see app/design_store.py) -
+    without this, every test touching a design endpoint would write a
+    real design_state.json into the repo root as a side effect. Autouse
+    (unlike TOPOLOGYOPERATOR_LAYOUT_FILE's per-test opt-in) since design
+    saves happen on nearly every design mutation across many test files,
+    not just a handful that opt in deliberately.
+    """
+    monkeypatch.setenv("TOPOLOGYOPERATOR_DESIGN_FILE", str(tmp_path / "design_state.json"))
+
+
 @pytest.fixture
 def temp_topology_file(tmp_path, app_state):
     """

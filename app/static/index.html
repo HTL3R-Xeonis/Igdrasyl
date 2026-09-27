@@ -185,8 +185,22 @@
     color: var(--warn);
     font-size: 13px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
-  #warning-banner:empty { display: none; }
+  #warning-banner[hidden] { display: none; }
+  #warning-retry-btn {
+    background: transparent;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 3px;
+    padding: 2px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #warning-retry-btn:hover { background: var(--warn); color: #1a1400; }
   main {
     flex: 1;
     display: flex;
@@ -345,6 +359,7 @@
   .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
   .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
+  .link-line-capturing { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
   .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
   .port-label { fill: var(--canvas-link); font-size: 9px; pointer-events: none; user-select: none; }
   #canvas-toolbar {
@@ -392,7 +407,7 @@
     margin-bottom: 4px;
     border-bottom: 1px solid var(--border);
   }
-  #node-actions button.console-btn {
+  #node-actions button.console-btn, #link-actions button.console-btn {
     display: block;
     width: 100%;
     text-align: left;
@@ -405,8 +420,8 @@
     padding: 7px 12px;
     cursor: pointer;
   }
-  #node-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
-  #node-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
+  #node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
+  #node-actions button.console-btn:disabled, #link-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
   #right-panel {
     width: var(--right-panel-width, 360px);
     flex-shrink: 0;
@@ -514,7 +529,7 @@
      Topology Summary row) - not docked in the page flow, so it stays
      out of #console-area's own layout (that's just the live session
      area now). */
-  #node-actions {
+  #node-actions, #link-actions {
     position: fixed;
     z-index: 150;
     min-width: 180px;
@@ -527,6 +542,13 @@
     font-size: 13px;
     display: flex;
     flex-direction: column;
+  }
+  #link-actions-header {
+    padding: 0 12px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--dim);
   }
   #console-area {
     flex: 1;
@@ -1142,7 +1164,7 @@
   <input type="file" id="draw-image-input" accept="image/*" hidden>
   <div id="menubar-status"></div>
 </header>
-<div id="warning-banner"></div>
+<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button></div>
 <main>
   <div id="device-palette">
     <div id="palette-header"><span>Devices</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
@@ -1202,6 +1224,13 @@
         <button class="console-btn" id="selected-action-btn"></button>
         <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
+      </div>
+      <div id="link-actions" hidden>
+        <div id="link-actions-header"></div>
+        <button class="console-btn" id="link-start-capture-btn">Start Capture</button>
+        <button class="console-btn" id="link-stop-capture-btn" hidden>Stop Capture</button>
+        <button class="console-btn" id="link-wireshark-btn" disabled>Wireshark…</button>
+        <button class="console-btn" id="link-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="session-tabbar" hidden></div>
       <div id="console-placeholder">Click a node on the canvas, or in the Topology Summary above, then open its Console or Screen to see it here.</div>
@@ -1607,6 +1636,29 @@ let designMode = false;
 function apiPath(path) {
   return designMode ? `/design${path}` : path;
 }
+
+function setWarningBanner(text, opts = {}) {
+  const banner = document.getElementById("warning-banner");
+  const retryBtn = document.getElementById("warning-retry-btn");
+  document.getElementById("warning-banner-text").textContent = text;
+  banner.hidden = !text;
+  retryBtn.hidden = !text || !opts.retryable;
+}
+
+document.getElementById("warning-retry-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("warning-retry-btn");
+  btn.disabled = true;
+  btn.textContent = "Retrying…";
+  try {
+    await fetch("/reload", { method: "POST" });
+    await loadCanvas();
+  } catch (err) {
+    // loadCanvas's own catch already surfaces this - nothing extra to do here.
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Retry";
+  }
+});
 function confirmDisruption(message, opts) {
   if (designMode || !showDisruptionWarnings) return Promise.resolve(true);
   return showConfirm(message, opts);
@@ -1764,14 +1816,18 @@ async function loadCanvas() {
       ? [DESIGN_HEALTH_STUB, await fetch(apiPath("/topology")).then(r => r.json()), null, await fetch(apiPath("/layout")).then(r => r.json())]
       : await Promise.all([
         fetch("/health").then(r => r.json()),
-        fetch("/topology").then(r => r.json()),
+        // 503s while app.state.graph couldn't load (e.g. the template
+        // service is down) - fall back to an empty canvas instead of
+        // throwing, so the health.warning banner (set below) stays the
+        // one thing the user sees instead of a generic "Failed to load".
+        fetch("/topology").then(r => r.ok ? r.json() : []),
         fetch("/nodes").then(r => r.ok ? r.json() : null),
-        fetch("/layout").then(r => r.json()),
+        fetch("/layout").then(r => r.ok ? r.json() : {}),
       ]);
 
     document.getElementById("project-meta").textContent =
       `${health.gns3_project_name} @ ${health.esxi_ip}`;
-    document.getElementById("warning-banner").textContent = health.warning || "";
+    setWarningBanner(health.warning || "", { retryable: !designMode });
     incrementalDeploy = health.incremental_deploy !== false;
 
     const gns3Link = document.getElementById("gns3-webui-link");
@@ -1793,6 +1849,7 @@ async function loadCanvas() {
       const pos = positions[node.name] || { x: 100, y: 100 };
       nodesData[node.name] = { ...node, live: liveByName.get(node.name) || null, x: pos.x, y: pos.y };
     }
+    await refreshLiveLinks();
     renderCanvas();
     renderSummary();
     if (!initialFitDone) {
@@ -2552,14 +2609,14 @@ function renderCanvas() {
       const neighbourIfName = neighbourIfEntry ? neighbourIfEntry[0] : "";
 
       const line = document.createElementNS(SVG_NS, "line");
-      line.setAttribute("class", "link-line");
+      const isCapturing = !!(liveLinksData[pairKey] && liveLinksData[pairKey].capturing);
+      line.setAttribute("class", isCapturing ? "link-line link-line-capturing" : "link-line");
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, neighbour);
-      line.addEventListener("pointerdown", async (evt) => {
+      line.addEventListener("pointerdown", (evt) => {
         evt.stopPropagation();
         if (linkMode) return;
-        const [a, b] = line.dataset.pair.split("|");
-        if (await showConfirm(`Delete link between ${a} and ${b}?`, { danger: true })) deleteLink(a, b);
+        showLinkActions(node.name, ifName, neighbourName, neighbourIfName, { x: evt.clientX, y: evt.clientY });
       });
       linksLayer.appendChild(line);
       appendLinkEndpointDot(linksLayer, node, neighbour, ifName);
@@ -3166,6 +3223,119 @@ async function deleteLink(node1, node2) {
   }
 }
 
+// --- Link-actions popup (delete, and - for a live, non-design link -
+// Wireshark-style packet capture, matching GNS3's own web GUI. See
+// app/capture.py: capture start/stop/stream all proxy straight through
+// to GNS3's own controller API for the real link this node-name pair
+// resolves to. ---
+
+let liveLinksData = {};
+let selectedLinkPair = null;
+
+function linkPairKey(a, b) {
+  return [a, b].sort().join("|");
+}
+
+async function refreshLiveLinks() {
+  if (designMode) {
+    liveLinksData = {};
+    return;
+  }
+  try {
+    const links = await fetch("/links").then((r) => (r.ok ? r.json() : []));
+    liveLinksData = {};
+    for (const link of links) liveLinksData[linkPairKey(link.node1, link.node2)] = link;
+  } catch (err) {
+    liveLinksData = {};
+  }
+}
+
+function renderLinkActionsPopup(node1, if1, node2, if2) {
+  document.getElementById("link-actions-header").textContent =
+    `${node1}:${if1 || "?"} ⇄ ${node2}:${if2 || "?"}`;
+
+  const startBtn = document.getElementById("link-start-capture-btn");
+  const stopBtn = document.getElementById("link-stop-capture-btn");
+  const wsBtn = document.getElementById("link-wireshark-btn");
+
+  if (designMode) {
+    startBtn.hidden = true;
+    stopBtn.hidden = true;
+    wsBtn.hidden = true;
+    return;
+  }
+
+  const live = liveLinksData[linkPairKey(node1, node2)];
+  const capturing = !!(live && live.capturing);
+  startBtn.hidden = capturing;
+  stopBtn.hidden = !capturing;
+  wsBtn.hidden = false;
+  startBtn.disabled = !live;
+  stopBtn.disabled = !live;
+  wsBtn.disabled = !capturing;
+  startBtn.title = live ? "Start a packet capture on this link" : "No live GNS3 link found for this pair";
+  stopBtn.title = "Stop the running capture";
+  wsBtn.title = capturing ? "Copy a command to open this capture in Wireshark" : "Start a capture first";
+  startBtn.onclick = () => callLinkCapture("start", node1, node2);
+  stopBtn.onclick = () => callLinkCapture("stop", node1, node2);
+  wsBtn.onclick = () => {
+    const cmd = `curl -sN ${window.location.origin}/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/stream | wireshark -k -i -`;
+    showTextareaPrompt("Run this on your own machine to open the live capture in Wireshark:", {
+      title: "Wireshark",
+      defaultValue: cmd,
+      confirmLabel: "Close",
+    });
+  };
+}
+
+function showLinkActions(node1, if1, node2, if2, anchor) {
+  selectedLinkPair = { node1, if1, node2, if2 };
+  const popup = document.getElementById("link-actions");
+  popup.hidden = false;
+  renderLinkActionsPopup(node1, if1, node2, if2);
+  positionNear(popup, anchor);
+}
+
+function deselectLink() {
+  selectedLinkPair = null;
+  document.getElementById("link-actions").hidden = true;
+}
+
+async function callLinkCapture(action, node1, node2) {
+  try {
+    const resp = await fetch(
+      `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/${action}`,
+      { method: "POST" }
+    );
+    if (!resp.ok) {
+      await showAlert(`Failed to ${action} capture: ${(await resp.json()).detail || resp.status}`);
+      return;
+    }
+    await refreshLiveLinks();
+    if (selectedLinkPair && selectedLinkPair.node1 === node1 && selectedLinkPair.node2 === node2) {
+      renderLinkActionsPopup(selectedLinkPair.node1, selectedLinkPair.if1, selectedLinkPair.node2, selectedLinkPair.if2);
+    }
+  } catch (err) {
+    await showAlert(`Failed to ${action} capture: ${err}`);
+  }
+}
+
+document.getElementById("link-delete-btn").addEventListener("click", async () => {
+  if (!selectedLinkPair) return;
+  const { node1, node2 } = selectedLinkPair;
+  const deleteMsg = `Delete link between ${node1} and ${node2}?`;
+  if (!(await showConfirm(deleteMsg, { danger: true, confirmLabel: "Delete" }))) return;
+  deselectLink();
+  await deleteLink(node1, node2);
+});
+
+document.addEventListener("click", (evt) => {
+  const popup = document.getElementById("link-actions");
+  if (popup.hidden || popup.contains(evt.target)) return;
+  if (evt.target.closest(".link-line")) return;
+  deselectLink();
+});
+
 function exitLinkMode() {
   linkMode = false;
   linkFirstNode = null;
@@ -3706,7 +3876,7 @@ async function enterDesignMode() {
   try {
     await loadCanvas();
   } catch (err) {
-    document.getElementById("warning-banner").textContent = `Failed to load design sketch: ${err}`;
+    setWarningBanner(`Failed to load design sketch: ${err}`);
   }
 }
 
@@ -3905,7 +4075,7 @@ async function enterHost(filename, isActive) {
     try {
       await loadCanvas();
     } catch (err) {
-      document.getElementById("warning-banner").textContent = `Failed to load: ${err}`;
+      setWarningBanner(`Failed to load: ${err}`, { retryable: true });
     }
     return;
   }

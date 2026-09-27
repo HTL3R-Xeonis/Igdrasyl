@@ -140,6 +140,55 @@ def to_topology_yaml_dict(state: DesignState) -> dict[str, Any]:
     }
 
 
+def to_dict(state: DesignState) -> dict[str, Any]:
+    """
+    A plain-dict snapshot of the whole sketch for app/design_store.py to
+    persist to disk - includes each node's already-resolved
+    `environment`, unlike to_topology_yaml_dict, so from_dict can restore
+    it without re-asking the template service (see from_dict).
+    """
+    return {
+        "nodes": [
+            {
+                "name": node.name,
+                "role": node.role,
+                "image": node.image,
+                "environment": node.environment,
+                "interfaces": dict(node.interfaces),
+            }
+            for node in state.nodes.values()
+        ],
+        "links": [list(link) for link in state.links],
+        "layout": {name: dict(pos) for name, pos in state.layout.items()},
+        "drawings": list(state.drawings),
+    }
+
+
+def from_dict(data: dict[str, Any]) -> DesignState:
+    """
+    Restores a sketch from to_dict's own shape, constructing DesignNode
+    directly rather than going through add_node/add_link - deliberately
+    bypasses Environment.get_environment (a live template-service call)
+    since a saved sketch's environment was already resolved once, and
+    restoring it must keep working even while that service is down
+    (the whole reason app/design_store.py exists: surviving a restart
+    during exactly that kind of outage without losing the sketch).
+    """
+    state = new_state()
+    for entry in data.get("nodes", []):
+        state.nodes[entry["name"]] = DesignNode(
+            name=entry["name"],
+            role=entry["role"],
+            image=entry["image"],
+            environment=entry["environment"],
+            interfaces=dict(entry.get("interfaces", {})),
+        )
+    state.links = [tuple(link) for link in data.get("links", [])]
+    state.layout = {name: dict(pos) for name, pos in data.get("layout", {}).items()}
+    state.drawings = list(data.get("drawings", []))
+    return state
+
+
 class _NeighbourView:
     """Just enough of GenericNode's shape for _build_adjacency's own `neighbour.name` lookup."""
 

@@ -599,6 +599,105 @@ def test_generate_design_status_reports_running_attempt(client, app_state):
     }
 
 
+def test_topology_503s_when_graph_failed_to_load(client, app_state):
+    app_state.graph = None
+    app_state.startup_warning = "template service unreachable"
+    resp = client.get("/topology")
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "template service unreachable"
+
+
+def test_nodes_503s_when_graph_failed_to_load(client, app_state):
+    app_state.graph = None
+    resp = client.get("/nodes")
+    assert resp.status_code == 503
+
+
+def test_layout_get_and_post_503_when_graph_failed_to_load(client, app_state):
+    app_state.graph = None
+    assert client.get("/layout").status_code == 503
+    assert client.post("/layout", json={"name": "R1", "x": 1.0, "y": 2.0}).status_code == 503
+
+
+def test_design_endpoints_still_work_when_graph_failed_to_load(client, app_state):
+    """The whole point of degrading gracefully: design mode never touches app.state.graph at all."""
+    app_state.graph = None
+    app_state.startup_warning = "template service unreachable"
+
+    resp = client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"})
+    assert resp.status_code == 200, resp.text
+    assert client.get("/design/topology").status_code == 200
+
+
+def test_reload_endpoint_recovers_after_a_transient_failure(client, app_state):
+    app_state.graph = None
+    app_state.startup_warning = "boom"
+
+    with patch("app.main.load_graph") as fake_load_graph, patch(
+        "app.main.resolve_project_id", return_value=None
+    ), patch("app.main.gns3_vm_deploy_jobs.auto_deploy_if_missing"):
+        fake_load_graph.return_value = MagicMock(nodes={})
+        resp = client.post("/reload")
+
+    assert resp.status_code == 200
+    assert resp.json()["warning"] is None or "GNS3" in resp.json()["warning"]
+    assert app_state.graph is not None
+
+
+def test_live_links_returns_empty_list_with_no_live_project(client, app_state):
+    app_state.project_id = None
+    resp = client.get("/links")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_link_capture_start_stop_and_stream(client, app_state):
+    app_state.project_id = "proj-1"
+    app_state.gns3_vm_ip = "10.20.20.233"
+    live_nodes = [{"name": "R1", "node_id": "n1"}, {"name": "SW1", "node_id": "n2"}]
+    live_links = [
+        {
+            "link_id": "link-1",
+            "capturing": False,
+            "nodes": [
+                {"node_id": "n1", "label": {"text": "eth0"}},
+                {"node_id": "n2", "label": {"text": "Ethernet0"}},
+            ],
+        }
+    ]
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live_nodes), patch(
+        "app.capture.GNS3Connection.list_project_links", return_value=live_links
+    ), patch("app.capture.GNS3Connection.ensure_project_open"):
+        resp = client.get("/links")
+        assert resp.status_code == 200
+        assert resp.json() == [
+            {"node1": "R1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet0", "capturing": False}
+        ]
+
+        with patch("app.capture.GNS3Connection.post", return_value={"capturing": True}):
+            resp = client.post("/links/R1/SW1/capture/start")
+        assert resp.status_code == 200, resp.text
+
+        with patch("app.capture.GNS3Connection.post"):
+            resp = client.post("/links/R1/SW1/capture/stop")
+        assert resp.status_code == 200, resp.text
+
+        fake_stream = MagicMock()
+        fake_stream.iter_content.return_value = iter([b"pcap-bytes"])
+        with patch("app.capture.requests.get", return_value=fake_stream):
+            resp = client.get("/links/R1/SW1/capture/stream")
+        assert resp.status_code == 200
+        assert resp.content == b"pcap-bytes"
+        assert resp.headers["content-type"] == "application/vnd.tcpdump.pcap"
+
+
+def test_link_capture_start_404s_when_no_live_link(client, app_state):
+    app_state.project_id = "proj-1"
+    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]):
+        resp = client.post("/links/R1/SW1/capture/start")
+    assert resp.status_code == 404
+
+
 def test_generate_design_status_reports_error(client, app_state):
     from app import generate_jobs
 

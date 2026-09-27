@@ -17,6 +17,7 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI, HTTPException, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
@@ -25,7 +26,7 @@ from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import console, design, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, logs, project_bundle, settings_profiles, topology_write, vm_screen
+from app import capture, console, design, design_store, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, logs, project_bundle, settings_profiles, topology_write, vm_screen
 from app.logging_setup import configure_logging
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import (
@@ -38,63 +39,54 @@ from app.gns3_state import (
 from app.layout import load_layout, save_position
 from app.topology import load_graph, resolve_project_name
 
+# Widened alongside (RuntimeError, ConnectionError, TimeoutError) on the
+# live /nodes and /links endpoints below - a template-service outage
+# surfaces as requests.exceptions.RequestException (e.g. ConnectionError,
+# which is NOT the builtin ConnectionError), not just the three above.
+_LIVE_WRITE_ERRORS = (RuntimeError, ConnectionError, TimeoutError, requests.exceptions.RequestException)
+
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _LICENSE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "LICENSE")
 
 _SETTINGS_ENV_VAR = "TOPOLOGYOPERATOR_SETTINGS"
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    settings_path = os.getenv(_SETTINGS_ENV_VAR)
-    if settings_path:
-        Settings.initialise_settings(settings_path)
+def _refresh_startup_state(app: FastAPI) -> None:
+    """
+    (Re)computes app.state.graph and the live GNS3 project resolution -
+    called once from lifespan at process start, and again from
+    POST /reload for a manual retry once a previously-down dependency
+    (the template-listing service load_graph() needs, or the GNS3 VM/
+    project itself) comes back, without needing a full process restart.
 
-    # After initialise_settings, so a settings.yml's own log_file_path
-    # override (if any) is already in effect - see app/logging_setup.py.
-    configure_logging()
+    Never raises: both the topology-file load and the GNS3 resolution
+    are independently best-effort here (a template-service outage
+    shouldn't hide a GNS3 VM being reachable, or vice versa) - failures
+    are collected into app.state.startup_warning instead, same spirit as
+    the GNS3-resolution-only try/except this replaces. See /topology,
+    /nodes, /layout and GET /project/export, which all now check
+    app.state.graph is None and 503 instead of crashing when this
+    couldn't load it (previously an unhandled exception here failed the
+    whole FastAPI lifespan, refusing to start the process at all - see
+    handoff/INFRASTRUCTURE.md's "Template-listing API" outage note).
+    """
+    warnings: list[str] = []
 
-    # Opens a real, persistent pyvmomi session - done once here and
-    # reused for the app's lifetime rather than per-request, same
-    # reasoning as TopologyBuilder's own CLI commands.
-    app.state.esxi_connection = ESXiConnection(
-        Settings.ESXI.IP,
-        Settings.ESXI.PORT,
-        Settings.ESXI.USERNAME,
-        Settings.ESXI.PASSWORD,
-    )
-
-    # The graph/topology file itself is always available even if live
-    # GNS3 state below can't be resolved - fine to fail startup if the
-    # topology file is missing/invalid though, unlike the network calls
-    # below, which can legitimately be transient (GNS3 VM's DHCP lease
-    # not resolved yet, project not deployed yet).
-    app.state.graph = load_graph()
+    # No network dependency (just Settings.GNS3.PROJECT_NAME or the
+    # topology file's own path stem) - resolved independently of
+    # load_graph() below so a template-service outage there doesn't also
+    # block the GNS3 project lookup that only needs this name.
     app.state.project_name = resolve_project_name()
-    # Most recent /config-push request body - project_bundle.py's own
-    # GET /project/export includes this as the bundle's configs.json,
-    # since nothing else persists config-push data anywhere.
-    app.state.last_config_push = {}
-    # Canvas drawings (rectangles/ellipses/lines/text annotations) -
-    # client-side state the frontend pushes here via POST /drawings
-    # whenever it changes, so a reload restores them and
-    # project_bundle.py's own export can bundle them too. Not synced
-    # with GNS3's own real drawings API - see app/static/index.html's
-    # own notes on that.
-    app.state.last_drawings = []
 
-    # A separate, never-deployed sketch topology (see app/design.py),
-    # reachable from the landing page independent of whichever host
-    # profile this process happens to be running. In-memory only - lost
-    # on a host switch (a real process re-exec, see settings_profiles.py)
-    # same as any other in-memory state, and otherwise only cleared by
-    # POST /design/reset.
-    app.state.design = design.new_state()
+    try:
+        app.state.graph = load_graph()
+    except Exception as exc:
+        app.state.graph = None
+        warnings.append(str(exc))
+        logger.warning(f"Starting without a loaded topology: {exc}")
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
-    app.state.startup_warning = None
-    app.state.gns3_vm_deploy_job = None
     try:
         # Auto-recovery: only when the configured GNS3 VM is genuinely
         # absent - never when one exists but just isn't reporting an IP
@@ -124,8 +116,60 @@ async def lifespan(app: FastAPI):
         # live GNS3 state, so the app comes up in a degraded mode rather
         # than refusing to start entirely. /health surfaces this, and
         # /nodes returns a 503 with the same detail.
-        app.state.startup_warning = str(exc)
+        warnings.append(str(exc))
         logger.warning(f"Starting without live GNS3 state: {exc}")
+
+    app.state.startup_warning = "; ".join(warnings) or None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings_path = os.getenv(_SETTINGS_ENV_VAR)
+    if settings_path:
+        Settings.initialise_settings(settings_path)
+
+    # After initialise_settings, so a settings.yml's own log_file_path
+    # override (if any) is already in effect - see app/logging_setup.py.
+    configure_logging()
+
+    # Opens a real, persistent pyvmomi session - done once here and
+    # reused for the app's lifetime rather than per-request, same
+    # reasoning as TopologyBuilder's own CLI commands.
+    app.state.esxi_connection = ESXiConnection(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        Settings.ESXI.PASSWORD,
+    )
+
+    # Most recent /config-push request body - project_bundle.py's own
+    # GET /project/export includes this as the bundle's configs.json,
+    # since nothing else persists config-push data anywhere.
+    app.state.last_config_push = {}
+    # Canvas drawings (rectangles/ellipses/lines/text annotations) -
+    # client-side state the frontend pushes here via POST /drawings
+    # whenever it changes, so a reload restores them and
+    # project_bundle.py's own export can bundle them too. Not synced
+    # with GNS3's own real drawings API - see app/static/index.html's
+    # own notes on that.
+    app.state.last_drawings = []
+
+    # A separate, never-deployed sketch topology (see app/design.py),
+    # reachable from the landing page independent of whichever host
+    # profile this process happens to be running. Restored from disk
+    # (see app/design_store.py) when a prior session saved one, so a
+    # restart doesn't silently wipe an in-progress sketch - otherwise
+    # cleared only by POST /design/reset. Never touches the template
+    # service (see design.from_dict), so this always succeeds even
+    # while that service is down.
+    try:
+        app.state.design = design_store.load() or design.new_state()
+    except Exception as exc:
+        logger.warning(f"Couldn't restore saved design sketch, starting empty: {exc}")
+        app.state.design = design.new_state()
+
+    app.state.gns3_vm_deploy_job = None
+    _refresh_startup_state(app)
 
     yield
 
@@ -148,6 +192,20 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.post("/reload")
+def reload_startup_state() -> dict[str, Any]:
+    """
+    Manual retry for whatever _refresh_startup_state couldn't resolve at
+    startup (template service was down, GNS3 VM/project not up yet) -
+    the frontend's warning banner offers this instead of requiring a full
+    process restart once the dependency is back. Always 200; the result
+    is the same shape as GET /health so the frontend can refresh from it
+    directly.
+    """
+    _refresh_startup_state(app)
+    return health()
+
+
 @app.get("/logs")
 def get_logs(lines: int = 300) -> list[dict[str, Any]]:
     """
@@ -163,6 +221,8 @@ def get_logs(lines: int = 300) -> list[dict[str, Any]]:
 @app.get("/topology")
 def topology() -> list[dict[str, Any]]:
     """The topology file's own structure - no live GNS3/ESXi state."""
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     return [
         {
             "name": node.name,
@@ -203,6 +263,8 @@ def nodes() -> list[dict[str, Any]]:
     "started" here, since a live entry existing at all short-circuited
     the real ESXi lookup entirely.
     """
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     try:
         live_by_name = {n["name"]: n for n in list_live_nodes(app)}
     except NoLiveProject:
@@ -258,6 +320,8 @@ def layout() -> dict[str, dict[str, float]]:
     frontend always gets a full layout even before anyone has dragged
     anything. See app/layout.py.
     """
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     return load_layout(app.state.graph.nodes)
 
 
@@ -269,6 +333,8 @@ class LayoutUpdate(BaseModel):
 
 @app.post("/layout")
 def update_layout(update: LayoutUpdate) -> dict[str, str]:
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     if update.name not in app.state.graph.nodes:
         raise HTTPException(404, f"no node named {update.name!r}")
     save_position(update.name, update.x, update.y)
@@ -309,7 +375,7 @@ def add_node(request: AddNodeRequest) -> dict[str, str]:
         topology_write.add_node(app, request.name, request.role, request.image)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -320,7 +386,7 @@ def remove_node(name: str) -> dict[str, str]:
         topology_write.remove_node(app, name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -341,7 +407,7 @@ def add_link(request: AddLinkRequest) -> dict[str, str]:
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -352,9 +418,60 @@ def remove_link(node1: str, node2: str) -> dict[str, str]:
         topology_write.remove_link(app, node1, node2)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
+
+
+@app.get("/links")
+def live_links() -> list[dict[str, Any]]:
+    """Every live GNS3 link, for the canvas's link-actions popup to know which ones support capture. See app/capture.py."""
+    try:
+        return capture.list_live_links(app)
+    except NoLiveProject:
+        return []
+
+
+@app.post("/links/{node1}/{node2}/capture/start")
+def start_link_capture(node1: str, node2: str) -> dict[str, Any]:
+    try:
+        return capture.start_capture(app, node1, node2) or {"status": "ok"}
+    except (NoLiveProject, ValueError) as exc:
+        raise HTTPException(404, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/links/{node1}/{node2}/capture/stop")
+def stop_link_capture(node1: str, node2: str) -> dict[str, str]:
+    try:
+        capture.stop_capture(app, node1, node2)
+    except (NoLiveProject, ValueError) as exc:
+        raise HTTPException(404, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+    return {"status": "ok"}
+
+
+@app.get("/links/{node1}/{node2}/capture/stream")
+def stream_link_capture(node1: str, node2: str) -> StreamingResponse:
+    """
+    Proxies GNS3's own live pcap stream for this link straight through -
+    the same mechanism GNS3's desktop client pipes into a local
+    `wireshark -k -i -` process (see app/capture.py's own docstring for
+    why there's no separate "finished file" to download instead).
+    """
+    try:
+        upstream = capture.capture_stream(app, node1, node2)
+    except (NoLiveProject, ValueError) as exc:
+        raise HTTPException(404, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+    return StreamingResponse(
+        upstream.iter_content(chunk_size=4096),
+        media_type="application/vnd.tcpdump.pcap",
+        headers={"Content-Disposition": f'attachment; filename="{node1}_{node2}.pcap"'},
+    )
 
 
 @app.post("/nodes/{name}/start")
@@ -363,7 +480,7 @@ def start_node(name: str) -> dict[str, str]:
         lifecycle.start_node(app, name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -374,7 +491,7 @@ def stop_node(name: str) -> dict[str, str]:
         lifecycle.stop_node(app, name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -385,7 +502,7 @@ def reload_node(name: str) -> dict[str, str]:
         lifecycle.reload_node(app, name)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+    except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
 
@@ -454,6 +571,13 @@ def design_add_node(request: AddNodeRequest) -> dict[str, str]:
         design.add_node(app.state.design, request.name, request.role, request.image)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        # Environment.get_environment couldn't reach the template
+        # service - same degraded-mode story as GET /templates above,
+        # not a 500: the sketch itself is untouched, only classifying a
+        # brand new node needs that service to be up.
+        raise HTTPException(503, str(exc))
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -463,6 +587,7 @@ def design_remove_node(name: str) -> dict[str, str]:
         design.remove_node(app.state.design, name)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -474,6 +599,7 @@ def design_add_link(request: AddLinkRequest) -> dict[str, str]:
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -483,6 +609,7 @@ def design_remove_link(node1: str, node2: str) -> dict[str, str]:
         design.remove_link(app.state.design, node1, node2)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -496,6 +623,7 @@ def design_update_layout(update: LayoutUpdate) -> dict[str, str]:
     if update.name not in app.state.design.nodes:
         raise HTTPException(404, f"no node named {update.name!r}")
     app.state.design.layout[update.name] = {"x": update.x, "y": update.y}
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -507,6 +635,7 @@ def design_get_drawings() -> list[dict[str, Any]]:
 @app.post("/design/drawings")
 def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
     app.state.design.drawings = request.drawings
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -514,6 +643,7 @@ def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
 def design_reset() -> dict[str, str]:
     """Clears the sketch and starts a fresh, empty one."""
     app.state.design = design.new_state()
+    design_store.save(app.state.design)
     return {"status": "ok"}
 
 
@@ -585,6 +715,8 @@ def export_project() -> Response:
     the last config-push, drawings.json, layout.json (node canvas
     positions), and a manifest) - see app/project_bundle.py.
     """
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     data = project_bundle.build_export(app)
     filename = f"{app.state.project_name or 'topology'}.topoproj"
     return Response(

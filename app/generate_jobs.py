@@ -25,6 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI
 from loguru import logger
 
@@ -32,7 +33,7 @@ from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.settings import Settings
 from src.topology_file_validation import TopologyFileValidation
 
-from app import design
+from app import design, design_store
 
 
 @dataclass
@@ -92,8 +93,20 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             validator = TopologyFileValidation(str(tmp_path))
             validator.validate_file()
             app.state.design = _load_generated_topology(validator.nodes, validator.edges)
+            design_store.save(app.state.design)
             job.status = "done"
             logger.info(f"Generate job {job.id} succeeded on attempt {attempt}")
+            return
+        except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+            # The template service (validate_file/Environment.get_environment
+            # both depend on it) is unreachable - retrying won't help until
+            # it's back, so stop immediately with a clear error instead of
+            # burning through every remaining attempt against a known-down
+            # dependency (see handoff/INFRASTRUCTURE.md's template-service
+            # outage note).
+            job.status = "error"
+            job.error = f"Template service unavailable: {exc}"
+            logger.warning(f"Generate job {job.id} attempt {attempt}: template service unavailable: {exc}")
             return
         except Exception as exc:
             logger.warning(
