@@ -44,7 +44,10 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Matches GNS3's own real web UI (a Roboto-led stack, confirmed via
+       its own computed styles - Angular Material's default), rather
+       than this app's previous generic system-font stack. */
+    font-family: Roboto, "Helvetica Neue", Arial, "Segoe UI", sans-serif;
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -505,18 +508,10 @@
     font-size: 13px;
     text-align: center;
   }
-  #topology-summary h2 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--dim);
-    margin: 0;
-    padding: 10px 16px 6px;
-  }
   #topology-summary-list {
     list-style: none;
     margin: 0;
-    padding: 0 6px 8px;
+    padding: 8px 6px;
     overflow-y: auto;
   }
   .summary-row {
@@ -1182,7 +1177,7 @@
 <body>
 <div id="app-view" hidden>
 <header id="menubar">
-  <button class="menu-btn" id="home-btn" title="Back to host picker">⌂ Hosts</button>
+  <button class="menu-btn" id="home-btn" title="Back to host picker">⌂ Main Menu</button>
   <nav id="menubar-menus">
     <div class="menu">
       <button class="menu-btn" data-menu="file">File</button>
@@ -1201,7 +1196,7 @@
         <button class="menu-item" id="tab-push">Config Push</button>
         <button class="menu-item" id="tab-logs">Logs</button>
         <div class="menu-separator"></div>
-        <button class="menu-item active" id="toggle-devices-btn">Devices</button>
+        <button class="menu-item active" id="toggle-devices-btn">Template List</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="take-screenshot-btn">Take Screenshot</button>
       </div>
@@ -1262,13 +1257,13 @@
 <div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button></div>
 <main>
   <div id="device-palette">
-    <div id="palette-header"><span>Devices</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
+    <div id="palette-header"><span>Template List</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
     <div id="palette-categories">
       <button class="palette-cat active" data-role="ALL">All Devices</button>
       <button class="palette-cat" data-role="ROUTER">Routers</button>
       <button class="palette-cat" data-role="SWITCH">Switches</button>
       <button class="palette-cat" data-role="PC">End Devices</button>
-      <button class="palette-cat" data-role="FW">Security Devices</button>
+      <button class="palette-cat" data-role="FW">Firewalls</button>
       <button class="palette-cat" data-role="VM">VMs</button>
     </div>
     <div id="palette-list"></div>
@@ -1298,13 +1293,12 @@
   <div id="right-panel">
     <div id="topology-summary">
       <div id="status-connection"><span id="status-connection-text">Connecting…</span></div>
-      <h2>Topology Summary</h2>
       <ul id="topology-summary-list"></ul>
     </div>
     <div id="panel-resize-handle" title="Drag to resize"></div>
     <div id="console-area">
       <div id="console-area-header">
-        <span>Console / Screen</span>
+        <span>Console/Screen View</span>
         <button id="popout-btn" title="Pop this panel out into its own window">⧉ Pop out</button>
       </div>
       <div id="node-actions" hidden>
@@ -3858,7 +3852,7 @@ const PALETTE_CATEGORIES = [
   ["ROUTER", "Routers"],
   ["SWITCH", "Switches"],
   ["PC", "End Devices"],
-  ["FW", "Security Devices"],
+  ["FW", "Firewalls"],
   ["VM", "VMs"],
 ];
 let paletteRoleFilter = "ALL";
@@ -5124,14 +5118,14 @@ document.getElementById("popout-btn").addEventListener("click", () => {
     showAlert("Couldn't open a new window - check your browser's popup blocker.");
     return;
   }
-  win.document.title = "TopologyOperator - Console / Screen";
+  win.document.title = "TopologyOperator - Console/Screen View";
   win.document.head.innerHTML = document.head.innerHTML;
   win.document.body.appendChild(consoleArea);
   poppedOutWindow = win;
 
   const placeholder = document.createElement("div");
   placeholder.id = "console-area-placeholder";
-  placeholder.textContent = "Console / Screen is popped out into its own window.";
+  placeholder.textContent = "Console/Screen View is popped out into its own window.";
   document.getElementById("right-panel").appendChild(placeholder);
 
   win.addEventListener("beforeunload", () => {
