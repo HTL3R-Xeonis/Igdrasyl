@@ -201,6 +201,21 @@
     flex-shrink: 0;
   }
   #warning-retry-btn:hover { background: var(--warn); color: #1a1400; }
+  /* A plain wrapper div (toggled via [hidden] when switching to/from
+     the landing page - see enterHost/showLandingView) sits between body
+     and header/main/footer. Without its own flex participation here, it
+     defaults to block layout with an "auto" min-height, so it can never
+     shrink below its content's own height (a classic flexbox pitfall) -
+     real bug found live: a device-palette category with enough entries
+     to not fit on screen (e.g. "All Devices") grew #app-view taller than
+     the viewport instead of scrolling within #palette-list, scrolling
+     the WHOLE page (header/canvas included) rather than just the list. */
+  #app-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   main {
     flex: 1;
     display: flex;
@@ -798,6 +813,86 @@
     box-sizing: border-box;
   }
   #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  /* Live in-browser packet view for a running capture (see app/capture.py -
+     GET .../capture/stream) - decodes the raw pcap stream client-side into
+     a Wireshark-style table instead of only handing the user a copyable
+     command for a real, external Wireshark. */
+  #capture-viewer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  #capture-viewer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    width: 90vw;
+    max-width: 1100px;
+    height: 80vh;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  #capture-viewer-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #capture-viewer-title { font-size: 14px; font-weight: 600; }
+  #capture-viewer-status { font-size: 12px; color: var(--dim); }
+  #capture-viewer-wireshark-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #capture-viewer-wireshark-label { font-size: 12px; color: var(--dim); flex-shrink: 0; }
+  #capture-viewer-wireshark-command {
+    flex: 1;
+    min-width: 0;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+  }
+  #capture-viewer-wireshark-status { font-size: 11px; color: var(--dim); flex-shrink: 0; }
+  #capture-viewer-table-wrap { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 4px; min-height: 0; }
+  #capture-viewer-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: monospace; }
+  #capture-viewer-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel-2);
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  #capture-viewer-table td { padding: 3px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; }
+  #capture-viewer-table td:last-child { white-space: normal; }
+  #capture-viewer-table tbody tr:hover { background: var(--panel-2); }
+  #capture-viewer-table tbody tr.selected { background: var(--accent); color: #fff; }
+  #capture-viewer-detail-wrap {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    min-height: 0;
+    margin-top: 8px;
+  }
+  #capture-viewer-detail-tree, #capture-viewer-detail-hex {
+    flex: 1;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  #capture-viewer-detail-tree { font-family: inherit; }
+  #capture-viewer-detail-tree summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+  #capture-viewer-detail-tree .detail-field { padding: 1px 0 1px 18px; color: var(--dim); }
+  #capture-viewer-detail-tree .detail-field span { color: var(--text); }
+  #capture-viewer-detail-hex { font-family: monospace; white-space: pre; }
+  .capture-proto-TCP { color: var(--accent); }
+  .capture-proto-UDP { color: var(--ok); }
+  .capture-proto-ARP { color: var(--warn); }
+  .capture-proto-ICMP { color: var(--bad); }
   /* Landing page - the app's own entry point, a grid of clickable host
      tiles (one per uploaded settings.yml profile, see
      app/settings_profiles.py). #app-view (the whole existing
@@ -1229,7 +1324,7 @@
         <div id="link-actions-header"></div>
         <button class="console-btn" id="link-start-capture-btn">Start Capture</button>
         <button class="console-btn" id="link-stop-capture-btn" hidden>Stop Capture</button>
-        <button class="console-btn" id="link-wireshark-btn" disabled>Wireshark…</button>
+        <button class="console-btn" id="link-wireshark-btn" disabled>View Capture</button>
         <button class="console-btn" id="link-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="session-tabbar" hidden></div>
@@ -1294,6 +1389,36 @@
     <div id="modal-actions">
       <button class="toolbar-btn" id="modal-cancel-btn">Cancel</button>
       <button class="toolbar-btn primary" id="modal-confirm-btn">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="capture-viewer-overlay" hidden>
+  <div id="capture-viewer" role="dialog" aria-modal="true">
+    <div id="capture-viewer-header">
+      <strong id="capture-viewer-title"></strong>
+      <span id="capture-viewer-status"></span>
+      <div class="spacer"></div>
+      <button class="toolbar-btn" id="capture-viewer-clear-btn">Clear</button>
+      <button class="toolbar-btn primary" id="capture-viewer-close-btn">Close</button>
+    </div>
+    <div id="capture-viewer-wireshark-row">
+      <span id="capture-viewer-wireshark-label">Open in Wireshark:</span>
+      <input type="text" id="capture-viewer-wireshark-command" readonly>
+      <button class="toolbar-btn" id="capture-viewer-copy-wireshark-btn">Copy</button>
+      <span id="capture-viewer-wireshark-status"></span>
+    </div>
+    <div id="capture-viewer-table-wrap">
+      <table id="capture-viewer-table">
+        <thead>
+          <tr><th>No.</th><th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Length</th><th>Info</th></tr>
+        </thead>
+        <tbody id="capture-viewer-tbody"></tbody>
+      </table>
+    </div>
+    <div id="capture-viewer-detail-wrap" hidden>
+      <div id="capture-viewer-detail-tree"></div>
+      <div id="capture-viewer-detail-hex"></div>
     </div>
   </div>
 </div>
@@ -3275,17 +3400,10 @@ function renderLinkActionsPopup(node1, if1, node2, if2) {
   wsBtn.disabled = !capturing;
   startBtn.title = live ? "Start a packet capture on this link" : "No live GNS3 link found for this pair";
   stopBtn.title = "Stop the running capture";
-  wsBtn.title = capturing ? "Copy a command to open this capture in Wireshark" : "Start a capture first";
+  wsBtn.title = capturing ? "Open a live, in-browser packet view" : "Start a capture first";
   startBtn.onclick = () => callLinkCapture("start", node1, node2);
   stopBtn.onclick = () => callLinkCapture("stop", node1, node2);
-  wsBtn.onclick = () => {
-    const cmd = `curl -sN ${window.location.origin}/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/stream | wireshark -k -i -`;
-    showTextareaPrompt("Run this on your own machine to open the live capture in Wireshark:", {
-      title: "Wireshark",
-      defaultValue: cmd,
-      confirmLabel: "Close",
-    });
-  };
+  wsBtn.onclick = () => openCaptureViewer(node1, if1, node2, if2);
 }
 
 function showLinkActions(node1, if1, node2, if2, anchor) {
@@ -3334,6 +3452,370 @@ document.addEventListener("click", (evt) => {
   if (popup.hidden || popup.contains(evt.target)) return;
   if (evt.target.closest(".link-line")) return;
   deselectLink();
+});
+
+// --- Live in-browser packet view ---
+//
+// GET /links/{n1}/{n2}/capture/stream (app/main.py, proxying GNS3's own
+// live pcap stream - see app/capture.py) hands back raw pcap bytes with
+// no end, the same stream GNS3's own desktop client pipes into a local
+// `wireshark -k -i -`. Rather than only offering that copyable command,
+// PcapStreamParser decodes the stream client-side (pcap global header,
+// then repeated packet records) into a Wireshark-style table, so a
+// capture is viewable without leaving the browser or needing a local
+// Wireshark install - the copyable command is still shown underneath
+// for anyone who wants the real thing.
+//
+// Ethernet/ARP/IPv4/TCP/UDP/ICMP only (VLAN-tagged frames are unwrapped
+// first) - enough for a useful summary line per packet, not a full
+// protocol-dissector replacement for real Wireshark.
+
+class PcapStreamParser {
+  constructor(onPacket) {
+    this.onPacket = onPacket;
+    this.buf = new Uint8Array(0);
+    this.haveGlobalHeader = false;
+    this.littleEndian = true;
+  }
+
+  push(chunk) {
+    const merged = new Uint8Array(this.buf.length + chunk.length);
+    merged.set(this.buf, 0);
+    merged.set(chunk, this.buf.length);
+    this.buf = merged;
+    this._drain();
+  }
+
+  _drain() {
+    if (!this.haveGlobalHeader) {
+      if (this.buf.length < 24) return;
+      const dv = new DataView(this.buf.buffer, this.buf.byteOffset, 24);
+      // 0xa1b2c3d4 (or the nanosecond-precision variant 0xa1b23c4d) read
+      // little-endian means the file is little-endian; read big-endian
+      // means it's big-endian - either way the magic number itself tells
+      // us which to use for everything that follows.
+      const leMagic = dv.getUint32(0, true);
+      this.littleEndian = leMagic === 0xa1b2c3d4 || leMagic === 0xa1b23c4d;
+      this.haveGlobalHeader = true;
+      this.buf = this.buf.slice(24);
+    }
+    while (this.buf.length >= 16) {
+      const dv = new DataView(this.buf.buffer, this.buf.byteOffset, 16);
+      const tsSec = dv.getUint32(0, this.littleEndian);
+      const tsUsec = dv.getUint32(4, this.littleEndian);
+      const inclLen = dv.getUint32(8, this.littleEndian);
+      if (this.buf.length < 16 + inclLen) break;
+      const packetData = this.buf.slice(16, 16 + inclLen);
+      this.buf = this.buf.slice(16 + inclLen);
+      this.onPacket(tsSec, tsUsec, packetData);
+    }
+  }
+}
+
+function macStr(data, off) {
+  return Array.from(data.slice(off, off + 6)).map((b) => b.toString(16).padStart(2, "0")).join(":");
+}
+
+function ipStr(data, off) {
+  return `${data[off]}.${data[off + 1]}.${data[off + 2]}.${data[off + 3]}`;
+}
+
+function tcpFlagsStr(flags) {
+  const names = [];
+  if (flags & 0x02) names.push("SYN");
+  if (flags & 0x10) names.push("ACK");
+  if (flags & 0x01) names.push("FIN");
+  if (flags & 0x04) names.push("RST");
+  if (flags & 0x08) names.push("PSH");
+  if (flags & 0x20) names.push("URG");
+  return names.length ? `[${names.join(", ")}]` : "";
+}
+
+function protoName(n) {
+  return { 1: "ICMP", 6: "TCP", 17: "UDP" }[n] || `proto ${n}`;
+}
+
+// Full dissection for one Ethernet frame - returns both the one-line
+// `summary` for the packet-list row and a `layers` tree (title + [name,
+// value] field pairs, outermost first) for the Wireshark-style detail
+// pane a row expands into on click. Ethernet/VLAN/ARP/IPv4/TCP/UDP/ICMP
+// only, same scope as the plain summary this replaces - IPv6 is
+// identified but not decoded further.
+function dissectPacket(data) {
+  if (data.length < 14) {
+    return {
+      layers: [{ title: "Malformed frame", fields: [["Length", `${data.length} bytes`]] }],
+      summary: { src: "", dst: "", proto: "?", info: "Malformed frame" },
+    };
+  }
+  const dv = new DataView(data.buffer, data.byteOffset, data.length);
+  const dstMac = macStr(data, 0);
+  const srcMac = macStr(data, 6);
+  let ethertype = dv.getUint16(12, false);
+  let off = 14;
+  const ethFields = [["Destination", dstMac], ["Source", srcMac]];
+  if (ethertype === 0x8100 && data.length >= 18) {
+    // 802.1Q VLAN tag - real ethertype is 4 bytes further in.
+    ethFields.push(["802.1Q VLAN ID", `${dv.getUint16(14, false) & 0x0fff}`]);
+    ethertype = dv.getUint16(16, false);
+    off = 18;
+  }
+  ethFields.push(["Type", `0x${ethertype.toString(16).padStart(4, "0")}`]);
+  const layers = [{ title: `Ethernet II, Src: ${srcMac}, Dst: ${dstMac}`, fields: ethFields }];
+  const summary = { src: srcMac, dst: dstMac, proto: `0x${ethertype.toString(16)}`, info: "" };
+
+  if (ethertype === 0x0800 && data.length >= off + 20) {
+    const verIhl = data[off];
+    const ihl = (verIhl & 0x0f) * 4;
+    const totalLen = dv.getUint16(off + 2, false);
+    const ttl = data[off + 8];
+    const ipProto = data[off + 9];
+    const srcIp = ipStr(data, off + 12);
+    const dstIp = ipStr(data, off + 16);
+    layers.push({
+      title: `Internet Protocol Version 4, Src: ${srcIp}, Dst: ${dstIp}`,
+      fields: [
+        ["Version", `${verIhl >> 4}`],
+        ["Header Length", `${ihl} bytes`],
+        ["Total Length", `${totalLen}`],
+        ["Time to Live", `${ttl}`],
+        ["Protocol", `${protoName(ipProto)} (${ipProto})`],
+        ["Source", srcIp],
+        ["Destination", dstIp],
+      ],
+    });
+    summary.src = srcIp;
+    summary.dst = dstIp;
+    const l4 = off + ihl;
+    if (ipProto === 6 && data.length >= l4 + 20) {
+      const sport = dv.getUint16(l4, false);
+      const dport = dv.getUint16(l4 + 2, false);
+      const seq = dv.getUint32(l4 + 4, false);
+      const ack = dv.getUint32(l4 + 8, false);
+      const dataOffset = (data[l4 + 12] >> 4) * 4;
+      const flags = tcpFlagsStr(data[l4 + 13]);
+      const window = dv.getUint16(l4 + 14, false);
+      layers.push({
+        title: `Transmission Control Protocol, Src Port: ${sport}, Dst Port: ${dport}`,
+        fields: [
+          ["Source Port", `${sport}`],
+          ["Destination Port", `${dport}`],
+          ["Sequence Number", `${seq}`],
+          ["Acknowledgment Number", `${ack}`],
+          ["Header Length", `${dataOffset} bytes`],
+          ["Flags", flags || "-"],
+          ["Window Size", `${window}`],
+        ],
+      });
+      summary.proto = "TCP";
+      summary.info = `${sport} → ${dport} ${flags}`.trim();
+    } else if (ipProto === 17 && data.length >= l4 + 8) {
+      const sport = dv.getUint16(l4, false);
+      const dport = dv.getUint16(l4 + 2, false);
+      const len = dv.getUint16(l4 + 4, false);
+      layers.push({
+        title: `User Datagram Protocol, Src Port: ${sport}, Dst Port: ${dport}`,
+        fields: [["Source Port", `${sport}`], ["Destination Port", `${dport}`], ["Length", `${len}`]],
+      });
+      summary.proto = "UDP";
+      summary.info = `${sport} → ${dport}`;
+    } else if (ipProto === 1 && data.length >= l4 + 2) {
+      layers.push({
+        title: "Internet Control Message Protocol",
+        fields: [["Type", `${data[l4]}`], ["Code", `${data[l4 + 1]}`]],
+      });
+      summary.proto = "ICMP";
+      summary.info = `Type ${data[l4]}, Code ${data[l4 + 1]}`;
+    } else {
+      summary.proto = `IP proto ${ipProto}`;
+    }
+  } else if (ethertype === 0x0806 && data.length >= off + 28) {
+    const opcode = dv.getUint16(off + 6, false);
+    const senderMac = macStr(data, off + 8);
+    const senderIp = ipStr(data, off + 14);
+    const targetMac = macStr(data, off + 18);
+    const targetIp = ipStr(data, off + 24);
+    layers.push({
+      title: `Address Resolution Protocol (${opcode === 1 ? "request" : "reply"})`,
+      fields: [
+        ["Opcode", opcode === 1 ? "request (1)" : "reply (2)"],
+        ["Sender MAC", senderMac],
+        ["Sender IP", senderIp],
+        ["Target MAC", targetMac],
+        ["Target IP", targetIp],
+      ],
+    });
+    summary.src = senderMac;
+    summary.dst = targetMac;
+    summary.proto = "ARP";
+    summary.info = opcode === 1 ? `Who has ${targetIp}? Tell ${senderIp}` : `${senderIp} is at ${senderMac}`;
+  } else if (ethertype === 0x86dd) {
+    layers.push({ title: "Internet Protocol Version 6", fields: [["Note", "Not decoded further"]] });
+    summary.proto = "IPv6";
+  }
+  return { layers, summary };
+}
+
+function hexDump(data) {
+  const lines = [];
+  for (let i = 0; i < data.length; i += 16) {
+    const chunk = data.slice(i, i + 16);
+    const hex = Array.from(chunk).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    const ascii = Array.from(chunk).map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ".")).join("");
+    lines.push(`${i.toString(16).padStart(4, "0")}  ${hex.padEnd(47)}  ${ascii}`);
+  }
+  return lines.join("\n");
+}
+
+let captureViewerAbort = null;
+let capturedPackets = [];   // parallel to the visible rows - trimmed together, see appendCaptureRow
+let selectedPacketRow = null;
+
+function appendCaptureRow(num, timeOffset, data, dissected) {
+  const tbody = document.getElementById("capture-viewer-tbody");
+  const row = document.createElement("tr");
+  const { summary } = dissected;
+  const cells = [num, timeOffset, summary.src, summary.dst, summary.proto, data.length, summary.info];
+  cells.forEach((value, i) => {
+    const td = document.createElement("td");
+    td.textContent = value;
+    if (i === 4) td.className = `capture-proto-${summary.proto}`;
+    row.appendChild(td);
+  });
+  row.addEventListener("click", () => selectCaptureRow(row));
+  tbody.appendChild(row);
+  capturedPackets.push({ data, dissected });
+
+  // Unbounded growth would eventually make the tab unresponsive on a
+  // busy link left capturing for a while - keep only the most recent
+  // 1000 rows, same spirit as the Logs panel's own tail-based approach.
+  while (tbody.children.length > 1000) {
+    tbody.removeChild(tbody.firstChild);
+    capturedPackets.shift();
+  }
+
+  const wrap = document.getElementById("capture-viewer-table-wrap");
+  const nearBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 60;
+  if (nearBottom) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function selectCaptureRow(row) {
+  const tbody = document.getElementById("capture-viewer-tbody");
+  const index = Array.prototype.indexOf.call(tbody.children, row);
+  const packet = capturedPackets[index];
+  if (!packet) return;
+
+  document.querySelectorAll("#capture-viewer-tbody tr.selected").forEach((r) => r.classList.remove("selected"));
+  row.classList.add("selected");
+  selectedPacketRow = row;
+
+  const tree = document.getElementById("capture-viewer-detail-tree");
+  tree.innerHTML = "";
+  for (const layer of packet.dissected.layers) {
+    const details = document.createElement("details");
+    details.open = true;
+    const summaryEl = document.createElement("summary");
+    summaryEl.textContent = layer.title;
+    details.appendChild(summaryEl);
+    for (const [name, value] of layer.fields) {
+      const field = document.createElement("div");
+      field.className = "detail-field";
+      field.append(`${name}: `);
+      const span = document.createElement("span");
+      span.textContent = value;
+      field.appendChild(span);
+      details.appendChild(field);
+    }
+    tree.appendChild(details);
+  }
+
+  document.getElementById("capture-viewer-detail-hex").textContent = hexDump(packet.data);
+  document.getElementById("capture-viewer-detail-wrap").hidden = false;
+}
+
+async function openCaptureViewer(node1, if1, node2, if2) {
+  if (captureViewerAbort) captureViewerAbort.abort();
+  const overlay = document.getElementById("capture-viewer-overlay");
+  const status = document.getElementById("capture-viewer-status");
+  document.getElementById("capture-viewer-tbody").innerHTML = "";
+  document.getElementById("capture-viewer-detail-wrap").hidden = true;
+  capturedPackets = [];
+  selectedPacketRow = null;
+  document.getElementById("capture-viewer-title").textContent =
+    `${node1}:${if1 || "?"} ⇄ ${node2}:${if2 || "?"} — live capture`;
+  const streamPath = `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/stream`;
+  const wiresharkCmd = `curl -sN ${window.location.origin}${streamPath} | wireshark -k -i -`;
+  document.getElementById("capture-viewer-wireshark-command").value = wiresharkCmd;
+  document.getElementById("capture-viewer-wireshark-status").textContent = "";
+  status.textContent = "Connecting…";
+  overlay.hidden = false;
+
+  const controller = new AbortController();
+  captureViewerAbort = controller;
+
+  try {
+    const resp = await fetch(streamPath, { signal: controller.signal });
+    if (!resp.ok || !resp.body) {
+      status.textContent = `Failed to open capture stream: ${resp.status}`;
+      return;
+    }
+    status.textContent = "Live";
+    const reader = resp.body.getReader();
+    let packetNum = 0;
+    let firstTs = null;
+    const parser = new PcapStreamParser((tsSec, tsUsec, data) => {
+      const ts = tsSec + tsUsec / 1e6;
+      if (firstTs === null) firstTs = ts;
+      packetNum += 1;
+      appendCaptureRow(packetNum, (ts - firstTs).toFixed(6), data, dissectPacket(data));
+    });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.push(value);
+    }
+    status.textContent = "Stream ended";
+  } catch (err) {
+    if (err.name !== "AbortError") status.textContent = `Stream error: ${err}`;
+  }
+}
+
+document.getElementById("capture-viewer-copy-wireshark-btn").addEventListener("click", async () => {
+  const input = document.getElementById("capture-viewer-wireshark-command");
+  const status = document.getElementById("capture-viewer-wireshark-status");
+  // The command is always visible and selectable in the input above
+  // regardless of what happens here - clipboard write is best-effort
+  // only, not the only way to get it. navigator.clipboard needs a
+  // secure context (HTTPS or localhost); this app is commonly reached
+  // over plain HTTP on a LAN IP, where it's simply unavailable - that
+  // must degrade to an inline status message, never a popup (a popup
+  // here previously could appear *after* the user had already moved on
+  // and closed the capture viewer, since the clipboard rejection is
+  // asynchronous - confusing, looked like a stray, unrelated dialog).
+  try {
+    await navigator.clipboard.writeText(input.value);
+    status.textContent = "Copied!";
+  } catch (err) {
+    input.select();
+    status.textContent = "Clipboard unavailable - selected for you, press Ctrl/Cmd+C";
+  }
+  setTimeout(() => { status.textContent = ""; }, 3000);
+});
+
+function closeCaptureViewer() {
+  if (captureViewerAbort) {
+    captureViewerAbort.abort();
+    captureViewerAbort = null;
+  }
+  document.getElementById("capture-viewer-overlay").hidden = true;
+}
+
+document.getElementById("capture-viewer-close-btn").addEventListener("click", closeCaptureViewer);
+document.getElementById("capture-viewer-clear-btn").addEventListener("click", () => {
+  document.getElementById("capture-viewer-tbody").innerHTML = "";
+  document.getElementById("capture-viewer-detail-wrap").hidden = true;
+  capturedPackets = [];
+  selectedPacketRow = null;
 });
 
 function exitLinkMode() {
