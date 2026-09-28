@@ -92,6 +92,14 @@ esxi:
   # Must be the OVA's first-added network adapter; trunk_port_group
   # above is reused for the second (trunk) NIC.
   # gns3_vm_mgmt_network: PG-MGMT
+  # [start_mac, end_mac] - if set, a freshly deployed GNS3 VM's
+  # management NIC gets a MAC address from this inclusive range instead
+  # of inheriting the old VM's own MAC, e.g. so a DHCP server can be
+  # configured to only hand out IP addresses to MACs in this range. If
+  # the old VM's own MAC already falls in the range, it's kept as-is
+  # (preserves the same DHCP-leased IP across a redeploy). Unset (the
+  # default) leaves the MAC exactly as before this setting existed.
+  # gns3_vm_mac_range: ["00:50:56:00:10:00", "00:50:56:00:1f:ff"]
   # ESXi datastore to place a freshly deployed GNS3 VM on - reuses the
   # same datastore setting TopologyBuilder's own node deploys use.
   # Unset auto-picks whichever datastore has the most free space.

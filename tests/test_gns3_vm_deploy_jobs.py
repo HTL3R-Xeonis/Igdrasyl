@@ -20,12 +20,14 @@ def _reset_gns3_vm_settings():
         Settings.ESXI.GNS3_VM_OVA_PATH,
         Settings.ESXI.GNS3_VM_MGMT_NETWORK,
         Settings.ESXI.DATASTORE,
+        Settings.ESXI.GNS3_VM_MAC_RANGE,
     )
     yield
     (
         Settings.ESXI.GNS3_VM_OVA_PATH,
         Settings.ESXI.GNS3_VM_MGMT_NETWORK,
         Settings.ESXI.DATASTORE,
+        Settings.ESXI.GNS3_VM_MAC_RANGE,
     ) = original
 
 
@@ -101,6 +103,25 @@ def test_run_deploy_job_forwards_delete_old_vm(app_state):
         gns3_vm_deploy_jobs.run_deploy_job(app, job, delete_old_vm=True)
 
     assert fake_deploy.call_args.kwargs["delete_old_vm"] is True
+
+
+def test_run_deploy_job_forwards_mac_range_from_settings(app_state):
+    Settings.ESXI.GNS3_VM_OVA_PATH = "/mnt/nfs/gns3.ova"
+    Settings.ESXI.GNS3_VM_MGMT_NETWORK = "PG-MGMT"
+    Settings.ESXI.DATASTORE = "datastore1"
+    Settings.ESXI.GNS3_VM_MAC_RANGE = ("00:50:56:00:10:00", "00:50:56:00:10:ff")
+    app = _fake_app(app_state)
+    job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
+
+    with patch(
+        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+        gns3_vm_deploy_jobs.run_deploy_job(app, job)
+
+    assert fake_deploy.call_args.kwargs["mac_range"] == (
+        "00:50:56:00:10:00",
+        "00:50:56:00:10:ff",
+    )
 
 
 def test_start_job_forwards_delete_old_vm_to_run_deploy_job(app_state):
@@ -239,6 +260,25 @@ def test_auto_deploy_if_missing_deploys_when_configured_and_truly_absent(app_sta
     assert args[3] == "datastore1"
     assert args[4] == "PG-MGMT"
     assert args[5] == Settings.ESXI.TRUNK_PORT_GROUP
+
+
+def test_auto_deploy_if_missing_forwards_mac_range_from_settings(app_state):
+    Settings.ESXI.GNS3_VM_OVA_PATH = "/mnt/nfs/gns3.ova"
+    Settings.ESXI.GNS3_VM_MGMT_NETWORK = "PG-MGMT"
+    Settings.ESXI.DATASTORE = "datastore1"
+    Settings.ESXI.GNS3_VM_MAC_RANGE = ("00:50:56:00:10:00", "00:50:56:00:10:ff")
+    app = _fake_app(app_state)
+    app_state.esxi_connection.get_vm.return_value = None
+
+    with patch(
+        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+    ) as fake_deploy:
+        gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
+
+    assert fake_deploy.call_args.kwargs["mac_range"] == (
+        "00:50:56:00:10:00",
+        "00:50:56:00:10:ff",
+    )
 
 
 def test_auto_deploy_if_missing_propagates_deploy_failures(app_state):

@@ -93,6 +93,7 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
         datastore_name,
         Settings.ESXI.GNS3_VM_MGMT_NETWORK,
         Settings.ESXI.TRUNK_PORT_GROUP,
+        mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
     )
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
@@ -112,6 +113,7 @@ def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = Fal
             Settings.ESXI.TRUNK_PORT_GROUP,
             on_stage=lambda stage: setattr(job, "stage", stage),
             delete_old_vm=delete_old_vm,
+            mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
         )
         job.ip_address = ip_address
         app.state.gns3_vm_ip = ip_address
