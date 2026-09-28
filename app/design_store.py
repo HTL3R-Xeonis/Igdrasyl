@@ -41,7 +41,9 @@ def load() -> design.DesignState | None:
         with open(path) as f:
             return design.from_dict(json.load(f))
     except (OSError, ValueError, KeyError) as exc:
-        logger.warning(f"Couldn't parse saved design sketch at {path}, ignoring it: {exc}")
+        logger.warning(
+            f"Couldn't parse saved design sketch at {path}, ignoring it: {exc}"
+        )
         return None
 
 

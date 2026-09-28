@@ -108,5 +108,7 @@ def run_command_in_guest(
         return None, f"{type(exc).__name__}: {exc}"
 
     exit_code = wait_for_guest_process(process_manager, vm, auth, pid)
-    output = "timed out waiting for exit" if exit_code is None else f"exit code {exit_code}"
+    output = (
+        "timed out waiting for exit" if exit_code is None else f"exit code {exit_code}"
+    )
     return exit_code, output

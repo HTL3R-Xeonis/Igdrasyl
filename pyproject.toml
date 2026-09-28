@@ -34,3 +34,22 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+ignore = [
+    # Broad `except Exception` (often with a bare `pass`) is a real,
+    # deliberate, pervasive pattern throughout this codebase for
+    # best-effort/non-critical paths (e.g. a stale-project-id refresh
+    # that's fine to skip on any failure, cleanup code that shouldn't
+    # ever block the main flow) - each one is commented explaining why
+    # at its call site. Flagging all ~20 of them isn't catching bugs,
+    # just noise against an intentional convention.
+    "BLE001", # blind-except
+    "S110",   # try-except-pass
+    # Nested `with` blocks (e.g. `with patch(...): with pytest.raises(...):`)
+    # are a common, defensible test-readability idiom throughout
+    # tests/ - ruff can't auto-fix these safely (no fix available even
+    # with --unsafe-fixes), and hand-rewriting ~16 call sites for a
+    # pure style preference isn't worth the churn.
+    "SIM117", # multiple-with-statements
+]

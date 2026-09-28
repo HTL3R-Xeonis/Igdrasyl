@@ -63,8 +63,12 @@ def add_node(state: DesignState, name: str, role: str, image: str) -> None:
         raise ValueError(f"a node named '{name}' already exists")
     environment = Environment.get_environment(image)
     if environment == Environment.ON_NOTHING:
-        raise ValueError(f"unknown image '{image}' - not a valid GNS3 or ESXi template name")
-    state.nodes[name] = DesignNode(name=name, role=role, image=image, environment=environment.name)
+        raise ValueError(
+            f"unknown image '{image}' - not a valid GNS3 or ESXi template name"
+        )
+    state.nodes[name] = DesignNode(
+        name=name, role=role, image=image, environment=environment.name
+    )
 
 
 def remove_node(state: DesignState, name: str) -> None:
@@ -208,7 +212,7 @@ class _NodeView:
     get_neighbour() of its own to call directly.
     """
 
-    __slots__ = ("name", "interfaces", "_state")
+    __slots__ = ("_state", "interfaces", "name")
 
     def __init__(self, node: DesignNode, state: DesignState) -> None:
         self.name = node.name

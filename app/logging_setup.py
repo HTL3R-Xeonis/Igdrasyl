@@ -19,7 +19,6 @@ from __future__ import annotations
 import sys
 
 from loguru import logger
-
 from src.settings import Settings
 
 _FILE_FORMAT = (
@@ -37,5 +36,7 @@ _PRINT_FORMAT = (
 
 def configure_logging() -> None:
     logger.remove()
-    logger.add(Settings.LOG_FILE_PATH, format=_FILE_FORMAT, level="INFO", rotation="10MB")
+    logger.add(
+        Settings.LOG_FILE_PATH, format=_FILE_FORMAT, level="INFO", rotation="10MB"
+    )
     logger.add(sys.stdout, format=_PRINT_FORMAT)

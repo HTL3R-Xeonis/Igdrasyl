@@ -24,7 +24,6 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 from loguru import logger
-
 from src.gns3_vm_deploy import deploy_fresh_gns3_vm
 from src.settings import Settings
 
@@ -98,7 +97,9 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
 
-def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = False) -> None:
+def run_deploy_job(
+    app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = False
+) -> None:
     try:
         datastore_name = Settings.ESXI.DATASTORE
         if datastore_name is None:
@@ -124,7 +125,9 @@ def run_deploy_job(app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = Fal
         # until something gets deployed to it, so this is best-effort
         # and commonly stays None right after this job finishes.
         try:
-            app.state.project_id = resolve_project_id(ip_address, app.state.project_name)
+            app.state.project_id = resolve_project_id(
+                ip_address, app.state.project_name
+            )
             if app.state.project_id is not None:
                 app.state.startup_warning = None
         except Exception:

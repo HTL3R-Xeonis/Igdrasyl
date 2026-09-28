@@ -2,9 +2,9 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from src.settings import Settings
 
 from app import gns3_vm_deploy_jobs
-from src.settings import Settings
 
 
 def _fake_app(app_state):
@@ -71,10 +71,11 @@ def test_run_deploy_job_marks_done_and_updates_app_state(app_state):
     app = _fake_app(app_state)
     job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ) as fake_deploy, patch(
-        "app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ) as fake_deploy,
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
     ):
         gns3_vm_deploy_jobs.run_deploy_job(app, job)
 
@@ -97,9 +98,12 @@ def test_run_deploy_job_forwards_delete_old_vm(app_state):
     app = _fake_app(app_state)
     job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ) as fake_deploy,
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
+    ):
         gns3_vm_deploy_jobs.run_deploy_job(app, job, delete_old_vm=True)
 
     assert fake_deploy.call_args.kwargs["delete_old_vm"] is True
@@ -113,9 +117,12 @@ def test_run_deploy_job_forwards_mac_range_from_settings(app_state):
     app = _fake_app(app_state)
     job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ) as fake_deploy,
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
+    ):
         gns3_vm_deploy_jobs.run_deploy_job(app, job)
 
     assert fake_deploy.call_args.kwargs["mac_range"] == (
@@ -130,9 +137,12 @@ def test_start_job_forwards_delete_old_vm_to_run_deploy_job(app_state):
     Settings.ESXI.DATASTORE = "datastore1"
     app = _fake_app(app_state)
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ) as fake_deploy,
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
+    ):
         job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=True)
         deadline = time.monotonic() + 2
         while job.status == "running" and time.monotonic() < deadline:
@@ -152,9 +162,12 @@ def test_run_deploy_job_auto_picks_biggest_datastore_when_unset(app_state):
     biggest.name = "auto-picked-datastore"
     app_state.esxi_connection.find_biggest_datastore.return_value = biggest
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ) as fake_deploy, patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ) as fake_deploy,
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
+    ):
         gns3_vm_deploy_jobs.run_deploy_job(app, job)
 
     args, _ = fake_deploy.call_args
@@ -189,8 +202,9 @@ def test_run_deploy_job_reports_stages_via_on_stage(app_state):
         kwargs["on_stage"]("importing OVA")
         return "10.20.20.233"
 
-    with patch("app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", side_effect=fake_deploy), patch(
-        "app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None
+    with (
+        patch("app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", side_effect=fake_deploy),
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
     ):
         gns3_vm_deploy_jobs.run_deploy_job(app, job)
 
@@ -203,9 +217,12 @@ def test_start_job_runs_in_the_background_and_completes(app_state):
     Settings.ESXI.DATASTORE = "datastore1"
     app = _fake_app(app_state)
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
-    ), patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None):
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm", return_value="10.20.20.233"
+        ),
+        patch("app.gns3_vm_deploy_jobs.resolve_project_id", return_value=None),
+    ):
         job = gns3_vm_deploy_jobs.start_job(app)
 
         deadline = time.monotonic() + 2
@@ -232,7 +249,9 @@ def test_auto_deploy_if_missing_is_a_noop_when_vm_already_exists(app_state):
     Settings.ESXI.GNS3_VM_OVA_PATH = "/mnt/nfs/gns3.ova"
     Settings.ESXI.GNS3_VM_MGMT_NETWORK = "PG-MGMT"
     app = _fake_app(app_state)
-    app_state.esxi_connection.get_vm.return_value = MagicMock()  # exists, even with no IP yet
+    app_state.esxi_connection.get_vm.return_value = (
+        MagicMock()
+    )  # exists, even with no IP yet
 
     with patch("app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm") as fake_deploy:
         gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
@@ -288,9 +307,11 @@ def test_auto_deploy_if_missing_propagates_deploy_failures(app_state):
     app = _fake_app(app_state)
     app_state.esxi_connection.get_vm.return_value = None
 
-    with patch(
-        "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm",
-        side_effect=TimeoutError("no IP reported"),
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.deploy_fresh_gns3_vm",
+            side_effect=TimeoutError("no IP reported"),
+        ),
+        pytest.raises(TimeoutError),
     ):
-        with pytest.raises(TimeoutError):
-            gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
+        gns3_vm_deploy_jobs.auto_deploy_if_missing(app)

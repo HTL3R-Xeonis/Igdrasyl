@@ -25,16 +25,14 @@ async def run(url: str) -> int:
 
     print(f"Connecting to {url} ...")
     try:
-        async with websockets.connect(
-            url, ssl=ssl_context, open_timeout=10
-        ) as ws:
+        async with websockets.connect(url, ssl=ssl_context, open_timeout=10) as ws:
             print("WebSocket handshake succeeded.")
             print(f"  Subprotocol negotiated: {ws.subprotocol}")
             print("Waiting up to 5s for the server to send anything...")
             try:
                 data = await asyncio.wait_for(ws.recv(), timeout=5)
                 print(f"  Received {len(data)} byte(s): {data[:64]!r}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 print("  Nothing received in 5s (connection stayed open though).")
         return 0
     except Exception as exc:

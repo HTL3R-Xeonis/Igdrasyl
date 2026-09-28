@@ -13,7 +13,6 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from app import generate_jobs
@@ -61,7 +60,11 @@ def test_load_generated_topology_gives_every_node_a_distinct_position():
     # the click-to-place flow every other node creation path uses) and
     # rendered as one fully overlapping stack of icons.
     nodes = [
-        {"names": ["R1", "R2", "R3", "R4"], "role": "ROUTER", "image": "Cisco IOSv 15.6(1)T"},
+        {
+            "names": ["R1", "R2", "R3", "R4"],
+            "role": "ROUTER",
+            "image": "Cisco IOSv 15.6(1)T",
+        },
     ]
     state = generate_jobs._load_generated_topology(nodes, [])
 
@@ -105,7 +108,12 @@ def test_run_generate_job_retries_when_api_reports_invalid(app_state):
 def test_run_generate_job_retries_when_local_validation_fails(app_state):
     app = _fake_app(app_state)
     job = generate_jobs.GenerateJob(id="job-1", max_attempts=3)
-    bad_yaml = yaml.safe_dump({"nodes": [{"names": ["R1"], "role": "ROUTER", "image": "not-a-real-image"}], "edges": []})
+    bad_yaml = yaml.safe_dump(
+        {
+            "nodes": [{"names": ["R1"], "role": "ROUTER", "image": "not-a-real-image"}],
+            "edges": [],
+        }
+    )
     responses = [
         {"valid": True, "yaml": bad_yaml, "warnings": []},
         _valid_result(),

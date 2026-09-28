@@ -31,12 +31,12 @@ def _live_nodes(**overrides):
 def test_echo_round_trip_through_real_tcp_server(client, app_state, fake_tcp_server):
     port = fake_tcp_server(_echo)
     app_state.project_id = "proj-1"
-    with patch(
-        "app.console.list_live_nodes", return_value=_live_nodes(console=port)
+    with (
+        patch("app.console.list_live_nodes", return_value=_live_nodes(console=port)),
+        client.websocket_connect("/ws/console/R1") as ws,
     ):
-        with client.websocket_connect("/ws/console/R1") as ws:
-            ws.send_bytes(b"hello console")
-            assert ws.receive_bytes() == b"hello console"
+        ws.send_bytes(b"hello console")
+        assert ws.receive_bytes() == b"hello console"
 
 
 def test_unknown_node_closes_with_1008(client, app_state):
@@ -50,13 +50,15 @@ def test_unknown_node_closes_with_1008(client, app_state):
 
 def test_unsupported_console_type_closes_with_1003(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.console.list_live_nodes",
-        return_value=_live_nodes(console_type="vnc"),
+    with (
+        patch(
+            "app.console.list_live_nodes",
+            return_value=_live_nodes(console_type="vnc"),
+        ),
+        pytest.raises(WebSocketDisconnect) as exc_info,
     ):
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect("/ws/console/R1") as ws:
-                ws.receive_bytes()
+        with client.websocket_connect("/ws/console/R1") as ws:
+            ws.receive_bytes()
     assert exc_info.value.code == 1003
 
 
@@ -73,22 +75,24 @@ def test_no_live_project_closes_with_1013(client, app_state):
     from app.gns3_state import NoLiveProject
 
     app_state.project_id = None
-    with patch(
-        "app.console.list_live_nodes",
-        side_effect=NoLiveProject("nothing deployed"),
+    with (
+        patch(
+            "app.console.list_live_nodes",
+            side_effect=NoLiveProject("nothing deployed"),
+        ),
+        pytest.raises(WebSocketDisconnect) as exc_info,
     ):
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect("/ws/console/R1") as ws:
-                ws.receive_bytes()
+        with client.websocket_connect("/ws/console/R1") as ws:
+            ws.receive_bytes()
     assert exc_info.value.code == 1013
 
 
 def test_unreachable_console_closes_with_1011(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.console.list_live_nodes", return_value=_live_nodes(console=1)
+    with (
+        patch("app.console.list_live_nodes", return_value=_live_nodes(console=1)),
+        pytest.raises(WebSocketDisconnect) as exc_info,
     ):
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect("/ws/console/R1") as ws:
-                ws.receive_bytes()
+        with client.websocket_connect("/ws/console/R1") as ws:
+            ws.receive_bytes()
     assert exc_info.value.code == 1011

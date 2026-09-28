@@ -84,13 +84,15 @@ def test_upstream_connect_failure_closes_with_1011(client, app_state):
     vm.AcquireTicket.return_value = _make_ticket("10.20.20.202", 443)
     app_state.esxi_connection.get_vm.return_value = vm
 
-    with patch(
-        "app.vm_screen.websockets.connect",
-        new=AsyncMock(side_effect=OSError("connection refused")),
+    with (
+        patch(
+            "app.vm_screen.websockets.connect",
+            new=AsyncMock(side_effect=OSError("connection refused")),
+        ),
+        pytest.raises(WebSocketDisconnect) as exc_info,
     ):
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect("/ws/vm-screen/VM1") as ws:
-                ws.receive_bytes()
+        with client.websocket_connect("/ws/vm-screen/VM1") as ws:
+            ws.receive_bytes()
     assert exc_info.value.code == 1011
 
 

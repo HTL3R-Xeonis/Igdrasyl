@@ -77,8 +77,13 @@ def _preview(path: Path) -> dict[str, Any]:
 def list_profiles() -> list[dict[str, Any]]:
     active_name = _active_settings_name()
     profiles = []
-    for path in sorted(_profiles_dir().glob("*.yml")) + sorted(_profiles_dir().glob("*.yaml")):
-        entry: dict[str, Any] = {"filename": path.name, "active": path.name == active_name}
+    for path in sorted(_profiles_dir().glob("*.yml")) + sorted(
+        _profiles_dir().glob("*.yaml")
+    ):
+        entry: dict[str, Any] = {
+            "filename": path.name,
+            "active": path.name == active_name,
+        }
         entry.update(_preview(path))
         profiles.append(entry)
     return profiles
@@ -132,4 +137,6 @@ def restart_into_profile(filename: str) -> None:
     :raises InvalidProfileName: unsafe filename. :raises FileNotFoundError: no such profile.
     """
     path = profile_path(filename)
-    threading.Timer(_RESTART_DELAY_SECONDS, _restart_with_settings, args=(str(path),)).start()
+    threading.Timer(
+        _RESTART_DELAY_SECONDS, _restart_with_settings, args=(str(path),)
+    ).start()

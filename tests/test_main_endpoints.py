@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import requests
 import yaml
-
 from src.settings import Settings
 
 from app.config_push import DeviceResult
@@ -106,7 +105,9 @@ def test_deploy_gns3_vm_defaults_to_keeping_the_old_vm(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
-    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job) as fake_start:
+    with patch(
+        "app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job
+    ) as fake_start:
         resp = client.post("/gns3-vm/deploy")
     assert resp.status_code == 200
     assert fake_start.call_args.kwargs == {"delete_old_vm": False}
@@ -116,7 +117,9 @@ def test_deploy_gns3_vm_forwards_delete_old_vm(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
-    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job) as fake_start:
+    with patch(
+        "app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job
+    ) as fake_start:
         resp = client.post("/gns3-vm/deploy", json={"delete_old_vm": True})
     assert resp.status_code == 200
     assert fake_start.call_args.kwargs == {"delete_old_vm": True}
@@ -143,7 +146,10 @@ def test_gns3_vm_deploy_status_reports_done_with_ip(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     app_state.gns3_vm_deploy_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(
-        id="job-1", status="done", stage="waiting for an IP address", ip_address="10.20.20.233"
+        id="job-1",
+        status="done",
+        stage="waiting for an IP address",
+        ip_address="10.20.20.233",
     )
     resp = client.get("/gns3-vm/deploy/job-1")
     assert resp.status_code == 200
@@ -202,8 +208,9 @@ def test_node_ports_returns_real_interfaces_for_gns3_node(client, app_state):
             "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
         }
     ]
-    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live), patch(
-        "app.gns3_state.GNS3Connection.list_project_links", return_value=[]
+    with (
+        patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live),
+        patch("app.gns3_state.GNS3Connection.list_project_links", return_value=[]),
     ):
         resp = client.get("/nodes/R1/ports")
     assert resp.status_code == 200
@@ -276,7 +283,9 @@ def test_nodes_esxi_status_ignores_a_stale_gns3_cloud_node_entry(client, app_sta
     assert by_name["VM1"]["gns3_node_id"] == "cloud-1"
 
 
-def test_layout_get_returns_a_position_for_every_node(client, app_state, tmp_path, monkeypatch):
+def test_layout_get_returns_a_position_for_every_node(
+    client, app_state, tmp_path, monkeypatch
+):
     monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     resp = client.get("/layout")
     assert resp.status_code == 200
@@ -306,7 +315,15 @@ def test_drawings_get_reflects_current_state(client, app_state):
 
 
 def test_drawings_post_then_get_round_trips(client, app_state):
-    drawing = {"id": 1, "type": "rect", "x1": 0, "y1": 0, "x2": 100, "y2": 50, "stroke": "#7cb342"}
+    drawing = {
+        "id": 1,
+        "type": "rect",
+        "x1": 0,
+        "y1": 0,
+        "x2": 100,
+        "y2": 50,
+        "stroke": "#7cb342",
+    }
     resp = client.post("/drawings", json={"drawings": [drawing]})
     assert resp.status_code == 200
 
@@ -351,7 +368,12 @@ def test_export_project_returns_zip_with_attachment_header(
     assert resp.headers["content-type"] == "application/zip"
     assert ".topoproj" in resp.headers["content-disposition"]
     assert set(zipfile.ZipFile(io.BytesIO(resp.content)).namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json", "layout.json",
+        "manifest.json",
+        "topology.yaml",
+        "settings.yml",
+        "configs.json",
+        "drawings.json",
+        "layout.json",
     }
 
 
@@ -403,10 +425,14 @@ def test_import_project_happy_path_returns_manifest_and_configs(
     assert result["manifest"]["format_version"] == 1
 
 
-def test_import_project_does_not_auto_push_by_default(client, app_state, temp_topology_file):
+def test_import_project_does_not_auto_push_by_default(
+    client, app_state, temp_topology_file
+):
     fake = MagicMock()
     app_state.topology_backend = fake
-    bundle = _valid_bundle(temp_topology_file.read_text(), configs={"R1": ["show version"]})
+    bundle = _valid_bundle(
+        temp_topology_file.read_text(), configs={"R1": ["show version"]}
+    )
 
     with patch("app.config_push.push_all") as fake_push_all:
         resp = client.post(
@@ -448,7 +474,15 @@ def test_import_project_auto_pushes_when_the_bundle_enables_it(
 
     assert result["status"] == "done"
     assert fake_push_all.call_args[0][0] == {"R1": ["show version"]}
-    assert result["push_results"] == [{"device": "R1", "transport": "netmiko", "ok": True, "commands": [], "error": None}]
+    assert result["push_results"] == [
+        {
+            "device": "R1",
+            "transport": "netmiko",
+            "ok": True,
+            "commands": [],
+            "error": None,
+        }
+    ]
     assert app_state.last_config_push == {"R1": ["show version"]}
 
 
@@ -495,7 +529,9 @@ def test_import_project_restores_bundled_node_positions(
     assert "GHOST" not in layout
 
 
-def test_import_project_bad_bundle_maps_to_error_status(client, app_state, temp_topology_file):
+def test_import_project_bad_bundle_maps_to_error_status(
+    client, app_state, temp_topology_file
+):
     resp = client.post(
         "/project/import",
         files={"file": ("bundle.topoproj", b"not a zip", "application/zip")},
@@ -506,7 +542,9 @@ def test_import_project_bad_bundle_maps_to_error_status(client, app_state, temp_
     assert result["error_kind"] == "bad_bundle"
 
 
-def test_import_project_deploy_failure_maps_to_error_status(client, app_state, temp_topology_file):
+def test_import_project_deploy_failure_maps_to_error_status(
+    client, app_state, temp_topology_file
+):
     fake = MagicMock()
     fake.deploy_topology.side_effect = RuntimeError("deploy failed")
     app_state.topology_backend = fake
@@ -526,12 +564,18 @@ def test_import_job_status_404s_for_unknown_job(client, app_state):
     assert resp.status_code == 404
 
 
-def test_settings_profiles_upload_list_and_delete_round_trip(client, app_state, tmp_path, monkeypatch):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+def test_settings_profiles_upload_list_and_delete_round_trip(
+    client, app_state, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
 
     resp = client.post(
         "/settings-profiles",
-        files={"file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")},
+        files={
+            "file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")
+        },
     )
     assert resp.status_code == 200, resp.text
 
@@ -545,8 +589,12 @@ def test_settings_profiles_upload_list_and_delete_round_trip(client, app_state, 
     assert client.get("/settings-profiles").json() == []
 
 
-def test_settings_profiles_upload_rejects_invalid_yaml(client, app_state, tmp_path, monkeypatch):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+def test_settings_profiles_upload_rejects_invalid_yaml(
+    client, app_state, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
 
     resp = client.post(
         "/settings-profiles",
@@ -555,17 +603,27 @@ def test_settings_profiles_upload_rejects_invalid_yaml(client, app_state, tmp_pa
     assert resp.status_code == 400
 
 
-def test_settings_profiles_delete_404s_for_unknown_file(client, app_state, tmp_path, monkeypatch):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+def test_settings_profiles_delete_404s_for_unknown_file(
+    client, app_state, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
     resp = client.delete("/settings-profiles/nope.yml")
     assert resp.status_code == 404
 
 
-def test_settings_profiles_activate_triggers_a_restart(client, app_state, tmp_path, monkeypatch):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+def test_settings_profiles_activate_triggers_a_restart(
+    client, app_state, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
     client.post(
         "/settings-profiles",
-        files={"file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")},
+        files={
+            "file": ("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n", "application/x-yaml")
+        },
     )
 
     with patch("app.settings_profiles._restart_with_settings") as fake_restart:
@@ -578,8 +636,12 @@ def test_settings_profiles_activate_triggers_a_restart(client, app_state, tmp_pa
     assert fake_restart.call_args[0][0].endswith("host-a.yml")
 
 
-def test_settings_profiles_activate_404s_for_unknown_file(client, app_state, tmp_path, monkeypatch):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles"))
+def test_settings_profiles_activate_404s_for_unknown_file(
+    client, app_state, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
     resp = client.post("/settings-profiles/nope.yml/activate")
     assert resp.status_code == 404
 
@@ -594,7 +656,9 @@ def test_generate_design_returns_job_id(client, app_state):
 
     fake_job = generate_jobs.GenerateJob(id="job-1", max_attempts=4)
     with patch("app.main.generate_jobs.start_job", return_value=fake_job):
-        resp = client.post("/design/generate", json={"prompt": "a small office network"})
+        resp = client.post(
+            "/design/generate", json={"prompt": "a small office network"}
+        )
     assert resp.status_code == 200
     assert resp.json() == {"job_id": "job-1"}
 
@@ -615,7 +679,10 @@ def test_generate_design_status_reports_running_attempt(client, app_state):
     resp = client.get("/design/generate/job-1")
     assert resp.status_code == 200
     assert resp.json() == {
-        "status": "running", "attempt": 2, "max_attempts": 4, "warnings": ["hmm"],
+        "status": "running",
+        "attempt": 2,
+        "max_attempts": 4,
+        "warnings": ["hmm"],
     }
 
 
@@ -636,7 +703,10 @@ def test_nodes_503s_when_graph_failed_to_load(client, app_state):
 def test_layout_get_and_post_503_when_graph_failed_to_load(client, app_state):
     app_state.graph = None
     assert client.get("/layout").status_code == 503
-    assert client.post("/layout", json={"name": "R1", "x": 1.0, "y": 2.0}).status_code == 503
+    assert (
+        client.post("/layout", json={"name": "R1", "x": 1.0, "y": 2.0}).status_code
+        == 503
+    )
 
 
 def test_design_endpoints_still_work_when_graph_failed_to_load(client, app_state):
@@ -644,7 +714,9 @@ def test_design_endpoints_still_work_when_graph_failed_to_load(client, app_state
     app_state.graph = None
     app_state.startup_warning = "template service unreachable"
 
-    resp = client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"})
+    resp = client.post(
+        "/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"}
+    )
     assert resp.status_code == 200, resp.text
     assert client.get("/design/topology").status_code == 200
 
@@ -653,9 +725,11 @@ def test_reload_endpoint_recovers_after_a_transient_failure(client, app_state):
     app_state.graph = None
     app_state.startup_warning = "boom"
 
-    with patch("app.main.load_graph") as fake_load_graph, patch(
-        "app.main.resolve_project_id", return_value=None
-    ), patch("app.main.gns3_vm_deploy_jobs.auto_deploy_if_missing"):
+    with (
+        patch("app.main.load_graph") as fake_load_graph,
+        patch("app.main.resolve_project_id", return_value=None),
+        patch("app.main.gns3_vm_deploy_jobs.auto_deploy_if_missing"),
+    ):
         fake_load_graph.return_value = MagicMock(nodes={})
         resp = client.post("/reload")
 
@@ -685,13 +759,23 @@ def test_link_capture_start_stop_and_stream(client, app_state):
             ],
         }
     ]
-    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=live_nodes), patch(
-        "app.capture.GNS3Connection.list_project_links", return_value=live_links
-    ), patch("app.capture.GNS3Connection.ensure_project_open"):
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes", return_value=live_nodes
+        ),
+        patch("app.capture.GNS3Connection.list_project_links", return_value=live_links),
+        patch("app.capture.GNS3Connection.ensure_project_open"),
+    ):
         resp = client.get("/links")
         assert resp.status_code == 200
         assert resp.json() == [
-            {"node1": "R1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet0", "capturing": False}
+            {
+                "node1": "R1",
+                "if1": "eth0",
+                "node2": "SW1",
+                "if2": "Ethernet0",
+                "capturing": False,
+            }
         ]
 
         with patch("app.capture.GNS3Connection.post", return_value={"capturing": True}):
@@ -723,7 +807,11 @@ def test_generate_design_status_reports_error(client, app_state):
 
     app_state.generate_jobs = {
         "job-1": generate_jobs.GenerateJob(
-            id="job-1", status="error", attempt=4, max_attempts=4, error="no valid topology"
+            id="job-1",
+            status="error",
+            attempt=4,
+            max_attempts=4,
+            error="no valid topology",
         )
     }
     resp = client.get("/design/generate/job-1")

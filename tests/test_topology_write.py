@@ -53,7 +53,9 @@ class _FakeBackend:
         self._write(topology_file, data)
 
 
-def test_add_node_calls_backend_and_reloads_graph(client, app_state, temp_topology_file):
+def test_add_node_calls_backend_and_reloads_graph(
+    client, app_state, temp_topology_file
+):
     fake = _FakeBackend()
     app_state.topology_backend = fake
 
@@ -87,7 +89,9 @@ def test_add_node_runtime_error_maps_to_502(client, app_state, temp_topology_fil
     assert resp.status_code == 502
 
 
-def test_remove_node_calls_backend_and_reloads_graph(client, app_state, temp_topology_file):
+def test_remove_node_calls_backend_and_reloads_graph(
+    client, app_state, temp_topology_file
+):
     fake = _FakeBackend()
     app_state.topology_backend = fake
 
@@ -119,12 +123,15 @@ def test_remove_node_runtime_error_maps_to_502(client, app_state, temp_topology_
     assert resp.status_code == 502
 
 
-def test_add_link_calls_backend_and_reloads_graph(client, app_state, temp_topology_file):
+def test_add_link_calls_backend_and_reloads_graph(
+    client, app_state, temp_topology_file
+):
     fake = _FakeBackend()
     app_state.topology_backend = fake
 
     resp = client.post(
-        "/links", json={"node1": "VM1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet1"}
+        "/links",
+        json={"node1": "VM1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet1"},
     )
 
     assert resp.status_code == 200, resp.text
@@ -152,13 +159,16 @@ def test_add_link_runtime_error_maps_to_502(client, app_state, temp_topology_fil
     app_state.topology_backend = fake
 
     resp = client.post(
-        "/links", json={"node1": "VM1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet1"}
+        "/links",
+        json={"node1": "VM1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet1"},
     )
 
     assert resp.status_code == 502
 
 
-def test_remove_link_calls_backend_and_reloads_graph(client, app_state, temp_topology_file):
+def test_remove_link_calls_backend_and_reloads_graph(
+    client, app_state, temp_topology_file
+):
     fake = _FakeBackend()
     app_state.topology_backend = fake
 
@@ -180,19 +190,21 @@ def test_remove_link_runtime_error_maps_to_502(client, app_state, temp_topology_
 
 
 def test_templates_returns_gns3_and_esxi_names(client, app_state):
-    with patch(
-        "app.topology_write.APIHandler.get_gns3_template_names",
-        return_value={"VPCS", "Cisco IOSv 15.6(1)T"},
-    ), patch(
-        "app.topology_write.APIHandler.get_esxi_template_names",
-        return_value={"debian", "pfSense"},
-    ), patch(
-        "app.topology_write._fetch_gns3_templates", return_value=[]
-    ), patch(
-        "app.topology_write._gns3_template_categories",
-        return_value={"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
-    ), patch(
-        "app.topology_write._gns3_template_port_specs", return_value={}
+    with (
+        patch(
+            "app.topology_write.APIHandler.get_gns3_template_names",
+            return_value={"VPCS", "Cisco IOSv 15.6(1)T"},
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_esxi_template_names",
+            return_value={"debian", "pfSense"},
+        ),
+        patch("app.topology_write._fetch_gns3_templates", return_value=[]),
+        patch(
+            "app.topology_write._gns3_template_categories",
+            return_value={"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
+        ),
+        patch("app.topology_write._gns3_template_port_specs", return_value={}),
     ):
         resp = client.get("/templates")
 
@@ -227,9 +239,10 @@ def test_fetch_gns3_templates_returns_raw_template_list(app_state):
     # LITERAL_API_VALUES is forced "true" for the whole suite (see this
     # file's own top-of-conftest comment) so the real-fetch code path
     # needs its own override to actually run here.
-    with patch.object(
-        topology_write.Settings.API, "LITERAL_API_VALUES", False
-    ), patch("app.topology_write.APIHandler.get", return_value=fake_response):
+    with (
+        patch.object(topology_write.Settings.API, "LITERAL_API_VALUES", False),
+        patch("app.topology_write.APIHandler.get", return_value=fake_response),
+    ):
         result = topology_write._fetch_gns3_templates()
 
     assert result == fake_response["templates"]
@@ -238,11 +251,12 @@ def test_fetch_gns3_templates_returns_raw_template_list(app_state):
 def test_fetch_gns3_templates_tolerates_server_failure(app_state):
     from app import topology_write
 
-    with patch.object(
-        topology_write.Settings.API, "LITERAL_API_VALUES", False
-    ), patch(
-        "app.topology_write.APIHandler.get",
-        side_effect=TimeoutError("template server slow"),
+    with (
+        patch.object(topology_write.Settings.API, "LITERAL_API_VALUES", False),
+        patch(
+            "app.topology_write.APIHandler.get",
+            side_effect=TimeoutError("template server slow"),
+        ),
     ):
         result = topology_write._fetch_gns3_templates()
 
@@ -274,7 +288,9 @@ def test_gns3_template_categories_returns_name_to_category_mapping(app_state):
     }
 
 
-def test_gns3_template_port_specs_includes_templates_with_a_fixed_port_format(app_state):
+def test_gns3_template_port_specs_includes_templates_with_a_fixed_port_format(
+    app_state,
+):
     from app import topology_write
 
     templates = [

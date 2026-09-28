@@ -11,8 +11,12 @@ rather than duplicating its ESXi/GNS3 connection code.
 
 **Status: feature-complete and verified end-to-end against real
 infrastructure** - GNS3 console embedding, VM screens (direct VNC),
-config-push, project import/export, and multi-host switching have all
-been exercised live, not just in the test suite.
+config-push, project import/export, multi-host switching, design mode,
+Generate via LLM, packet capture, and the template-outage degrade path
+have all been exercised live, not just in the test suite. The GNS3 VM
+Deploy feature (below) is thoroughly unit-tested but not yet exercised
+against a real OVA import - no OVA path has been configured on the
+infrastructure available so far.
 
 ## Architecture
 
@@ -57,6 +61,96 @@ been exercised live, not just in the test suite.
   bundle's own layout.json, or a shared force-directed default
   (`src.graph.layout.compute_node_positions`) for whatever neither of
   those covers.
+- **Design mode** (`app/design.py`): an offline sketch topology, reachable
+  from the landing page independent of whichever host is active - build a
+  topology through the same canvas UI before any real host/deploy
+  exists, then hand it off via `GET /design/export` (a host-agnostic
+  `.topoproj`, importable later against a real host through the normal
+  `POST /project/import`). Pure in-memory data with no live GNS3/ESXi
+  connection, but autosaved to `design_state.json`
+  (`app/design_store.py`) after every edit and restored at startup, so a
+  process restart doesn't lose an in-progress sketch - and restoring
+  never touches the template service (see the graceful-degrade point
+  below), since the sketch's already-resolved node environments are
+  saved alongside it rather than re-derived.
+- **Generate via LLM** (`app/generate_jobs.py`): a landing-page action
+  that turns a natural-language prompt into a topology via the Topology
+  Generator API (`src.connections.topology_generator_client`), mirroring
+  TopologyBuilder's own CLI `generate` command's retry-until-valid loop,
+  then opens the result straight into design mode instead of writing a
+  file. Runs as a background job (`POST /design/generate` → `job_id`,
+  `GET /design/generate/{job_id}` polls attempt/status/warnings). Every
+  generated node gets a real position via the same force-directed layout
+  algorithm (`src.graph.layout.compute_node_positions`) a deployed
+  topology's own missing positions already fall back to, rather than
+  landing all nodes on top of each other.
+- **Real application logging** (`app/logging_setup.py`, `app/logs.py`):
+  writes to `Settings.LOG_FILE_PATH` in the same format/rotation as
+  TopologyBuilder's own CLI logging, readable from the GUI itself via
+  View > Logs (`GET /logs`) - auto-refreshing, color-coded by level.
+- **Wireshark-style packet capture** (`app/capture.py`): start/stop a
+  capture on any live link and view it as a live, in-browser
+  Wireshark-style packet table (click a link on the canvas) - a
+  client-side pcap parser decodes Ethernet/ARP/IPv4/TCP/UDP/ICMP frames
+  from the raw stream GNS3's own controller API exposes, with a
+  click-to-expand protocol-detail tree and hex dump per packet. The
+  equivalent real-Wireshark command
+  (`curl -sN <origin>/links/.../capture/stream | wireshark -k -i -`) is
+  always shown as plain selectable text for anyone who wants the actual
+  external tool - never behind a clipboard-dependent popup, since
+  `navigator.clipboard` needs a secure context (HTTPS or localhost) this
+  app doesn't always have on a typical plain-HTTP LAN deployment.
+- **Graceful degrade when the template-listing service is down**: if
+  `load_graph()` can't reach it at startup, `app.state.graph` becomes
+  `None` instead of the whole process refusing to start - the real
+  error surfaces via the existing warning banner (with a "Retry" button,
+  `POST /reload`), and only the live topology view is unavailable; the
+  landing page, design mode, and the Logs panel all keep working
+  regardless, since none of them touch `app.state.graph`.
+
+## GNS3 VM Deploy
+
+Replaces the configured GNS3 VM with a freshly imported one from its own
+OVA (`src.gns3_vm_deploy.deploy_fresh_gns3_vm`, in TopologyBuilder) -
+available two ways:
+
+- **On demand**, via File menu > "Deploy Fresh GNS3 VM…" - e.g. to
+  recover from a corrupted GNS3 VM without restarting this whole
+  process.
+- **Automatically at startup**, but only when the configured VM is
+  found *genuinely absent* - never just because it exists but isn't
+  reporting an IP yet (e.g. still booting).
+
+Requires `esxi.gns3_vm_ova_path` and `esxi.gns3_vm_mgmt_network` set in
+`settings.yml` (see [`settings.example.yml`](settings.example.yml)) -
+unset (the default) leaves this feature unavailable entirely, both the
+button and the auto-recovery.
+
+An existing same-named VM is always powered off and renamed as a
+timestamped backup first, never touched destructively by default. Two
+further options, both configured/confirmed explicitly given their real
+consequences:
+
+- **Delete the old VM permanently** instead of leaving it as a backup -
+  a second, separate confirmation in the GUI (irreversible, so it's
+  never bundled into the main "Deploy" confirmation), or `delete_old_vm`
+  on `POST /gns3-vm/deploy`. Only ever deletes the old VM *after* the
+  new one has confirmed itself alive by reporting an IP - a new VM that
+  never comes up leaves the old one untouched, exactly as if this
+  option had been off.
+- **Pin the VM's MAC address to a configured range** -
+  `esxi.gns3_vm_mac_range: [start_mac, end_mac]` in `settings.yml`, e.g.
+  so a DHCP server can be set up to only hand out IP addresses to MACs
+  in that range. If the old VM's own MAC already falls in the range,
+  it's kept as-is (preserves the same DHCP-leased IP across a
+  redeploy); otherwise a free MAC from the range is picked, avoiding
+  every other VM currently on the ESXi host.
+
+A missing trunk network (`esxi.trunk_port_group`) is auto-created on a
+genuinely fresh ESXi host, the same way a normal topology deploy already
+self-heals it. A missing *management* network is not auto-created -
+that's an externally-managed network this tool has no safe way to guess
+settings for, so it still fails loudly.
 
 ## Running it
 
@@ -77,12 +171,20 @@ has something to click into immediately.
 
 ## Endpoints
 
-- `GET /health`, `GET /topology` (static graph), `GET /nodes` (graph
-  merged with live GNS3/ESXi state), `GET/POST /layout`.
+- `GET /health` (includes `warning` - see the graceful-degrade point
+  above), `POST /reload` (manual retry once a down dependency recovers),
+  `GET /topology` (static graph, 503 while `app.state.graph` is down),
+  `GET /nodes` (graph merged with live GNS3/ESXi state), `GET/POST
+  /layout`.
 - `GET /templates`, `POST /nodes`, `DELETE /nodes/{name}`, `POST
   /links`, `DELETE /links/{node1}/{node2}` - live add/remove.
 - `POST /nodes/{name}/start`, `.../stop`, `.../reload` - node lifecycle.
+- `GET /links` (every live link + capturing state), `POST
+  /links/{node1}/{node2}/capture/start`, `.../capture/stop`, `GET
+  .../capture/stream` (proxies GNS3's own live pcap stream) - see
+  Architecture above.
 - `POST /config-push`, `GET/POST /drawings`.
+- `GET /logs?lines=N` (see Architecture above).
 - `GET /project/export`, `POST /project/import` (kicks off a background
   job, returns `{job_id, total}`), `GET /project/import/{job_id}`
   (progress + final result), `POST /project/reload-gns3` (closes and
@@ -90,6 +192,14 @@ has something to click into immediately.
   running - refreshes GNS3's own state without redeploying anything).
 - `GET/POST /settings-profiles`, `DELETE /settings-profiles/{filename}`,
   `POST /settings-profiles/{filename}/activate` (see Architecture above).
+- `GET /design/topology`, `POST /design/nodes`, `DELETE
+  /design/nodes/{name}`, `POST /design/links`, `DELETE
+  /design/links/{node1}/{node2}`, `GET/POST /design/layout`, `GET/POST
+  /design/drawings`, `POST /design/reset`, `GET /design/export`, `POST
+  /design/generate`, `GET /design/generate/{job_id}` - design mode, all
+  mirroring the equivalent live endpoint above (see Architecture above).
+- `POST /gns3-vm/deploy`, `GET /gns3-vm/deploy/{job_id}` (see GNS3 VM
+  Deploy above).
 - `WS /ws/console/{node}`, `WS /ws/vm-screen/{node}`.
 
 The frontend at `/` covers all of these.
@@ -101,9 +211,18 @@ pip install -e ".[test]"
 pytest
 ```
 
-150 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+236 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
+
+CI (`.github/workflows/ci_pipeline.yml`) runs this suite plus
+`ruff check`/`ruff format --check` on every push. A few rule categories
+are deliberately disabled project-wide (see `[tool.ruff.lint]` in
+`pyproject.toml`) rather than suppressed inline everywhere: blind
+`except Exception` and `try`/`except`/`pass` are a real, pervasive,
+commented-at-each-call-site best-effort pattern throughout this
+codebase, not oversights; nested `with` blocks in tests are a common,
+defensible readability idiom ruff can't safely auto-combine anyway.
 
 ## License
 

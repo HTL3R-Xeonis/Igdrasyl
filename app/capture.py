@@ -36,7 +36,6 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI
-
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
@@ -125,7 +124,9 @@ def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
     # ensure_project_open's own docstring) - every mutating per-link call
     # below then fails outright with a real 403 "The project is not
     # opened" otherwise. A no-op when already open, the common case.
-    GNS3Connection.ensure_project_open(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
+    GNS3Connection.ensure_project_open(
+        app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
+    )
     return GNS3Connection.post(
         f"{_base_url(app)}/links/{link['link_id']}/start_capture",
         json={
@@ -137,7 +138,9 @@ def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
 
 def stop_capture(app: FastAPI, node1: str, node2: str) -> None:
     link = _live_link(app, node1, node2)
-    GNS3Connection.ensure_project_open(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
+    GNS3Connection.ensure_project_open(
+        app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
+    )
     GNS3Connection.post(f"{_base_url(app)}/links/{link['link_id']}/stop_capture")
 
 
@@ -154,7 +157,9 @@ def capture_stream(app: FastAPI, node1: str, node2: str) -> requests.Response:
         docstring on that endpoint's known flakiness.
     """
     link = _live_link(app, node1, node2)
-    GNS3Connection.ensure_project_open(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
+    GNS3Connection.ensure_project_open(
+        app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
+    )
     response = requests.get(
         f"{_base_url(app)}/links/{link['link_id']}/pcap",
         stream=True,

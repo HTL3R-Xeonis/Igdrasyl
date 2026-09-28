@@ -24,13 +24,12 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
 import yaml
 from fastapi import FastAPI
-
 from src.settings import Settings
 
 from app.gns3_state import resolve_project_id
@@ -76,7 +75,7 @@ def build_export(app: FastAPI) -> bytes:
     manifest = {
         "format_version": _FORMAT_VERSION,
         "project_name": app.state.project_name,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         # Whether a future POST /project/import of *this* bundle should
         # also run its own configs.json through config-push right after
         # the deploy succeeds, instead of only loading it into the
@@ -93,7 +92,9 @@ def build_export(app: FastAPI) -> bytes:
     drawings = getattr(app.state, "last_drawings", [])
     layout = load_layout(app.state.graph.nodes)
 
-    return _write_bundle(manifest, topology_yaml, settings_snapshot, configs, drawings, layout)
+    return _write_bundle(
+        manifest, topology_yaml, settings_snapshot, configs, drawings, layout
+    )
 
 
 def build_design_export(state, project_name: str) -> bytes:
@@ -112,7 +113,7 @@ def build_design_export(state, project_name: str) -> bytes:
     manifest = {
         "format_version": _FORMAT_VERSION,
         "project_name": project_name,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "auto_config_push": False,
         "origin": "design",
     }
@@ -212,7 +213,9 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     # gns3_state.list_live_nodes).
     if app.state.gns3_vm_ip is not None:
         try:
-            app.state.project_id = resolve_project_id(app.state.gns3_vm_ip, app.state.project_name)
+            app.state.project_id = resolve_project_id(
+                app.state.gns3_vm_ip, app.state.project_name
+            )
             # Same staleness bug as project_id itself: startup_warning is
             # otherwise set once in lifespan and never revisited, so a
             # perfectly healthy import still leaves /health (and the

@@ -20,7 +20,6 @@ from typing import Any
 import requests
 from fastapi import FastAPI
 from loguru import logger
-
 from src.backend import TopologyBackend
 from src.connections.api_handler import APIHandler
 from src.settings import Settings
@@ -64,8 +63,15 @@ def _fetch_gns3_templates() -> list[dict]:
     try:
         data = APIHandler.get(f"{Settings.API.GNS3_TEMPLATE_SERVER_URL}/api/templates")
         return data.get("templates", [])
-    except (requests.exceptions.RequestException, TimeoutError, ValueError, KeyError) as exc:
-        logger.warning(f"Couldn't fetch GNS3 template details, frontend will fall back to guessing/free text: {exc}")
+    except (
+        requests.exceptions.RequestException,
+        TimeoutError,
+        ValueError,
+        KeyError,
+    ) as exc:
+        logger.warning(
+            f"Couldn't fetch GNS3 template details, frontend will fall back to guessing/free text: {exc}"
+        )
         return []
 
 

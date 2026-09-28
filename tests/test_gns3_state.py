@@ -53,12 +53,20 @@ def test_list_node_ports_marks_in_use_from_live_links(app_state):
         }
     ]
     fake_links = [
-        {"nodes": [{"node_id": "n1", "adapter_number": 0, "port_number": 0}, {"node_id": "n2", "adapter_number": 0, "port_number": 0}]}
+        {
+            "nodes": [
+                {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+                {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+            ]
+        }
     ]
-    with patch(
-        "app.gns3_state.GNS3Connection.list_project_nodes", return_value=fake_nodes
-    ), patch(
-        "app.gns3_state.GNS3Connection.list_project_links", return_value=fake_links
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes", return_value=fake_nodes
+        ),
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_links", return_value=fake_links
+        ),
     ):
         ports = list_node_ports(FakeApp(), "R1")
 
@@ -94,12 +102,14 @@ def test_list_live_nodes_treats_a_stale_project_id_404_as_no_live_project(app_st
         state = app_state
 
     response = MagicMock(status_code=404)
-    with patch(
-        "app.gns3_state.GNS3Connection.list_project_nodes",
-        side_effect=requests.HTTPError(response=response),
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes",
+            side_effect=requests.HTTPError(response=response),
+        ),
+        pytest.raises(NoLiveProject, match="stale-id"),
     ):
-        with pytest.raises(NoLiveProject, match="stale-id"):
-            list_live_nodes(FakeApp())
+        list_live_nodes(FakeApp())
 
 
 def test_list_live_nodes_reraises_non_404_http_errors(app_state):
@@ -109,17 +119,24 @@ def test_list_live_nodes_reraises_non_404_http_errors(app_state):
         state = app_state
 
     response = MagicMock(status_code=503)
-    with patch(
-        "app.gns3_state.GNS3Connection.list_project_nodes",
-        side_effect=requests.HTTPError(response=response),
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes",
+            side_effect=requests.HTTPError(response=response),
+        ),
+        pytest.raises(requests.HTTPError),
     ):
-        with pytest.raises(requests.HTTPError):
-            list_live_nodes(FakeApp())
+        list_live_nodes(FakeApp())
 
 
 def test_resolve_project_id_finds_project_by_name():
-    projects = [{"name": "other", "project_id": "p0"}, {"name": "phaseb", "project_id": "p1"}]
-    with patch("app.gns3_state.GNS3Connection.list_all_projects", return_value=projects):
+    projects = [
+        {"name": "other", "project_id": "p0"},
+        {"name": "phaseb", "project_id": "p1"},
+    ]
+    with patch(
+        "app.gns3_state.GNS3Connection.list_all_projects", return_value=projects
+    ):
         assert resolve_project_id("10.0.0.1", "phaseb") == "p1"
 
 
@@ -130,8 +147,12 @@ def test_resolve_project_id_returns_none_when_not_found():
 
 def test_reload_project_closes_then_opens_in_order():
     calls = []
-    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]), patch(
-        "app.gns3_state.GNS3Connection.post", side_effect=lambda url: calls.append(url)
+    with (
+        patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]),
+        patch(
+            "app.gns3_state.GNS3Connection.post",
+            side_effect=lambda url: calls.append(url),
+        ),
     ):
         reload_project("10.0.0.1", 80, "proj-1")
 
@@ -142,9 +163,12 @@ def test_reload_project_closes_then_opens_in_order():
 
 
 def test_reload_project_propagates_http_errors_from_close_or_open():
-    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]), patch(
-        "app.gns3_state.GNS3Connection.post",
-        side_effect=requests.HTTPError("boom"),
+    with (
+        patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]),
+        patch(
+            "app.gns3_state.GNS3Connection.post",
+            side_effect=requests.HTTPError("boom"),
+        ),
     ):
         with pytest.raises(requests.HTTPError):
             reload_project("10.0.0.1", 80, "proj-1")
@@ -165,11 +189,14 @@ def test_reload_project_restarts_only_nodes_that_were_started_before():
         {"node_id": "n2", "name": "SW1", "status": "stopped"},
         {"node_id": "n3", "name": "PC1", "status": "started"},
     ]
-    with patch(
-        "app.gns3_state.GNS3Connection.list_project_nodes", return_value=nodes_before
-    ), patch("app.gns3_state.GNS3Connection.post"), patch(
-        "app.gns3_state.GNS3Connection.start_node"
-    ) as fake_start:
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes",
+            return_value=nodes_before,
+        ),
+        patch("app.gns3_state.GNS3Connection.post"),
+        patch("app.gns3_state.GNS3Connection.start_node") as fake_start,
+    ):
         reload_project("10.0.0.1", 80, "proj-1")
 
     started_ids = {call.args[3] for call in fake_start.call_args_list}
@@ -181,11 +208,16 @@ def test_reload_project_continues_restarting_other_nodes_if_one_fails():
         {"node_id": "n1", "name": "R1", "status": "started"},
         {"node_id": "n2", "name": "SW1", "status": "started"},
     ]
-    with patch(
-        "app.gns3_state.GNS3Connection.list_project_nodes", return_value=nodes_before
-    ), patch("app.gns3_state.GNS3Connection.post"), patch(
-        "app.gns3_state.GNS3Connection.start_node", side_effect=RuntimeError("boom")
-    ) as fake_start:
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes",
+            return_value=nodes_before,
+        ),
+        patch("app.gns3_state.GNS3Connection.post"),
+        patch(
+            "app.gns3_state.GNS3Connection.start_node", side_effect=RuntimeError("boom")
+        ) as fake_start,
+    ):
         reload_project("10.0.0.1", 80, "proj-1")  # must not raise
 
     assert fake_start.call_count == 2

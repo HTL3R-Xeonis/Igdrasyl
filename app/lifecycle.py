@@ -9,7 +9,6 @@ app/gns3_state.py's own pattern instead.
 from __future__ import annotations
 
 from fastapi import FastAPI
-
 from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
@@ -18,9 +17,7 @@ from app.gns3_state import list_live_nodes
 
 
 def _live_gns3_node_id(app: FastAPI, name: str) -> str:
-    live_node = next(
-        (n for n in list_live_nodes(app) if n["name"] == name), None
-    )
+    live_node = next((n for n in list_live_nodes(app) if n["name"] == name), None)
     if live_node is None:
         raise ValueError(f"node {name!r} has no live GNS3 instance")
     return live_node["node_id"]

@@ -14,9 +14,9 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+from src.graph.environment import Environment
 
 from app import design
-from src.graph.environment import Environment
 
 
 @pytest.fixture(autouse=True)
@@ -31,12 +31,15 @@ def _templates(request):
         yield
         return
     Environment._get_templates.cache_clear()
-    with patch(
-        "src.graph.environment.APIHandler.get_gns3_template_names",
-        return_value={"Cisco IOSv 15.6(1)T", "VPCS"},
-    ), patch(
-        "src.graph.environment.APIHandler.get_esxi_template_names",
-        return_value={"debian"},
+    with (
+        patch(
+            "src.graph.environment.APIHandler.get_gns3_template_names",
+            return_value={"Cisco IOSv 15.6(1)T", "VPCS"},
+        ),
+        patch(
+            "src.graph.environment.APIHandler.get_esxi_template_names",
+            return_value={"debian"},
+        ),
     ):
         yield
     Environment._get_templates.cache_clear()
@@ -223,7 +226,9 @@ def test_from_dict_does_not_call_the_template_service():
 
 
 def test_design_add_node_and_get_topology(client, app_state):
-    resp = client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"})
+    resp = client.post(
+        "/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"}
+    )
     assert resp.status_code == 200
 
     resp = client.get("/design/topology")
@@ -234,7 +239,9 @@ def test_design_add_node_and_get_topology(client, app_state):
 
 
 def test_design_add_node_bad_image_is_400(client, app_state):
-    resp = client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "nope"})
+    resp = client.post(
+        "/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "nope"}
+    )
     assert resp.status_code == 400
 
 
@@ -246,7 +253,9 @@ def test_design_nodes_ports_404s_so_frontend_falls_back_to_free_text(client, app
 
 def test_design_link_and_layout_roundtrip(client, app_state):
     client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"})
-    client.post("/design/nodes", json={"name": "SW1", "role": "SWITCH", "image": "VPCS"})
+    client.post(
+        "/design/nodes", json={"name": "SW1", "role": "SWITCH", "image": "VPCS"}
+    )
     resp = client.post(
         "/design/links",
         json={"node1": "R1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet0"},
@@ -283,7 +292,9 @@ def test_design_reset_clears_everything(client, app_state):
 
 def test_design_export_produces_host_agnostic_topoproj(client, app_state):
     client.post("/design/nodes", json={"name": "R1", "role": "ROUTER", "image": "VPCS"})
-    client.post("/design/nodes", json={"name": "SW1", "role": "SWITCH", "image": "VPCS"})
+    client.post(
+        "/design/nodes", json={"name": "SW1", "role": "SWITCH", "image": "VPCS"}
+    )
     client.post(
         "/design/links",
         json={"node1": "R1", "if1": "eth0", "node2": "SW1", "if2": "Ethernet0"},
@@ -296,8 +307,12 @@ def test_design_export_produces_host_agnostic_topoproj(client, app_state):
 
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     assert set(zf.namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json",
-        "drawings.json", "layout.json",
+        "manifest.json",
+        "topology.yaml",
+        "settings.yml",
+        "configs.json",
+        "drawings.json",
+        "layout.json",
     }
     manifest = json.loads(zf.read("manifest.json"))
     assert manifest["format_version"] == 1
@@ -313,7 +328,9 @@ def test_design_export_produces_host_agnostic_topoproj(client, app_state):
     assert layout == {"R1": {"x": 5.0, "y": 6.0}}
 
 
-def test_design_export_is_importable_against_any_active_host(client, app_state, temp_topology_file):
+def test_design_export_is_importable_against_any_active_host(
+    client, app_state, temp_topology_file
+):
     """
     apply_import's ESXi-target check must accept a bundle with no target
     at all (see project_bundle.apply_import's has_target guard) - proves

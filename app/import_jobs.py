@@ -28,7 +28,6 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
-
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
@@ -43,7 +42,9 @@ class ImportJob:
     completed: int = 0
     status: str = "running"  # "running" | "done" | "error"
     error: str | None = None
-    error_kind: str | None = None  # "bad_bundle" | "deploy_failed", mirrors the old 400 vs 502 split
+    error_kind: str | None = (
+        None  # "bad_bundle" | "deploy_failed", mirrors the old 400 vs 502 split
+    )
     result: dict[str, Any] | None = None
 
 
@@ -66,7 +67,9 @@ def peek_target_node_names(zip_bytes: bytes) -> set[str]:
 
 
 def create_job(app: FastAPI, target_names: set[str]) -> ImportJob:
-    job = ImportJob(id=str(uuid.uuid4()), total=len(target_names), target_names=target_names)
+    job = ImportJob(
+        id=str(uuid.uuid4()), total=len(target_names), target_names=target_names
+    )
     if not hasattr(app.state, "import_jobs"):
         app.state.import_jobs = {}
     app.state.import_jobs[job.id] = job
@@ -136,7 +139,9 @@ def poll_progress(app: FastAPI, job: ImportJob) -> int:
         try:
             project_id = resolve_project_id(gns3_vm_ip, project_name)
             if project_id is not None:
-                for node in GNS3Connection.list_project_nodes(gns3_vm_ip, Settings.GNS3.PORT, project_id):
+                for node in GNS3Connection.list_project_nodes(
+                    gns3_vm_ip, Settings.GNS3.PORT, project_id
+                ):
                     if node["name"] in job.target_names:
                         live_names.add(node["name"])
         except Exception:
@@ -149,6 +154,8 @@ def poll_progress(app: FastAPI, job: ImportJob) -> int:
 def start_job(app: FastAPI, zip_bytes: bytes) -> ImportJob:
     target_names = peek_target_node_names(zip_bytes)
     job = create_job(app, target_names)
-    thread = threading.Thread(target=run_import_job, args=(app, job, zip_bytes), daemon=True)
+    thread = threading.Thread(
+        target=run_import_job, args=(app, job, zip_bytes), daemon=True
+    )
     thread.start()
     return job

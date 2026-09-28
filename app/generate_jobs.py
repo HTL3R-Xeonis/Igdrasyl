@@ -28,7 +28,6 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI
 from loguru import logger
-
 from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.settings import Settings
 from src.topology_file_validation import TopologyFileValidation
@@ -46,7 +45,9 @@ class GenerateJob:
     error: str | None = None
 
 
-def _load_generated_topology(nodes: list[dict], edges: list[list[str]]) -> design.DesignState:
+def _load_generated_topology(
+    nodes: list[dict], edges: list[list[str]]
+) -> design.DesignState:
     """
     Builds a fresh design.DesignState from a validated topology's own
     {nodes, edges} - the same shape TopologyFileValidation.nodes/.edges
@@ -77,12 +78,16 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
         except (TimeoutError, RuntimeError) as exc:
             job.status = "error"
             job.error = str(exc)
-            logger.warning(f"Generate job {job.id} attempt {attempt}: request failed: {exc}")
+            logger.warning(
+                f"Generate job {job.id} attempt {attempt}: request failed: {exc}"
+            )
             return
 
         job.warnings = list(result.get("warnings", []))
         if not result.get("valid"):
-            logger.warning(f"Generate job {job.id} attempt {attempt}: reported invalid, retrying")
+            logger.warning(
+                f"Generate job {job.id} attempt {attempt}: reported invalid, retrying"
+            )
             continue
 
         fd, tmp_name = tempfile.mkstemp(suffix=".yml", prefix="generated_topology_")
@@ -92,12 +97,18 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             tmp_path.write_text(result["yaml"])
             validator = TopologyFileValidation(str(tmp_path))
             validator.validate_file()
-            app.state.design = _load_generated_topology(validator.nodes, validator.edges)
+            app.state.design = _load_generated_topology(
+                validator.nodes, validator.edges
+            )
             design_store.save(app.state.design)
             job.status = "done"
             logger.info(f"Generate job {job.id} succeeded on attempt {attempt}")
             return
-        except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        except (
+            TimeoutError,
+            RuntimeError,
+            requests.exceptions.RequestException,
+        ) as exc:
             # The template service (validate_file/Environment.get_environment
             # both depend on it) is unreachable - retrying won't help until
             # it's back, so stop immediately with a clear error instead of
@@ -106,7 +117,9 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             # outage note).
             job.status = "error"
             job.error = f"Template service unavailable: {exc}"
-            logger.warning(f"Generate job {job.id} attempt {attempt}: template service unavailable: {exc}")
+            logger.warning(
+                f"Generate job {job.id} attempt {attempt}: template service unavailable: {exc}"
+            )
             return
         except Exception as exc:
             logger.warning(
@@ -122,10 +135,14 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
 
 
 def start_job(app: FastAPI, prompt: str) -> GenerateJob:
-    job = GenerateJob(id=str(uuid.uuid4()), max_attempts=Settings.GENERATE_MAX_RETRIES + 1)
+    job = GenerateJob(
+        id=str(uuid.uuid4()), max_attempts=Settings.GENERATE_MAX_RETRIES + 1
+    )
     if not hasattr(app.state, "generate_jobs"):
         app.state.generate_jobs = {}
     app.state.generate_jobs[job.id] = job
-    thread = threading.Thread(target=run_generate_job, args=(app, job, prompt), daemon=True)
+    thread = threading.Thread(
+        target=run_generate_job, args=(app, job, prompt), daemon=True
+    )
     thread.start()
     return job

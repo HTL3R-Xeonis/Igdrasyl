@@ -73,7 +73,12 @@ def test_tail_log_lines_keeps_unparseable_lines_as_raw_message(tmp_path):
     finally:
         Settings.LOG_FILE_PATH = original
 
-    assert result[1] == {"time": "", "level": "", "location": "", "message": "Traceback (most recent call last):"}
+    assert result[1] == {
+        "time": "",
+        "level": "",
+        "location": "",
+        "message": "Traceback (most recent call last):",
+    }
     assert result[2]["message"] == '  File "main.py", line 1, in <module>'
 
 
@@ -89,7 +94,12 @@ def test_get_logs_endpoint_returns_parsed_lines(client, app_state, tmp_path):
 
     assert resp.status_code == 200
     assert resp.json() == [
-        {"time": "2026-09-24 21:34:04.917", "level": "INFO", "location": "main.py:1", "message": "hello"}
+        {
+            "time": "2026-09-24 21:34:04.917",
+            "level": "INFO",
+            "location": "main.py:1",
+            "message": "hello",
+        }
     ]
 
 

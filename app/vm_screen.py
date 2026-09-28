@@ -98,7 +98,9 @@ async def vm_screen_proxy(websocket: WebSocket, node_name: str) -> None:
         ticket = vm.AcquireTicket(ticketType="webmks")
     except Exception as exc:
         logger.warning(f"WebMKS ticket acquisition failed for {node_name!r}: {exc!r}")
-        await websocket.close(code=1011, reason=f"couldn't acquire a WebMKS ticket: {exc}")
+        await websocket.close(
+            code=1011, reason=f"couldn't acquire a WebMKS ticket: {exc}"
+        )
         return
 
     from src.settings import Settings

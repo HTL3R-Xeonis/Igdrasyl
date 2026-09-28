@@ -60,7 +60,9 @@ def ensure_ticket_directory(host: str, ssh_user: str, ssh_password: str | None) 
     step can't run, not that ticket acquisition itself should fail.
     """
     if not ssh_password:
-        print(f"No SSH password given - skipping ticket-directory self-heal check on {host}.")
+        print(
+            f"No SSH password given - skipping ticket-directory self-heal check on {host}."
+        )
         return
     try:
         client = paramiko.SSHClient()
@@ -102,7 +104,9 @@ def main() -> int:
     parser.add_argument("--user", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--vm", required=True, help="Name of an already-running VM")
-    parser.add_argument("--ssh-user", default="root", help="SSH login for the self-heal check")
+    parser.add_argument(
+        "--ssh-user", default="root", help="SSH login for the self-heal check"
+    )
     parser.add_argument(
         "--ssh-password",
         default=None,

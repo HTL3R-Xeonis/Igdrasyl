@@ -25,11 +25,11 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel
+from src.graph.blocks.generic_node import GenericNode
+from src.graph.environment import Environment
 
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.guest_ops import guest_credentials_for_image, run_command_in_guest
-from src.graph.blocks.generic_node import GenericNode
-from src.graph.environment import Environment
 
 _NETMIKO_CONNECT_TIMEOUT_SECONDS = 20
 
@@ -70,7 +70,10 @@ def _push_via_netmiko(
     node: GenericNode, commands: list[str], gns3_vm_ip: str, console_port: int
 ) -> DeviceResult:
     from netmiko import ConnectHandler
-    from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+    from netmiko.exceptions import (
+        NetmikoAuthenticationException,
+        NetmikoTimeoutException,
+    )
 
     device_type = _netmiko_device_type(node.image)
     try:
@@ -84,7 +87,9 @@ def _push_via_netmiko(
         )
     except (NetmikoTimeoutException, NetmikoAuthenticationException, OSError) as exc:
         return DeviceResult(
-            device=node.name, transport="netmiko", ok=False,
+            device=node.name,
+            transport="netmiko",
+            ok=False,
             error=f"couldn't connect: {exc}",
         )
 
@@ -114,14 +119,18 @@ def _push_via_guest_ops(
     vm = esxi_connection.get_vm(node.name)
     if vm is None:
         return DeviceResult(
-            device=node.name, transport="guest_ops", ok=False,
+            device=node.name,
+            transport="guest_ops",
+            ok=False,
             error=f"VM '{node.name}' not found on ESXi",
         )
 
     creds = guest_credentials_for_image(node.image)
     if creds is None:
         return DeviceResult(
-            device=node.name, transport="guest_ops", ok=False,
+            device=node.name,
+            transport="guest_ops",
+            ok=False,
             error=f"no guest credentials found for image '{node.image}'",
         )
     username, password = creds
@@ -132,7 +141,9 @@ def _push_via_guest_ops(
     results: list[CommandResult] = []
     overall_ok = True
     for command in commands:
-        exit_code, output = run_command_in_guest(process_manager, vm, auth, command, is_windows)
+        exit_code, output = run_command_in_guest(
+            process_manager, vm, auth, command, is_windows
+        )
         ok = exit_code == 0
         results.append(CommandResult(command=command, output=output, ok=ok))
         if not ok:
@@ -159,7 +170,9 @@ def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
         if node is None:
             results.append(
                 DeviceResult(
-                    device=device_name, transport="n/a", ok=False,
+                    device=device_name,
+                    transport="n/a",
+                    ok=False,
                     error="not found in topology",
                 )
             )
@@ -170,7 +183,9 @@ def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
             if live is None:
                 results.append(
                     DeviceResult(
-                        device=device_name, transport="netmiko", ok=False,
+                        device=device_name,
+                        transport="netmiko",
+                        ok=False,
                         error=live_error or "no live console info for this node",
                     )
                 )
@@ -179,7 +194,9 @@ def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
             if live.get("console_type") != "telnet" or console_port is None:
                 results.append(
                     DeviceResult(
-                        device=device_name, transport="netmiko", ok=False,
+                        device=device_name,
+                        transport="netmiko",
+                        ok=False,
                         error=f"no telnet console available (type={live.get('console_type')!r})",
                     )
                 )
@@ -188,11 +205,15 @@ def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
                 _push_via_netmiko(node, commands, app.state.gns3_vm_ip, console_port)
             )
         elif node.env == Environment.ON_ESXI:
-            results.append(_push_via_guest_ops(node, commands, app.state.esxi_connection))
+            results.append(
+                _push_via_guest_ops(node, commands, app.state.esxi_connection)
+            )
         else:
             results.append(
                 DeviceResult(
-                    device=device_name, transport="n/a", ok=False,
+                    device=device_name,
+                    transport="n/a",
+                    ok=False,
                     error=f"node environment {node.env.name} has no config-push transport",
                 )
             )

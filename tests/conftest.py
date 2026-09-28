@@ -11,19 +11,20 @@ import asyncio
 import os
 import shutil
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 os.environ["LITERAL_API_VALUES"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
+from src.settings import Settings
 
 import app.main as main_module
 from app import design
 from app.topology import load_graph, resolve_project_name
-from src.settings import Settings
 
 _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
 
@@ -38,7 +39,9 @@ def _design_store_tmp_file(tmp_path, monkeypatch):
     saves happen on nearly every design mutation across many test files,
     not just a handful that opt in deliberately.
     """
-    monkeypatch.setenv("TOPOLOGYOPERATOR_DESIGN_FILE", str(tmp_path / "design_state.json"))
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_DESIGN_FILE", str(tmp_path / "design_state.json")
+    )
 
 
 @pytest.fixture
@@ -98,7 +101,9 @@ def client(app_state):
     return TestClient(main_module.app)
 
 
-def _start_fake_tcp_server(handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any]) -> tuple[int, Callable[[], None]]:
+def _start_fake_tcp_server(
+    handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any],
+) -> tuple[int, Callable[[], None]]:
     loop = asyncio.new_event_loop()
     port_holder: dict[str, int] = {}
     ready = threading.Event()
@@ -155,7 +160,9 @@ def fake_tcp_server():
         stop()
 
 
-def _start_fake_ws_server(handler: Callable[[Any], Any]) -> tuple[int, Callable[[], None]]:
+def _start_fake_ws_server(
+    handler: Callable[[Any], Any],
+) -> tuple[int, Callable[[], None]]:
     import websockets
 
     loop = asyncio.new_event_loop()

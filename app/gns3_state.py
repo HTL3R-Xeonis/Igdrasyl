@@ -11,7 +11,6 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI
-
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
@@ -65,7 +64,9 @@ def reload_project(gns3_vm_ip: str, port: int, project_id: str) -> None:
     """
     base = f"http://{gns3_vm_ip}:{port}/v2/projects/{project_id}"
     nodes_before = GNS3Connection.list_project_nodes(gns3_vm_ip, port, project_id)
-    started_node_ids = [n["node_id"] for n in nodes_before if n.get("status") == "started"]
+    started_node_ids = [
+        n["node_id"] for n in nodes_before if n.get("status") == "started"
+    ]
 
     GNS3Connection.post(f"{base}/close")
     GNS3Connection.post(f"{base}/open")

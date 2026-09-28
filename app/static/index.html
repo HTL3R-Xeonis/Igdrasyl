@@ -1392,6 +1392,7 @@
     <div id="capture-viewer-header">
       <strong id="capture-viewer-title"></strong>
       <span id="capture-viewer-status"></span>
+      <button class="toolbar-btn" id="capture-viewer-retry-btn" hidden>Retry</button>
       <div class="spacer"></div>
       <button class="toolbar-btn" id="capture-viewer-clear-btn">Clear</button>
       <button class="toolbar-btn primary" id="capture-viewer-close-btn">Close</button>
@@ -3731,6 +3732,7 @@ async function openCaptureViewer(node1, if1, node2, if2) {
   if (captureViewerAbort) captureViewerAbort.abort();
   const overlay = document.getElementById("capture-viewer-overlay");
   const status = document.getElementById("capture-viewer-status");
+  const retryBtn = document.getElementById("capture-viewer-retry-btn");
   document.getElementById("capture-viewer-tbody").innerHTML = "";
   document.getElementById("capture-viewer-detail-wrap").hidden = true;
   capturedPackets = [];
@@ -3742,15 +3744,24 @@ async function openCaptureViewer(node1, if1, node2, if2) {
   document.getElementById("capture-viewer-wireshark-command").value = wiresharkCmd;
   document.getElementById("capture-viewer-wireshark-status").textContent = "";
   status.textContent = "Connecting…";
+  retryBtn.hidden = true;
+  retryBtn.onclick = () => openCaptureViewer(node1, if1, node2, if2);
   overlay.hidden = false;
 
   const controller = new AbortController();
   captureViewerAbort = controller;
 
+  // GNS3's own /pcap endpoint is known to be intermittently flaky (see
+  // app/capture.py's own docstring - the exact same request can work
+  // once and then hang or drop on the very next attempt, a real
+  // upstream gns3-server issue, not fixable from here) - offering an
+  // immediate one-click retry instead of making the user close and
+  // re-open the whole viewer is the practical mitigation.
   try {
     const resp = await fetch(streamPath, { signal: controller.signal });
     if (!resp.ok || !resp.body) {
       status.textContent = `Failed to open capture stream: ${resp.status}`;
+      retryBtn.hidden = false;
       return;
     }
     status.textContent = "Live";
@@ -3769,8 +3780,12 @@ async function openCaptureViewer(node1, if1, node2, if2) {
       parser.push(value);
     }
     status.textContent = "Stream ended";
+    retryBtn.hidden = false;
   } catch (err) {
-    if (err.name !== "AbortError") status.textContent = `Stream error: ${err}`;
+    if (err.name !== "AbortError") {
+      status.textContent = `Stream error: ${err}`;
+      retryBtn.hidden = false;
+    }
   }
 }
 

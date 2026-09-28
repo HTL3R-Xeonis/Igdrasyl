@@ -7,7 +7,9 @@ from app import settings_profiles
 
 @pytest.fixture(autouse=True)
 def _isolated_profiles_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv(settings_profiles._PROFILES_DIR_ENV_VAR, str(tmp_path / "profiles"))
+    monkeypatch.setenv(
+        settings_profiles._PROFILES_DIR_ENV_VAR, str(tmp_path / "profiles")
+    )
     monkeypatch.delenv(settings_profiles._SETTINGS_ENV_VAR, raising=False)
     yield
 
@@ -44,7 +46,9 @@ def test_save_profile_then_list_shows_a_preview():
     assert profiles[0]["active"] is False
 
 
-def test_list_profiles_marks_the_one_matching_topologyoperator_settings(monkeypatch, tmp_path):
+def test_list_profiles_marks_the_one_matching_topologyoperator_settings(
+    monkeypatch, tmp_path
+):
     settings_profiles.save_profile("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n")
     settings_profiles.save_profile("host-b.yml", b"esxi:\n  ip: 10.0.0.2\n")
     active_path = settings_profiles._profiles_dir() / "host-b.yml"
@@ -97,7 +101,9 @@ def test_restart_into_profile_raises_for_unknown_file_without_scheduling_anythin
 def test_restart_into_profile_schedules_a_delayed_restart(monkeypatch):
     settings_profiles.save_profile("host-a.yml", b"esxi:\n  ip: 10.0.0.1\n")
     calls = []
-    monkeypatch.setattr(settings_profiles, "_restart_with_settings", lambda path: calls.append(path))
+    monkeypatch.setattr(
+        settings_profiles, "_restart_with_settings", lambda path: calls.append(path)
+    )
     monkeypatch.setattr(settings_profiles, "_RESTART_DELAY_SECONDS", 0.01)
 
     settings_profiles.restart_into_profile("host-a.yml")
@@ -121,4 +127,6 @@ def test_restart_with_settings_reexecs_with_the_env_var_set(monkeypatch):
 
     settings_profiles._restart_with_settings("/some/path/host-a.yml")
 
-    assert captured["env"][settings_profiles._SETTINGS_ENV_VAR] == "/some/path/host-a.yml"
+    assert (
+        captured["env"][settings_profiles._SETTINGS_ENV_VAR] == "/some/path/host-a.yml"
+    )

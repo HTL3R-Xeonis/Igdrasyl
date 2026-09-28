@@ -22,10 +22,13 @@ def _live_gns3_node(name: str, node_id: str) -> dict:
 
 def test_start_node_gns3_calls_gns3_connection(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.lifecycle.GNS3Connection.list_project_nodes",
-        return_value=[_live_gns3_node("R1", "node-1")],
-    ), patch("app.lifecycle.GNS3Connection.start_node") as mock_start:
+    with (
+        patch(
+            "app.lifecycle.GNS3Connection.list_project_nodes",
+            return_value=[_live_gns3_node("R1", "node-1")],
+        ),
+        patch("app.lifecycle.GNS3Connection.start_node") as mock_start,
+    ):
         resp = client.post("/nodes/R1/start")
 
     assert resp.status_code == 200, resp.text
@@ -34,10 +37,13 @@ def test_start_node_gns3_calls_gns3_connection(client, app_state):
 
 def test_stop_node_gns3_calls_gns3_connection(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.lifecycle.GNS3Connection.list_project_nodes",
-        return_value=[_live_gns3_node("R1", "node-1")],
-    ), patch("app.lifecycle.GNS3Connection.stop_node") as mock_stop:
+    with (
+        patch(
+            "app.lifecycle.GNS3Connection.list_project_nodes",
+            return_value=[_live_gns3_node("R1", "node-1")],
+        ),
+        patch("app.lifecycle.GNS3Connection.stop_node") as mock_stop,
+    ):
         resp = client.post("/nodes/R1/stop")
 
     assert resp.status_code == 200, resp.text
@@ -46,10 +52,13 @@ def test_stop_node_gns3_calls_gns3_connection(client, app_state):
 
 def test_reload_node_gns3_calls_gns3_connection(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.lifecycle.GNS3Connection.list_project_nodes",
-        return_value=[_live_gns3_node("R1", "node-1")],
-    ), patch("app.lifecycle.GNS3Connection.reload_node") as mock_reload:
+    with (
+        patch(
+            "app.lifecycle.GNS3Connection.list_project_nodes",
+            return_value=[_live_gns3_node("R1", "node-1")],
+        ),
+        patch("app.lifecycle.GNS3Connection.reload_node") as mock_reload,
+    ):
         resp = client.post("/nodes/R1/reload")
 
     assert resp.status_code == 200, resp.text
@@ -106,12 +115,15 @@ def test_start_node_no_live_gns3_instance_maps_to_404(client, app_state):
 
 def test_start_node_gns3_runtime_error_maps_to_502(client, app_state):
     app_state.project_id = "proj-1"
-    with patch(
-        "app.lifecycle.GNS3Connection.list_project_nodes",
-        return_value=[_live_gns3_node("R1", "node-1")],
-    ), patch(
-        "app.lifecycle.GNS3Connection.start_node",
-        side_effect=RuntimeError("start failed"),
+    with (
+        patch(
+            "app.lifecycle.GNS3Connection.list_project_nodes",
+            return_value=[_live_gns3_node("R1", "node-1")],
+        ),
+        patch(
+            "app.lifecycle.GNS3Connection.start_node",
+            side_effect=RuntimeError("start failed"),
+        ),
     ):
         resp = client.post("/nodes/R1/start")
     assert resp.status_code == 502

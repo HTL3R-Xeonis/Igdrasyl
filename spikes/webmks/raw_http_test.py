@@ -56,7 +56,7 @@ def main() -> int:
                 if not chunk:
                     break
                 chunks.append(chunk)
-        except socket.timeout:
+        except TimeoutError:
             pass
 
         data = b"".join(chunks)

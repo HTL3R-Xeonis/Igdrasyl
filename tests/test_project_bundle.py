@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 import yaml
-
 from src.settings import Settings
 
 from app import project_bundle
@@ -43,7 +42,9 @@ def _make_bundle(
     settings = {
         "esxi": {
             "ip": esxi_ip if esxi_ip is not None else Settings.ESXI.IP,
-            "gns3_vm_name": esxi_vm_name if esxi_vm_name is not None else Settings.ESXI.GNS3_VM_NAME,
+            "gns3_vm_name": esxi_vm_name
+            if esxi_vm_name is not None
+            else Settings.ESXI.GNS3_VM_NAME,
         },
         "gns3": {"username": Settings.GNS3.USERNAME, "port": Settings.GNS3.PORT},
     }
@@ -84,13 +85,20 @@ def test_build_export_produces_expected_zip_members(
 ):
     monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     app_state.last_config_push = {"R1": ["show version"]}
-    app_state.last_drawings = [{"id": 1, "type": "text", "x1": 10, "y1": 20, "text": "hi"}]
+    app_state.last_drawings = [
+        {"id": 1, "type": "text", "x1": 10, "y1": 20, "text": "hi"}
+    ]
 
     data = project_bundle.build_export(_app())
 
     zf = zipfile.ZipFile(io.BytesIO(data))
     assert set(zf.namelist()) == {
-        "manifest.json", "topology.yaml", "settings.yml", "configs.json", "drawings.json", "layout.json",
+        "manifest.json",
+        "topology.yaml",
+        "settings.yml",
+        "configs.json",
+        "drawings.json",
+        "layout.json",
     }
 
     manifest = json.loads(zf.read("manifest.json"))
@@ -127,7 +135,9 @@ def _app():
     return main_module.app
 
 
-def test_apply_import_happy_path_deploys_and_reloads_graph(app_state, temp_topology_file):
+def test_apply_import_happy_path_deploys_and_reloads_graph(
+    app_state, temp_topology_file
+):
     fake = _FakeBackend()
     app_state.topology_backend = fake
     bundle = _make_bundle()
@@ -169,7 +179,9 @@ def test_apply_import_defaults_auto_config_push_false_for_older_bundles(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf_out:
         for name in zf_in.namelist():
-            content = json.dumps(manifest) if name == "manifest.json" else zf_in.read(name)
+            content = (
+                json.dumps(manifest) if name == "manifest.json" else zf_in.read(name)
+            )
             zf_out.writestr(name, content)
 
     result = project_bundle.apply_import(_app(), buf.getvalue())
@@ -188,7 +200,9 @@ def test_apply_import_restores_bundled_drawings(app_state, temp_topology_file):
     assert app_state.last_drawings == bundled_drawings
 
 
-def test_apply_import_restores_bundled_layout(app_state, temp_topology_file, tmp_path, monkeypatch):
+def test_apply_import_restores_bundled_layout(
+    app_state, temp_topology_file, tmp_path, monkeypatch
+):
     monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
     app_state.topology_backend = _FakeBackend()
     bundle = _make_bundle(layout={"R1": {"x": 42, "y": 84}, "GHOST": {"x": 1, "y": 2}})
@@ -204,7 +218,9 @@ def test_apply_import_restores_bundled_layout(app_state, temp_topology_file, tmp
     assert "GHOST" not in saved
 
 
-def test_apply_import_re_resolves_a_project_id_the_deploy_changed(app_state, temp_topology_file):
+def test_apply_import_re_resolves_a_project_id_the_deploy_changed(
+    app_state, temp_topology_file
+):
     """
     Real bug found live: a non-incremental deploy deleted and recreated
     the whole GNS3 project under a new id, but the already-running
@@ -226,7 +242,9 @@ def test_apply_import_re_resolves_a_project_id_the_deploy_changed(app_state, tem
     assert app_state.project_id == "fresh-id"
 
 
-def test_apply_import_keeps_old_project_id_when_gns3_unreachable(app_state, temp_topology_file):
+def test_apply_import_keeps_old_project_id_when_gns3_unreachable(
+    app_state, temp_topology_file
+):
     app_state.topology_backend = _FakeBackend()
     app_state.gns3_vm_ip = "10.20.20.231"
     app_state.project_id = "stale-id"
@@ -252,7 +270,9 @@ def test_apply_import_clears_a_stale_startup_warning_once_the_project_resolves(
     """
     app_state.topology_backend = _FakeBackend()
     app_state.gns3_vm_ip = "10.20.20.231"
-    app_state.startup_warning = "No GNS3 project named 'x' - has this topology actually been deployed?"
+    app_state.startup_warning = (
+        "No GNS3 project named 'x' - has this topology actually been deployed?"
+    )
     bundle = _make_bundle()
 
     with patch("app.project_bundle.resolve_project_id", return_value="fresh-id"):

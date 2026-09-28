@@ -53,7 +53,7 @@ def test_run_command_in_guest_returns_none_on_method_fault():
     process_manager = MagicMock()
     process_manager.StartProgramInGuest.side_effect = vmodl.MethodFault()
 
-    exit_code, output = run_command_in_guest(
+    exit_code, _output = run_command_in_guest(
         process_manager, MagicMock(), MagicMock(), "echo hi", is_windows=False
     )
 
@@ -102,7 +102,7 @@ def test_run_command_in_guest_returns_exit_code_on_success():
         MagicMock(endTime="2026-01-01T00:00:00Z", exitCode=0)
     ]
 
-    exit_code, output = run_command_in_guest(
+    exit_code, _output = run_command_in_guest(
         process_manager, MagicMock(), MagicMock(), "echo hi", is_windows=False
     )
 

@@ -47,7 +47,9 @@ def test_create_job_sets_total_from_target_names(app_state):
 def test_poll_progress_counts_live_esxi_vms_by_name(app_state):
     app = _fake_app(app_state)
     job = import_jobs.create_job(app, {"VM1", "VM2"})
-    app_state.esxi_connection.get_vm.side_effect = lambda name: object() if name == "VM1" else None
+    app_state.esxi_connection.get_vm.side_effect = lambda name: (
+        object() if name == "VM1" else None
+    )
 
     completed = import_jobs.poll_progress(app, job)
 
@@ -63,8 +65,9 @@ def test_poll_progress_counts_live_gns3_nodes_by_name(app_state):
     job = import_jobs.create_job(app, {"R1", "SW1"})
 
     live = [{"name": "R1"}]
-    with patch("app.import_jobs.resolve_project_id", return_value="pid-1"), patch(
-        "app.import_jobs.GNS3Connection.list_project_nodes", return_value=live
+    with (
+        patch("app.import_jobs.resolve_project_id", return_value="pid-1"),
+        patch("app.import_jobs.GNS3Connection.list_project_nodes", return_value=live),
     ):
         completed = import_jobs.poll_progress(app, job)
 
@@ -97,7 +100,12 @@ def test_run_import_job_marks_done_and_stores_result(app_state, temp_topology_fi
     app_state.topology_backend = MagicMock()
     job = import_jobs.create_job(app, set())
 
-    fake_result = {"manifest": {}, "configs": {}, "drawings": [], "auto_config_push": False}
+    fake_result = {
+        "manifest": {},
+        "configs": {},
+        "drawings": [],
+        "auto_config_push": False,
+    }
     with patch("app.project_bundle.apply_import", return_value=fake_result):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
@@ -122,7 +130,9 @@ def test_run_import_job_marks_error_on_deploy_failure(app_state):
     app = _fake_app(app_state)
     job = import_jobs.create_job(app, set())
 
-    with patch("app.project_bundle.apply_import", side_effect=RuntimeError("deploy failed")):
+    with patch(
+        "app.project_bundle.apply_import", side_effect=RuntimeError("deploy failed")
+    ):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
     assert job.status == "error"
@@ -139,9 +149,10 @@ def test_run_import_job_auto_pushes_when_result_says_so(app_state):
         "drawings": [],
         "auto_config_push": True,
     }
-    with patch("app.project_bundle.apply_import", return_value=fake_result), patch(
-        "app.config_push.push_all", return_value=["ok"]
-    ) as fake_push_all:
+    with (
+        patch("app.project_bundle.apply_import", return_value=fake_result),
+        patch("app.config_push.push_all", return_value=["ok"]) as fake_push_all,
+    ):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
     fake_push_all.assert_called_once_with({"R1": ["show version"]}, app)
@@ -154,7 +165,12 @@ def test_start_job_runs_in_the_background_and_completes(app_state, temp_topology
     app_state.topology_backend = MagicMock()
     bundle = _bundle_with_topology(temp_topology_file.read_text())
 
-    fake_result = {"manifest": {}, "configs": {}, "drawings": [], "auto_config_push": False}
+    fake_result = {
+        "manifest": {},
+        "configs": {},
+        "drawings": [],
+        "auto_config_push": False,
+    }
     with patch("app.project_bundle.apply_import", return_value=fake_result):
         job = import_jobs.start_job(app, bundle)
 

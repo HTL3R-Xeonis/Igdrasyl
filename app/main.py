@@ -21,13 +21,25 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
-
 from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import capture, console, design, design_store, generate_jobs, gns3_vm_deploy_jobs, import_jobs, lifecycle, logs, project_bundle, settings_profiles, topology_write, vm_screen
-from app.logging_setup import configure_logging
+from app import (
+    capture,
+    console,
+    design,
+    design_store,
+    generate_jobs,
+    gns3_vm_deploy_jobs,
+    import_jobs,
+    lifecycle,
+    logs,
+    project_bundle,
+    settings_profiles,
+    topology_write,
+    vm_screen,
+)
 from app.config_push import DeviceResult, push_all
 from app.gns3_state import (
     NoLiveProject,
@@ -37,13 +49,19 @@ from app.gns3_state import (
     resolve_project_id,
 )
 from app.layout import load_layout, save_position
+from app.logging_setup import configure_logging
 from app.topology import load_graph, resolve_project_name
 
 # Widened alongside (RuntimeError, ConnectionError, TimeoutError) on the
 # live /nodes and /links endpoints below - a template-service outage
 # surfaces as requests.exceptions.RequestException (e.g. ConnectionError,
 # which is NOT the builtin ConnectionError), not just the three above.
-_LIVE_WRITE_ERRORS = (RuntimeError, ConnectionError, TimeoutError, requests.exceptions.RequestException)
+_LIVE_WRITE_ERRORS = (
+    RuntimeError,
+    ConnectionError,
+    TimeoutError,
+    requests.exceptions.RequestException,
+)
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _LICENSE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "LICENSE")
@@ -230,9 +248,7 @@ def topology() -> list[dict[str, Any]]:
             "image": node.image,
             "environment": node.env.name,
             "interfaces": {
-                if_name: (
-                    intf.neighbour.name if intf.neighbour is not None else None
-                )
+                if_name: (intf.neighbour.name if intf.neighbour is not None else None)
                 for if_name, intf in node.interfaces.items()
             },
         }
@@ -552,6 +568,7 @@ def set_drawings(request: DrawingsRequest) -> dict[str, str]:
 # endpoints above so the frontend's one canvas renderer covers both,
 # but nothing here ever touches ESXi/GNS3 or Settings.TOPOLOGY_FILE.
 
+
 @app.get("/design/templates")
 def design_templates() -> dict[str, Any]:
     try:
@@ -739,7 +756,9 @@ def reload_gns3_project() -> dict[str, str]:
     the real bug this fixes.
     """
     if app.state.gns3_vm_ip is None or app.state.project_id is None:
-        raise HTTPException(503, app.state.startup_warning or "no live GNS3 project resolved")
+        raise HTTPException(
+            503, app.state.startup_warning or "no live GNS3 project resolved"
+        )
     try:
         reload_project(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
     except (requests.RequestException, TimeoutError) as exc:
@@ -752,7 +771,7 @@ class DeployGns3VmRequest(BaseModel):
 
 
 @app.post("/gns3-vm/deploy")
-def deploy_gns3_vm(request: DeployGns3VmRequest = DeployGns3VmRequest()) -> dict[str, str]:
+def deploy_gns3_vm(request: DeployGns3VmRequest | None = None) -> dict[str, str]:
     """
     Kicks off a background job that replaces the configured GNS3 VM
     with a freshly imported one from gns3_vm_ova_path - the same action
@@ -766,8 +785,9 @@ def deploy_gns3_vm(request: DeployGns3VmRequest = DeployGns3VmRequest()) -> dict
     src.gns3_vm_deploy.deploy_fresh_gns3_vm's own docstring for why that
     ordering matters. Poll GET /gns3-vm/deploy/{job_id} for progress.
     """
+    delete_old_vm = request.delete_old_vm if request is not None else False
     try:
-        job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=request.delete_old_vm)
+        job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=delete_old_vm)
     except gns3_vm_deploy_jobs.NotConfigured as exc:
         raise HTTPException(400, str(exc))
     except gns3_vm_deploy_jobs.AlreadyRunning as exc:
@@ -835,7 +855,11 @@ def import_job_status(job_id: str) -> dict[str, Any]:
         raise HTTPException(404, f"no import job {job_id!r}")
 
     completed = import_jobs.poll_progress(app, job)
-    response: dict[str, Any] = {"status": job.status, "total": job.total, "completed": completed}
+    response: dict[str, Any] = {
+        "status": job.status,
+        "total": job.total,
+        "completed": completed,
+    }
     if job.status == "error":
         response["error"] = job.error
         response["error_kind"] = job.error_kind

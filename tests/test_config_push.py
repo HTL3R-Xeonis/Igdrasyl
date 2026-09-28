@@ -119,12 +119,15 @@ def test_push_all_dispatches_by_environment_and_reports_unknown_device(
     live_nodes = [
         {"name": "R1", "console": port, "console_type": "telnet", "status": "started"}
     ]
-    with patch("app.config_push.list_live_nodes", return_value=live_nodes), patch.object(
-        cp, "guest_credentials_for_image", return_value=("u", "p")
+    with (
+        patch("app.config_push.list_live_nodes", return_value=live_nodes),
+        patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")),
     ):
         fake_vm = MagicMock()
         app_state.esxi_connection.get_vm.return_value = fake_vm
-        process_manager = app_state.esxi_connection.content.guestOperationsManager.processManager
+        process_manager = (
+            app_state.esxi_connection.content.guestOperationsManager.processManager
+        )
         process_manager.StartProgramInGuest.return_value = 1
         process_manager.ListProcessesInGuest.return_value = [
             MagicMock(endTime="t", exitCode=0)
