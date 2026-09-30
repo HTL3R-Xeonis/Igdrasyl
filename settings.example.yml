@@ -1,11 +1,10 @@
 # Optional settings overrides for TopologyOperator, loaded via the
-# TOPOLOGYOPERATOR_SETTINGS env var (defaults to ./settings.yml).
+# TOPOLOGYOPERATOR_SETTINGS env var.
 # Copy this file to settings.yml (git-ignored) and fill in your own values.
 #
 # This reuses TopologyBuilder's own Settings class/YAML schema wholesale -
-# TopologyOperator doesn't have a config format of its own, it just needs
-# to point at the SAME topology file and infrastructure a TopologyBuilder
-# deploy already used, so it can look up what's actually running.
+# Select the topology separately using Project on the host tile.
+# Existing profiles containing topology_file remain compatible.
 # Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
 # GNS3_PASSWORD environment variables instead (a .env file works too, see
 # .env.example). GNS3_PASSWORD specifically is only needed for Phase B's
@@ -13,10 +12,8 @@
 # rebuild its VLAN trunk subinterfaces on every call. Read-only endpoints
 # work fine without it.
 
-# Path to the SAME topology YAML file a `topologybuilder deploy` already
-# used - this is what TopologyOperator reads to know what nodes/edges
-# should exist, before cross-referencing live GNS3/ESXi state.
-topology_file: ./topology_example.yaml
+# A host can be configured before any topology exists. Project selection
+# is stored separately by TopologyOperator, outside this host profile.
 
 # Where this process's own log file is written (rotated at 10MB) -
 # same setting, same format, as TopologyBuilder's own CLI logging (see
@@ -107,10 +104,7 @@ esxi:
 
 gns3:
   username: gns3
-  # Must match the project name that deploy actually used - omit (or
-  # comment out) to default to the topology file's own stem, same rule
-  # TopologyBuilder itself uses.
-  # project_name: tb_gns3_project
+  # Select the GNS3 project name using Project on the host tile.
   port: 80
 
 api:

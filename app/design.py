@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import yaml
 from src.graph.environment import Environment
 from src.graph.layout import compute_node_positions
 
@@ -142,6 +143,42 @@ def to_topology_yaml_dict(state: DesignState) -> dict[str, Any]:
         ],
         "edges": [[n1, if1, n2, if2] for n1, if1, n2, if2 in state.links],
     }
+
+
+def from_topology_yaml(text: str) -> DesignState:
+    """Build an editable design from a TopologyBuilder topology document."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid topology YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise TypeError("topology YAML must be a mapping")
+    nodes = data.get("nodes")
+    edges = data.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise TypeError("topology must contain nodes and edges lists")
+
+    state = new_state()
+    for group in nodes:
+        if not isinstance(group, dict):
+            raise TypeError("each node group must be a mapping")
+        names = group.get("names")
+        role = group.get("role")
+        image = group.get("image")
+        if not isinstance(names, list) or not all(
+            isinstance(name, str) for name in names
+        ):
+            raise ValueError("node names must be a list of strings")
+        if not isinstance(role, str) or not isinstance(image, str):
+            raise TypeError("each node group needs string role and image values")
+        for name in names:
+            add_node(state, name, role, image)
+    for edge in edges:
+        if not isinstance(edge, list) or len(edge) != 4:
+            raise ValueError("each edge must contain node, interface, node, interface")
+        add_link(state, *edge)
+    auto_layout(state)
+    return state
 
 
 def to_dict(state: DesignState) -> dict[str, Any]:

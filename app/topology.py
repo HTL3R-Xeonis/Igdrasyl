@@ -30,12 +30,16 @@ def load_graph() -> Graph:
     :raises FileNotFoundError: if the topology file doesn't exist.
     :raises ValueError: if the topology file is invalid.
     """
+    if not Settings.TOPOLOGY_FILE:
+        raise ValueError(
+            "No project selected. Choose Project on the host tile to select a topology."
+        )
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
     return Graph(validator.nodes, validator.edges)
 
 
-def resolve_project_name() -> str:
+def resolve_project_name() -> str | None:
     """
     The GNS3 project name a deploy of Settings.TOPOLOGY_FILE would have
     used: Settings.GNS3.PROJECT_NAME if set, otherwise the topology
@@ -44,4 +48,4 @@ def resolve_project_name() -> str:
     """
     if Settings.GNS3.PROJECT_NAME is not None:
         return Settings.GNS3.PROJECT_NAME
-    return Path(Settings.TOPOLOGY_FILE).stem
+    return Path(Settings.TOPOLOGY_FILE).stem if Settings.TOPOLOGY_FILE else None

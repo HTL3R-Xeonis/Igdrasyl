@@ -21,7 +21,7 @@ infrastructure available so far.
 ## Architecture
 
 - Web app: a FastAPI backend (`app/`) + a plain HTML/JS frontend
-  (`app/static/index.html`), not a native desktop app.
+  (`app/static/index.html`, `styles.css`, `app.js`, and `projects.js`), not a native desktop app.
 - Depends on TopologyBuilder as an installed library
   (`ESXiConnection`/`GNS3Connection`/`Settings`/`Graph`), not a copy of
   its code. Its top-level package name is `src`, so this project's own
@@ -157,7 +157,7 @@ settings for, so it still fails loudly.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-cp settings.example.yml settings.yml   # point topology_file at a real deployed topology
+cp settings.example.yml settings.yml   # configure the ESXi/GNS3 host
 cp .env.example .env                    # fill in ESXI_PASSWORD/GNS3_PASSWORD
 export TOPOLOGYOPERATOR_SETTINGS=settings.yml
 uvicorn app.main:app --reload
@@ -169,7 +169,81 @@ UI's own "Add host" tile; the file `TOPOLOGYOPERATOR_SETTINGS` points
 at on startup shows up there too, already marked active, so a first run
 has something to click into immediately.
 
+## Host configuration designer and settings
+
+Choose **Design a host configuration** on the home screen to build a host
+profile. Five guided sections cover 22 host/runtime settings, with
+TopologyBuilder defaults filled in and automatic options left blank.
+The final review shows the generated YAML. **Download YAML** saves a local copy;
+**Create host** adds a named profile without activating it or deploying anything.
+Existing filenames are rejected rather than overwritten.
+
+Each host tile's **Settings** button opens the same grouped editor for an existing
+profile. Optional values, booleans, ports, protected port-group lists, and MAC
+ranges have dedicated inputs and validation. Passwords remain server environment
+variables (`ESXI_PASSWORD` and `GNS3_PASSWORD`), because the settings loader does
+not accept passwords in YAML.
+
+**Test connections** uses the unsaved form values from the server. Each service
+shows its address, check type, elapsed time, status, and diagnostic message.
+ESXi and GNS3 checks test TCP reachability; API checks request the base URL.
+An HTTP 404 means the server responded but has no base-path route; these checks
+do not authenticate or run generation/deployment. GNS3 is skipped until its VM
+address is known for the selected host.
+
+**Save settings** retains unexposed YAML settings but removes YAML comments.
+**Apply / restart** activates the saved profile through the existing restart flow;
+open consoles disconnect. The active settings file is included even when it
+lives outside the uploaded profiles directory.
+
+## Selecting a project independently
+
+A host profile does not need a topology file. Use **Project** on its tile to
+choose a named project from the library and optionally override its GNS3 project
+name. The home screen's **Project library…** button creates empty projects or
+uploads topology YAML (up to 2 MB), and downloads their YAML again. Uploaded
+files are validated with TopologyBuilder's structural checks without contacting
+host template services; template availability is checked at activation.
+
+The application stores each project in `projects/<internal-id>/`, with its display
+name in `project.json` and topology in `topology.yaml`. Override this directory
+with `TOPOLOGYOPERATOR_PROJECTS_DIR`; include it and the selection store in backups.
+Names never become filesystem paths. Duplicate names are allowed as distinct projects.
+The project controls live in the separate `app/static/projects.js` feature file.
+
+Open a library project in the design canvas to edit its topology, drawings, and
+node positions. **Save Project** writes those parts back to that project only;
+each library project therefore retains its own canvas layout. **Deploy to Host…**
+shows the target ESXi address, GNS3 VM, node/link totals, role totals, and whether
+the host uses incremental or full deployment. The preview is read-only. Starting
+deployment selects the project for that host; if the host or project is not active,
+the app restarts once and resumes the confirmed deployment afterward.
+
+Choose **No project selected** to clear the selection. Existing server files remain
+available through **Existing server file (Advanced)** for migration. Save the selection,
+then use **Apply / restart** (or activate that host later). Selecting a project
+does not deploy it; importing a `.topoproj` remains an explicit deployment.
+
+Selections live in `project_selections.json`, keyed by host profile path, and
+survive restarts. Override the store path with `TOPOLOGYOPERATOR_PROJECT_SELECTIONS`.
+The same topology can be selected for different hosts. Existing profiles with
+`topology_file` and `gns3.project_name` remain compatible: those values are used
+until a separate selection is saved, including an explicit empty selection.
+New host YAML downloads contain neither field. TopologyBuilder's global settings
+are populated from the selection only at startup, so project changes use the
+same restart flow as host changes. Import and live edits require a selected project.
+
 ## Endpoints
+
+- `GET /projects`, `POST /projects` (name plus optional topology_yaml),
+  `GET /projects/{id}/download`: managed project library, with no deployment.
+- `POST /design/project/{id}/open`, `PUT /design/project/{id}`: open and save a
+  library project in the offline design canvas.
+- `GET /projects/{id}/deploy-preview/{host}`, `POST /projects/{id}/deploy/{host}`:
+  inspect and start a library deployment. The start endpoint requires that host
+  and project to be active after any required restart.
+- `GET/PUT /settings-profiles/{filename}/project`: independent host selection;
+  PUT accepts a library `project_id` or an advanced `topology_file` path.
 
 - `GET /health` (includes `warning` - see the graceful-degrade point
   above), `POST /reload` (manual retry once a down dependency recovers),

@@ -1,0 +1,1617 @@
+:root {
+    color-scheme: dark;
+    /* Neutral dark grey, GNS3 Desktop's own Qt-Fusion-dark-style base -
+       true R=G=B greys throughout, no blue/green cast in the chrome. */
+    --bg: #2b2b2b;
+    --panel: #333333;
+    --panel-2: #3c3c3c;
+    --border: #4a4a4a;
+    --text: #e0e0e0;
+    --dim: #a0a0a0;
+    /* Mint's own green, used for anything interactive/selected. */
+    --accent: #7cb342;
+    --accent-dim: #567a2e;
+    /* Deliberately a different, truer green from --accent so "this is
+       clickable" and "this is running" stay visually distinct. */
+    --ok: #4caf50;
+    --warn: #e0a63e;
+    --bad: #e05a5a;
+    /* The canvas itself is a deliberately separate, light surface -
+       everything else (header, panels, modals) stays the dark theme
+       above; only the SVG drawing area below uses these. */
+    --canvas-bg: #ffffff;
+    --canvas-grid-dot: #dde1e4;
+    --canvas-text: #1f2328;
+    --canvas-dim-text: #7a828c;
+    --canvas-status-unknown-stroke: #c7cbd1;
+    --canvas-link: #000000;
+  }
+  * { box-sizing: border-box; }
+  /* Without this, an element with an ID-selector display rule (flex,
+     block, ...) stays visible despite the `hidden` attribute - the
+     browser's own [hidden] default rule loses the specificity fight
+     against any #id{display:...} rule. Hit #node-actions this way. */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    /* Matches GNS3's own real web UI (a Roboto-led stack, confirmed via
+       its own computed styles - Angular Material's default), rather
+       than this app's previous generic system-font stack. */
+    font-family: Roboto, "Helvetica Neue", Arial, "Segoe UI", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  /* GNS3 Desktop's own top menu bar: a compact brand mark, then real
+     dropdown menus (File/View) instead of a row of loose buttons. */
+  header#menubar {
+    height: 40px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  #menubar-menus { display: flex; align-items: center; height: 100%; }
+  /* Loading feedback for slow, live-deploying actions (import project,
+     add node/VM) - shown right next to the menus, not a full-page
+     overlay, since the rest of the app stays usable while these run. */
+  #menubar-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  #menubar-status:empty { display: none; }
+  .menubar-spinner {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: menubar-spin 0.8s linear infinite;
+  }
+  @keyframes menubar-spin { to { transform: rotate(360deg); } }
+  /* Real (approximated) progress for POST /project/import - see
+     app/import_jobs.py's own docstring on how "completed" is derived.
+     A thin bar rather than the spinner, next to a "N/M" label. */
+  .menubar-progress-track {
+    width: 90px;
+    height: 6px;
+    flex-shrink: 0;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .menubar-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease-out;
+  }
+  .menu { position: relative; height: 100%; }
+  .menu-btn {
+    height: 100%;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+  .menu-btn:hover, .menu-btn.open { background: var(--panel-2); }
+  .menu-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 210px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+    z-index: 20;
+  }
+  .menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 10px 7px 24px;
+    position: relative;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .menu-item:hover { background: var(--panel-2); }
+  .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* For <a class="menu-item"> links that have nowhere to go yet (e.g.
+     the GNS3 Web UI link before any live GNS3 VM is resolved) -
+     :disabled doesn't apply to anchors, so this covers the same look. */
+  .menu-item-disabled { opacity: 0.45; pointer-events: none; }
+  .menu-item.active::before {
+    content: "\2713";
+    position: absolute;
+    left: 8px;
+    color: var(--accent);
+  }
+  .menu-separator { height: 1px; background: var(--border); margin: 4px 2px; }
+  .menu-info-line { padding: 7px 10px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .menu-settings-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .menu-settings-row input[type="number"] {
+    width: 55px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+  .menu-settings-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .menu-settings-checkbox:hover { background: var(--panel-2); }
+  #warning-banner {
+    padding: 8px 20px;
+    background: #3a2c14;
+    color: var(--warn);
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #warning-banner[hidden] { display: none; }
+  #warning-retry-btn {
+    background: transparent;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 3px;
+    padding: 2px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #warning-retry-btn:hover { background: var(--warn); color: #1a1400; }
+  /* A plain wrapper div (toggled via [hidden] when switching to/from
+     the landing page - see enterHost/showLandingView) sits between body
+     and header/main/footer. Without its own flex participation here, it
+     defaults to block layout with an "auto" min-height, so it can never
+     shrink below its content's own height (a classic flexbox pitfall) -
+     real bug found live: a device-palette category with enough entries
+     to not fit on screen (e.g. "All Devices") grew #app-view taller than
+     the viewport instead of scrolling within #palette-list, scrolling
+     the WHOLE page (header/canvas included) rather than just the list. */
+  #app-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  /* Left device-selection dock, GNS3 Desktop's own "Node types" panel -
+     pick a category, click a device, then click the canvas to place it. */
+  #device-palette {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #palette-header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #palette-close-btn {
+    text-transform: none;
+    letter-spacing: normal;
+    background: none;
+    border: none;
+    color: var(--dim);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px;
+  }
+  #palette-close-btn:hover { color: var(--accent); }
+  #palette-categories {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    max-height: 170px;
+    overflow-y: auto;
+  }
+  .palette-cat {
+    text-align: left;
+    background: none;
+    border: none;
+    border-left: 3px solid transparent;
+    color: var(--dim);
+    font-size: 12px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  .palette-cat:hover { background: var(--panel-2); color: var(--text); }
+  .palette-cat.active { background: var(--panel-2); color: var(--text); border-left-color: var(--accent); font-weight: 600; }
+  #palette-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    min-height: 0;
+  }
+  .palette-device {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 1px;
+  }
+  .palette-device:hover { background: var(--panel-2); }
+  .palette-device.armed { background: var(--accent-dim); color: #fff; }
+  .palette-icon { display: flex; flex-shrink: 0; width: 20px; height: 20px; align-items: center; justify-content: center; }
+  .palette-icon svg { display: block; }
+  .palette-empty { padding: 10px 8px; color: var(--dim); font-size: 12px; }
+  #palette-hint {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--warn);
+  }
+  #palette-hint-cancel {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #palette-hint-cancel:hover { border-color: var(--bad); color: var(--bad); }
+  #canvas-area {
+    flex: 1 1 auto;
+    min-width: 0;
+    border-right: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
+  #canvas.panning { cursor: grabbing; }
+  #canvas.placing, #canvas.drawing { cursor: crosshair; }
+  /* Colors/widths for rect/ellipse/line/text are all set per-shape as
+     real SVG presentation attributes in JS (buildDrawingShape) - not
+     here, since a stylesheet rule would win over them in the cascade
+     and silently ignore whatever color the operator actually picked. */
+  /* pointer-events: all - without it, an unfilled rect/ellipse
+     (fill="none", the default) only responds to clicks on its thin
+     stroke line, not its interior, which makes it nearly impossible
+     to click in practice. */
+  .drawing-shape { cursor: pointer; pointer-events: all; }
+  .drawing-draft { opacity: 0.6; stroke-dasharray: 4 3; }
+  .drawing-handle {
+    fill: var(--panel);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    cursor: nwse-resize;
+  }
+  /* The inline canvas text editor - a plain HTML input positioned
+     right over where its SVG <text> would render, not a modal popup. */
+  .canvas-text-editor {
+    position: fixed;
+    z-index: 250;
+    background: #fff;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: inherit;
+    line-height: 1.3;
+    outline: none;
+    min-width: 60px;
+  }
+  .grid-dot { fill: var(--canvas-grid-dot); }
+  .grid-bg { pointer-events: none; }
+  /* GNS3 Desktop's own node look: just the device icon and its label,
+     no card/box around it - only a dashed selection outline when
+     selected, and a small corner dot showing whether it's running. */
+  .node-shape { cursor: pointer; }
+  .node-shape text { fill: var(--canvas-text); font-size: 11px; pointer-events: none; user-select: none; }
+  .node-select-box { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: 0; }
+  .node-shape.selected .node-select-box { opacity: 1; }
+  .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-bg); stroke-width: 1.5; }
+  .status-dot.status-off { fill: var(--bad); stroke: var(--canvas-bg); stroke-width: 1.5; }
+  .status-dot.status-starting { fill: var(--warn); stroke: var(--canvas-bg); stroke-width: 1.5; }
+  .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
+  .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
+  .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
+  .link-line-capturing { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
+  .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
+  .port-label { fill: var(--canvas-link); font-size: 9px; pointer-events: none; user-select: none; }
+  #canvas-toolbar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 5;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  button.toolbar-btn, a.toolbar-btn {
+    font-size: 12px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+    text-decoration: none;
+    display: inline-block;
+  }
+  button.toolbar-btn:hover, a.toolbar-btn:hover { border-color: var(--accent); background: var(--panel-2); }
+  button.toolbar-btn.active { border-color: var(--accent); color: var(--accent); }
+  button.toolbar-btn.primary { background: var(--accent); color: #10130f; border-color: var(--accent); font-weight: 600; }
+  button.toolbar-btn.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
+  button.toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  #link-mode-hint { font-size: 12px; color: var(--warn); }
+  .env-tag {
+    font-size: 11px;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  /* Node-actions popup: a vertical, context-menu-style list - a header
+     row with the node's identity, then one full-width row per action,
+     stacked underneath each other instead of wrapping pill buttons. */
+  #node-actions-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  #node-actions button.console-btn, #link-actions button.console-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 13px;
+    background: none;
+    color: var(--text);
+    font-weight: 400;
+    border: none;
+    border-radius: 0;
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  #node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
+  #node-actions button.console-btn:disabled, #link-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
+  #right-panel {
+    width: var(--right-panel-width, 360px);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #right-panel-resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+  }
+  #right-panel-resize-handle:hover, #right-panel-resize-handle.dragging { background: var(--accent); }
+  #topology-summary {
+    flex-shrink: 0;
+    height: 260px;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* Drag up/down to reallocate space between Topology Summary and the
+     Console/Screen area below it - #topology-summary gets an explicit
+     pixel height (dragged), #console-area (flex: 1) just takes
+     whatever's left. */
+  #panel-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: row-resize;
+    background: var(--border);
+  }
+  #panel-resize-handle:hover, #panel-resize-handle.dragging { background: var(--accent); }
+  #console-area-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+  }
+  #popout-btn {
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: normal;
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+  #popout-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #console-area-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--dim);
+    font-size: 13px;
+    text-align: center;
+  }
+  #topology-summary-list {
+    list-style: none;
+    margin: 0;
+    padding: 8px 6px;
+    overflow-y: auto;
+  }
+  .summary-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .summary-row:hover { background: var(--panel-2); }
+  .summary-row.selected { background: var(--panel-2); }
+  .summary-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .summary-dot.status-ok { background: var(--ok); }
+  .summary-dot.status-off { background: var(--bad); }
+  .summary-dot.status-starting { background: var(--warn); }
+  .summary-dot.status-unknown { background: transparent; border: 1.5px solid var(--dim); }
+  .summary-icon { display: flex; flex-shrink: 0; }
+  .summary-icon svg { display: block; }
+  .summary-name { font-weight: 500; }
+  .summary-status { margin-left: auto; color: var(--dim); font-size: 11px; }
+  .summary-empty { padding: 6px 8px; color: var(--dim); font-size: 12px; }
+  /* A floating popup near whatever was clicked (a canvas icon, or a
+     Topology Summary row) - not docked in the page flow, so it stays
+     out of #console-area's own layout (that's just the live session
+     area now). */
+  #node-actions, #link-actions {
+    position: fixed;
+    z-index: 150;
+    min-width: 180px;
+    max-width: 240px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    padding: 10px 0;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+  }
+  #link-actions-header {
+    padding: 0 12px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--dim);
+  }
+  #console-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* Session tabs - one per open console/screen, shown side by side like
+     terminal tabs, each keeping its own live connection running even
+     while a different tab is the active/visible one. */
+  #session-tabbar {
+    display: flex;
+    gap: 2px;
+    padding: 4px 4px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .session-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 10px;
+    background: var(--bg);
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 180px;
+    flex-shrink: 0;
+  }
+  .session-tab.active { background: var(--panel-2); color: var(--text); }
+  .session-tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
+  .session-tab-dot.status-ok { background: var(--ok); }
+  .session-tab-dot.status-bad { background: var(--bad); }
+  .session-tab-label { overflow: hidden; text-overflow: ellipsis; }
+  .session-tab-close {
+    margin-left: 2px;
+    color: var(--dim);
+    border-radius: 3px;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .session-tab-close:hover { background: var(--border); color: var(--text); }
+  #console-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dim);
+    font-size: 13px;
+    text-align: center;
+    padding: 16px;
+  }
+  #session-panels { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+  /* Inactive session panels are NOT display:none - a hidden VM screen
+     (noVNC canvas) genuinely disconnects after a few seconds of that
+     (confirmed live: stays connected indefinitely while display:none
+     is never applied, but drops within ~10s once it is - some
+     rendering/keepalive path noVNC relies on evidently stalls when
+     its container leaves the render tree entirely). visibility:hidden
+     keeps it rendering/connected while genuinely invisible and inert;
+     position:absolute takes it out of #session-panels' own flex flow
+     so only the .active one affects layout. */
+  .session-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .session-panel.active { position: relative; flex: 1; }
+  .session-panel:not(.active) {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .session-panel-header {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .session-panel-title { color: var(--text); font-weight: 500; }
+  .session-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .session-terminal { flex: 1; padding: 8px; min-height: 0; }
+  .session-screen {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    background: #000;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+  }
+  .session-screen canvas { max-width: 100%; max-height: 100%; }
+  #push-area { width: var(--right-panel-width, 360px); flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow-y: auto; }
+  #push-area textarea {
+    width: 100%;
+    height: 140px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+  #push-area button.push-btn {
+    align-self: flex-start;
+    margin-top: 8px;
+    font-size: 13px;
+    background: var(--accent);
+    color: #10130f;
+    font-weight: 600;
+    border: none;
+    border-radius: 5px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  #push-results { margin-top: 16px; font-size: 13px; }
+  .device-result { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+  .device-result-header { padding: 6px 10px; display: flex; justify-content: space-between; background: var(--panel); }
+  .device-result-header.ok { border-left: 3px solid var(--ok); }
+  .device-result-header.fail { border-left: 3px solid var(--bad); }
+  .device-result table { font-size: 12px; }
+  .device-result td { border-bottom: 1px solid var(--border); }
+  .cmd-ok { color: var(--ok); }
+  .cmd-fail { color: var(--bad); }
+  /* View > Logs - tails Settings.LOG_FILE_PATH (see app/logs.py),
+     colored the same way loguru's own colorized console output would
+     be for TopologyBuilder's identical log format (see
+     app/logging_setup.py - kept byte-for-byte the same on purpose). */
+  #logs-area { width: var(--right-panel-width, 360px); flex-shrink: 0; display: flex; flex-direction: column; min-width: 0; padding: 16px; overflow: hidden; }
+  #logs-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-shrink: 0; }
+  #logs-toolbar .toolbar-btn { font-size: 12px; padding: 4px 10px; }
+  #logs-output {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  /* Two rows per entry, not one wide one - the sidebar's own width
+     (var(--right-panel-width), typically 360px) isn't enough to fit a
+     full timestamp + level + location + message on a single line
+     without squeezing the message into an unreadably narrow column. */
+  .log-line { margin-bottom: 4px; }
+  .log-line-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .log-line-time { color: var(--ok); flex-shrink: 0; }
+  .log-line-level { flex-shrink: 0; width: 8ch; font-weight: 700; }
+  .log-line-location { color: var(--accent); }
+  .log-line-message { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .log-level-INFO { color: var(--text); }
+  .log-level-DEBUG, .log-level-TRACE { color: var(--dim); }
+  .log-level-SUCCESS { color: var(--ok); }
+  .log-level-WARNING { color: var(--warn); }
+  .log-level-ERROR, .log-level-CRITICAL { color: var(--bad); }
+  .log-line-raw { color: var(--dim); white-space: pre-wrap; word-break: break-word; }
+  #logs-empty { color: var(--dim); font-size: 12px; }
+  #status-bar {
+    flex-shrink: 0;
+    height: 28px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 11px;
+    color: var(--dim);
+    gap: 16px;
+  }
+  #status-connection { padding: 8px 16px 0; font-size: 11px; color: var(--dim); }
+  #status-bar .spacer { flex: 1; }
+  #status-zoom { display: flex; align-items: center; gap: 6px; }
+  #status-zoom button {
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #status-zoom button:hover { border-color: var(--accent); color: var(--accent); }
+  #zoom-readout { min-width: 38px; text-align: center; }
+  button.toolbar-btn.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  button.toolbar-btn.danger:hover { background: #c94b4b; border-color: #c94b4b; }
+  #modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  #modal-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    width: 380px;
+    max-width: 90vw;
+    padding: 16px;
+  }
+  #modal-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+  #modal-message { margin: 0 0 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.4; }
+  #modal-field-wrap { margin-bottom: 14px; }
+  #modal-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  #modal-textarea {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+  #modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  /* Live in-browser packet view for a running capture (see app/capture.py -
+     GET .../capture/stream) - decodes the raw pcap stream client-side into
+     a Wireshark-style table instead of only handing the user a copyable
+     command for a real, external Wireshark. */
+  #capture-viewer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  #capture-viewer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    width: 90vw;
+    max-width: 1100px;
+    height: 80vh;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  #capture-viewer-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #capture-viewer-title { font-size: 14px; font-weight: 600; }
+  #capture-viewer-status { font-size: 12px; color: var(--dim); }
+  #capture-viewer-wireshark-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #capture-viewer-wireshark-label { font-size: 12px; color: var(--dim); flex-shrink: 0; }
+  #capture-viewer-wireshark-command {
+    flex: 1;
+    min-width: 0;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+  }
+  #capture-viewer-wireshark-status { font-size: 11px; color: var(--dim); flex-shrink: 0; }
+  #capture-viewer-table-wrap { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 4px; min-height: 0; }
+  #capture-viewer-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: monospace; }
+  #capture-viewer-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel-2);
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  #capture-viewer-table td { padding: 3px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; }
+  #capture-viewer-table td:last-child { white-space: normal; }
+  #capture-viewer-table tbody tr:hover { background: var(--panel-2); }
+  #capture-viewer-table tbody tr.selected { background: var(--accent); color: #fff; }
+  #capture-viewer-detail-wrap {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    min-height: 0;
+    margin-top: 8px;
+  }
+  #capture-viewer-detail-tree, #capture-viewer-detail-hex {
+    flex: 1;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  #capture-viewer-detail-tree { font-family: inherit; }
+  #capture-viewer-detail-tree summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+  #capture-viewer-detail-tree .detail-field { padding: 1px 0 1px 18px; color: var(--dim); }
+  #capture-viewer-detail-tree .detail-field span { color: var(--text); }
+  #capture-viewer-detail-hex { font-family: monospace; white-space: pre; }
+  .capture-proto-TCP { color: var(--accent); }
+  .capture-proto-UDP { color: var(--ok); }
+  .capture-proto-ARP { color: var(--warn); }
+  .capture-proto-ICMP { color: var(--bad); }
+  /* Landing page - the app's own entry point, a grid of clickable host
+     tiles (one per uploaded settings.yml profile, see
+     app/settings_profiles.py). #app-view (the whole existing
+     menubar+canvas UI) and #landing-view are mutually exclusive - see
+     showLandingView()/enterHost(). */
+  #landing-view {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 64px 24px;
+    background: var(--bg);
+  }
+  #landing-header { text-align: center; margin-bottom: 36px; }
+  #landing-header h1 { margin: 0 0 6px; font-size: 22px; }
+  .landing-subtitle { margin: 0; font-size: 13px; color: var(--dim); }
+  #landing-host-grid, #landing-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 18px;
+    max-width: 760px;
+    width: 100%;
+  }
+  .landing-section-label {
+    width: 100%;
+    max-width: 760px;
+    margin: 32px 0 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  #landing-generate-status {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--dim);
+    text-align: center;
+    max-width: 500px;
+  }
+  #landing-generate-status .landing-generate-warning { color: var(--warn); }
+  #landing-license-link {
+    margin-top: 40px;
+    font-size: 11px;
+    color: var(--dim);
+    text-decoration: none;
+  }
+  #landing-license-link:hover { color: var(--accent); text-decoration: underline; }
+  .landing-host-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 18px 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .landing-host-tile:hover { border-color: var(--accent); transform: translateY(-2px); }
+  /* Source SVG fill is a dark slate grey, meant for a light background
+     - brightness(0) flattens it to solid black first (ignoring that
+     original shade), then invert makes it a soft off-white matching
+     the rest of this dark theme's icon/text tones instead of pure
+     white. */
+  .landing-host-icon { width: 46px; height: 46px; filter: brightness(0) invert(0.88); }
+  .landing-host-name {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    word-break: break-word;
+    max-width: 100%;
+  }
+  .landing-host-active-dot {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .landing-host-delete-btn {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    background: none;
+    border: none;
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 4px;
+  }
+  .landing-host-delete-btn:hover { color: var(--bad); background: rgba(255, 255, 255, 0.06); }
+  .landing-host-tile.add-tile { border-style: dashed; color: var(--dim); }
+  .landing-host-tile.add-tile:hover { color: var(--accent); }
+  .landing-host-tile.add-tile .landing-host-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    opacity: 0.7;
+  }
+  /* A real dropdown, not a popup - no dark overlay, just a small
+     floating box positioned next to whatever was clicked. */
+  .inline-dropdown {
+    position: fixed;
+    z-index: 200;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 8px;
+    min-width: 170px;
+  }
+  .inline-dropdown-title { font-size: 11px; color: var(--dim); margin-bottom: 6px; white-space: nowrap; }
+  .inline-dropdown-hint { font-size: 10px; color: var(--dim); margin-top: 5px; white-space: nowrap; }
+  .inline-dropdown-select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  .drawing-popup { min-width: 160px; }
+  .drawing-style-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .drawing-style-row label { flex: 0 0 40px; color: var(--dim); }
+  .drawing-style-row input[type="color"] {
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+  }
+  .drawing-style-row input[type="number"] {
+    width: 55px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 5px;
+    font-size: 12px;
+  }
+  .drawing-style-clear {
+    margin-left: auto;
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+  .drawing-style-clear:hover { border-color: var(--accent); color: var(--accent); }
+  /* Custom RGBA color field - a checkerboard-backed swatch button that
+     opens a small popover with a native hue/sat picker (still the
+     easiest reliable way to pick a hue - no reason to reinvent a
+     canvas gradient picker for that part), an alpha slider, and a
+     live rgba()/hex text field for direct/paste entry. See
+     buildColorField(). */
+  .color-field { position: relative; }
+  .color-swatch-btn {
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    background-image:
+      linear-gradient(45deg, #808080 25%, transparent 25%),
+      linear-gradient(-45deg, #808080 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #808080 75%),
+      linear-gradient(-45deg, transparent 75%, #808080 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+    background-color: #fff;
+  }
+  .color-swatch-btn:hover, .color-swatch-btn:focus-visible { border-color: var(--accent); outline: none; }
+  .color-swatch-fill { position: absolute; inset: 0; border-radius: 3px; pointer-events: none; }
+  .color-popover {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 6px);
+    left: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 190px;
+  }
+  .color-popover-row { display: flex; align-items: center; gap: 8px; }
+  .color-popover input[type="color"] {
+    width: 30px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .color-alpha-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 12px;
+    border-radius: 6px;
+    background-image:
+      linear-gradient(45deg, #808080 25%, transparent 25%),
+      linear-gradient(-45deg, #808080 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #808080 75%),
+      linear-gradient(-45deg, transparent 75%, #808080 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+    background-color: #fff;
+  }
+  .color-alpha-slider::-webkit-slider-runnable-track { height: 12px; border-radius: 6px; }
+  .color-alpha-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+    margin-top: -1px;
+    cursor: pointer;
+  }
+  .color-alpha-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .color-alpha-readout { flex: 0 0 34px; text-align: right; color: var(--dim); font-size: 11px; }
+  .color-text-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  .color-text-input:focus { border-color: var(--accent); outline: none; }
+  /* Rotate handle - a small circle on a stalk above the shape's own
+     center, wrapped in the same rotate() transform as the shape
+     itself so it visually orbits with its current angle. */
+  .drawing-rotate-line { stroke: var(--accent); stroke-width: 1; }
+  .drawing-rotate-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: grab; }
+  .drawing-rotate-handle:active { cursor: grabbing; }
+  .drawing-layer-row { display: flex; gap: 4px; padding: 2px 4px; }
+  .drawing-layer-row .menu-item { flex: 1; text-align: center; font-size: 11px; padding: 6px 4px; }
+  .drawing-delete-btn {
+    width: calc(100% - 8px);
+    margin: 6px 4px 2px;
+    text-align: center;
+    background: var(--bad);
+    color: #fff;
+  }
+
+  #connection-dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; width: 620px; max-width: 92vw; max-height: 85vh; overflow: auto; }
+  #connection-dialog::backdrop { background: rgba(0,0,0,.55); }
+  #connection-fields { display: grid; gap: 10px; }
+  #connection-fields label { display: grid; gap: 4px; font-size: 13px; }
+  #connection-fields input { padding: 7px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+  #connection-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  #connection-results { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
+  #connection-dialog { width: 820px; padding: 24px; }
+  #connection-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  #connection-fields fieldset { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; border: 0; padding: 12px 0; }
+  #connection-fields legend { font-size: 18px; font-weight: 600; padding: 8px 0; }
+  #connection-fields input, #connection-fields textarea, #connection-fields select, #connection-name { box-sizing: border-box; width: 100%; padding: 9px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+  #connection-fields small { color: var(--muted); line-height: 1.45; }
+  #connection-actions { position: sticky; bottom: -24px; background: var(--panel); padding: 16px 0; border-top: 1px solid var(--border); }
+  #connection-yaml { max-height: 340px; overflow: auto; background: var(--bg); padding: 16px; font-size: 12px; }
+  #connection-results { margin-top: 16px; white-space: normal; display: grid; gap: 10px; }
+  .connection-result { padding: 12px; border: 1px solid var(--border); border-left: 4px solid var(--muted); border-radius: 5px; overflow-wrap: anywhere; }
+  .connection-result.reachable { border-left-color: #49b985; }
+  .connection-result.warning { border-left-color: #e3b34f; }
+  .connection-result.error { border-left-color: var(--bad); }
+  .connection-result p { margin: 6px 0; }
+  @media (max-width: 600px) { #connection-fields fieldset { grid-template-columns: 1fr; } #connection-dialog { padding: 14px; } }
+
+/* Shared desktop control styling, inspired by GNS3's Qt interface. */
+:root {
+  --accent: #aeb4bb;
+  --accent-dim: #6b727a;
+  --muted: var(--dim);
+  --control-face: #414141;
+  --control-hover: #505050;
+  --selection: #454b52;
+}
+body { font-family: "Segoe UI", "Noto Sans", Arial, sans-serif; font-size: 13px; }
+button, input, select, textarea { font: inherit; }
+button, a.toolbar-btn { border-radius: 2px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
+[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { cursor: default; opacity: .45; }
+button.toolbar-btn, a.toolbar-btn, .console-btn, .drawing-style-clear {
+  min-height: 27px; padding: 4px 12px; border-radius: 2px;
+  border: 1px solid #202020; border-top-color: #626262;
+  background: linear-gradient(#474747, #393939); color: var(--text);
+  box-shadow: inset 0 0 0 1px #ffffff05; font-size: 12px;
+}
+button.toolbar-btn:hover:not(:disabled), a.toolbar-btn:hover, .console-btn:hover:not(:disabled) {
+  background: var(--control-hover); border-color: #777;
+}
+button.toolbar-btn:active:not(:disabled), .console-btn:active:not(:disabled) {
+  background: #303030; border-color: #777; box-shadow: inset 0 1px 3px #0006;
+}
+button.toolbar-btn.primary, button.toolbar-btn.active {
+  background: var(--selection); border-color: var(--accent); color: #fff; font-weight: 500;
+}
+button.toolbar-btn.primary:hover:not(:disabled) { background: #5b6168; border-color: #92989f; }
+button.toolbar-btn.danger { background: #593939; border-color: #a86a6a; color: #ffe5e5; }
+button.toolbar-btn.danger:hover:not(:disabled) { background: #754444; border-color: #cc8888; }
+header#menubar { height: 30px; padding: 0 6px; background: #353535; }
+.menu-btn { font-size: 12px; padding: 0 10px; border-radius: 0; }
+.menu-btn:hover, .menu-btn.open { background: var(--selection); }
+.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions {
+  border-radius: 2px; border: 1px solid #676767;
+  background: #353535; box-shadow: 2px 3px 8px #0007;
+}
+.menu-dropdown { padding: 3px; }
+.menu-item, .menu-settings-checkbox { border-radius: 0; font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
+.menu-item:hover:not(:disabled), .menu-settings-checkbox:hover,
+#node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled) {
+  background: var(--selection); color: #fff;
+}
+#node-actions button.console-btn, #link-actions button.console-btn { box-shadow: none; min-height: 27px; }
+.menu-separator { background: #555; border-bottom: 1px solid #262626; }
+#modal-box, #capture-viewer, #connection-dialog, #project-selection-dialog {
+  border-radius: 3px !important; border: 1px solid #737373 !important;
+  box-shadow: 0 8px 28px #0008; background: #353535;
+}
+#connection-title, #project-selection-title, #modal-title {
+  margin: -2px 0 14px; padding-bottom: 10px; border-bottom: 1px solid #555; font-size: 14px;
+}
+#connection-fields input, #connection-fields textarea, #connection-fields select,
+#connection-name, #project-selection-form input, #modal-input, #modal-textarea {
+  border: 1px solid #191919; border-bottom-color: #595959;
+  border-radius: 2px; background: #292929; color: var(--text); padding: 6px 8px;
+}
+#connection-tabs { gap: 0; border-bottom: 1px solid #666; }
+#connection-tabs .toolbar-btn { border-radius: 3px 3px 0 0; box-shadow: none; margin-right: 2px; }
+#connection-tabs .toolbar-btn.primary { background: #494949; border-bottom-color: #494949; }
+#connection-fields legend { font-size: 13px; }
+#connection-fields label > span { text-transform: none; }
+#connection-actions, #modal-actions { gap: 6px; }
+.connection-result { border-radius: 2px; background: #303030; }
+#landing-view { padding: 32px 24px; align-items: stretch; max-width: 1000px; margin: 0 auto; width: 100%; }
+#landing-header { text-align: left; margin-bottom: 22px; padding-bottom: 14px; border-bottom: 1px solid #555; }
+#landing-header h1 { font-size: 20px; font-weight: 500; }
+#landing-host-grid { display: flex; flex-direction: column; max-width: none; gap: 5px; }
+#landing-actions-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: none; }
+.landing-section-label { max-width: none; margin-top: 24px; padding-top: 14px; }
+.landing-host-tile {
+  border-radius: 2px; padding: 12px; gap: 10px; background: #353535;
+  color: var(--text); transition: background .1s; border: 1px solid #555;
+}
+.landing-host-tile:hover { transform: none; border-color: #747a81; background: #3e4349; }
+#landing-host-grid .landing-host-tile { flex-direction: row; min-height: 58px; padding-left: 30px; }
+#landing-host-grid .landing-host-icon { order: 0; width: 30px; height: 30px; }
+#landing-host-grid .landing-host-name { order: 1; text-align: left; margin-right: auto; font-size: 13px; }
+#landing-host-grid .toolbar-btn { order: 2; }
+.landing-host-delete-btn { top: 50%; transform: translateY(-50%); left: 3px; border-radius: 2px; }
+.landing-host-active-dot { top: 5px; right: 5px; width: 6px; height: 6px; }
+.landing-host-tile.add-tile { border-style: solid; color: var(--text); font: inherit; }
+.landing-host-tile.add-tile:hover { color: #fff; }
+#landing-actions-grid .landing-host-icon { width: 26px; height: 26px; font-size: 23px; }
+#landing-license-link { align-self: flex-start; margin-top: 24px; }
+@media (max-width: 600px) {
+  #landing-view { padding: 18px 12px; }
+  #landing-actions-grid { grid-template-columns: 1fr; }
+  #landing-host-grid .landing-host-tile { flex-wrap: wrap; }
+  #landing-host-grid .landing-host-name { min-width: 55%; }
+}
+
+/* Project library uses the same compact desktop controls as host settings. */
+#project-selection-dialog {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 2px; width: 560px; max-width: 90vw; max-height: 85vh;
+  overflow: auto; padding: 20px;
+}
+#project-selection-dialog label { display: block; margin: 12px 0; }
+#project-selection-dialog input, #project-selection-dialog select {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 7px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+#project-selection-dialog p { color: var(--dim); line-height: 1.5; }
+#project-selection-dialog hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+#project-selection-dialog summary { cursor: pointer; margin-top: 12px; }
+#project-library-download[hidden] { display: none; }
+
+#deployment-preview-dialog {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 2px; width: 520px; max-width: 90vw; padding: 20px;
+}
+#deployment-preview-dialog label { display: block; margin: 12px 0; }
+#deployment-preview-dialog select {
+  display: block; width: 100%; margin-top: 6px; padding: 7px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+.deployment-summary { border: 1px solid var(--border); margin: 14px 0; }
+.deployment-summary-row {
+  display: grid; grid-template-columns: 150px 1fr; gap: 12px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+.deployment-summary-row:last-child { border-bottom: 0; }
+.deployment-summary-row dt { color: var(--dim); }
+.deployment-summary-row dd { margin: 0; }
+.deployment-warning { color: var(--warning, #d8ad62); }
+
+/* Modern GNS3 desktop refinement: compact application chrome, clear docks,
+   and restrained depth while keeping the familiar menu/canvas/panel layout. */
+:root {
+  --bg: #242424;
+  --panel: #2d2d2d;
+  --panel-2: #393939;
+  --border: #4b4b4b;
+  --text: #e8e8e8;
+  --dim: #a6a6a6;
+  --muted: #a6a6a6;
+  --accent: #aeb4bb;
+  --accent-dim: #6b727a;
+  --selection: #454b52;
+  --control-face: #3b3b3b;
+  --control-hover: #494949;
+  --ok: #63b36d;
+  --warn: #dda84d;
+  --bad: #d66262;
+}
+
+body {
+  background: var(--bg);
+  font-family: Inter, "Segoe UI", "Noto Sans", Arial, sans-serif;
+  font-size: 13px;
+  letter-spacing: .005em;
+}
+
+header#menubar {
+  height: 36px;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #363636 0%, #2b2b2b 100%);
+  border-bottom-color: #181818;
+  box-shadow: inset 0 -1px #444, 0 2px 8px #0005;
+  position: relative;
+  z-index: 30;
+}
+.menu-btn {
+  padding: 0 11px;
+  color: #dbe1e7;
+  font-weight: 500;
+  transition: background-color .12s ease, color .12s ease;
+}
+.menu-btn:hover, .menu-btn.open {
+  background: #454545;
+  color: #fff;
+}
+#home-btn {
+  margin-right: 5px;
+  padding-left: 30px;
+  border-right: 1px solid #505050;
+  position: relative;
+}
+#home-btn::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #b9b9b9;
+  border-radius: 2px;
+  transform: translateY(-45%) rotate(45deg);
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions {
+  background: #303030;
+  border-color: #616161;
+  border-radius: 5px;
+  box-shadow: 0 14px 34px #0009, 0 1px 0 #ffffff0d inset;
+  padding: 5px;
+}
+.menu-item, .menu-settings-checkbox {
+  border-radius: 3px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.menu-item:hover:not(:disabled), .menu-settings-checkbox:hover {
+  background: #505050;
+}
+.menu-item.active::before { color: #d2d6da; }
+.menu-separator { background: #424953; border-bottom-color: #1d2126; margin: 5px 3px; }
+
+button.toolbar-btn, a.toolbar-btn, .console-btn, .drawing-style-clear {
+  min-height: 30px;
+  padding: 5px 13px;
+  border: 1px solid #15191e;
+  border-top-color: #59616b;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #444, #363636);
+  box-shadow: 0 1px 1px #0005, inset 0 1px #ffffff0a;
+  transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+button.toolbar-btn:hover:not(:disabled), a.toolbar-btn:hover, .console-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #525252, #414141);
+  border-color: #767676;
+}
+button.toolbar-btn.primary, button.toolbar-btn.active {
+  background: linear-gradient(180deg, #60666d, #4d535a);
+  border-color: #838a91;
+  color: #fff;
+  box-shadow: 0 1px 2px #0006, inset 0 1px #ffffff20;
+}
+button.toolbar-btn.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #6c7279, #585e65);
+  border-color: #9ca2a8;
+}
+
+#device-palette, #right-panel, #push-area, #logs-area {
+  background: #292929;
+  border-color: #191919;
+  box-shadow: inset 0 1px #ffffff08;
+}
+#palette-header, #console-area-header {
+  min-height: 36px;
+  padding: 9px 12px;
+  color: #b7c0ca;
+  background: linear-gradient(180deg, #373737, #303030);
+  border-bottom-color: #191919;
+  letter-spacing: .075em;
+  font-weight: 600;
+}
+#palette-categories { background: #272727; border-bottom-color: #171717; }
+.palette-cat {
+  border-left: 3px solid transparent;
+  color: #abb4bf;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.palette-cat:hover { background: #383838; color: #fff; }
+.palette-cat.active {
+  background: #3a3a3a;
+  color: #f1f1f1;
+  border-left-color: #b7bcc2;
+}
+.palette-item { border-radius: 4px; margin: 2px 5px; }
+.palette-item:hover { background: #414141; }
+#canvas-toolbar {
+  top: 10px;
+  left: 10px;
+  padding: 5px;
+  border: 1px solid #a9b1ba;
+  border-radius: 6px;
+  background: rgba(245, 247, 249, .92);
+  box-shadow: 0 5px 14px #0002;
+  backdrop-filter: blur(8px);
+}
+#canvas-toolbar .toolbar-btn {
+  background: linear-gradient(#fff, #e8ecf0);
+  border-color: #a9b1ba;
+  color: #27313a;
+  box-shadow: 0 1px 2px #0002;
+}
+#canvas-toolbar .toolbar-btn:hover { background: #fff; border-color: #838990; }
+#canvas-toolbar .toolbar-btn.active { background: #dfe1e3; border-color: #777e85; }
+#topology-summary { background: #292929; border-bottom-color: #181818; }
+#status-connection {
+  padding: 9px 12px;
+  border-bottom: 1px solid #3a414b;
+  color: #c8d0d8;
+  font-weight: 500;
+}
+.summary-row { border-radius: 4px; margin: 2px 5px; }
+.summary-row:hover, .summary-row.selected { background: #3b4046; }
+#console-placeholder { color: #8f9aa6; line-height: 1.55; }
+#right-panel-resize-handle, #panel-resize-handle { background: #191919; }
+#right-panel-resize-handle:hover, #panel-resize-handle:hover { background: var(--accent-dim); }
+#status-bar {
+  min-height: 27px;
+  background: linear-gradient(180deg, #333, #2a2a2a);
+  border-top-color: #171717;
+  box-shadow: inset 0 1px #414852;
+  color: #aab3bd;
+}
+#status-zoom button { color: #c9d1d9; border-radius: 3px; }
+#status-zoom button:hover { background: #3e4853; color: #fff; }
+
+#landing-view {
+  max-width: 1060px;
+  padding: 42px 30px 36px;
+}
+#landing-header {
+  margin-bottom: 26px;
+  padding: 0 0 20px;
+  position: relative;
+  border-bottom-color: #3e4650;
+}
+#landing-header h1 {
+  margin: 0 0 5px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: #f2f5f8;
+}
+.landing-subtitle { color: #9fa9b5; }
+#landing-host-grid { gap: 8px; }
+.landing-host-tile {
+  border: 1px solid #454d57;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #353535, #303030);
+  box-shadow: 0 2px 7px #0003, inset 0 1px #ffffff08;
+}
+.landing-host-tile:hover {
+  border-color: #737980;
+  background: linear-gradient(180deg, #3d3d3d, #353535);
+  box-shadow: 0 4px 12px #0004, inset 3px 0 #858b92;
+}
+#landing-host-grid .landing-host-tile { min-height: 64px; padding-left: 34px; }
+#landing-host-grid .landing-host-icon {
+  width: 34px;
+  height: 34px;
+  padding: 6px;
+  border-radius: 6px;
+  background: #252525;
+  border: 1px solid #424a54;
+}
+#landing-host-grid img.landing-host-icon {
+  padding: 4px;
+  background: transparent;
+  border-color: transparent;
+  filter: brightness(0) invert(82%);
+}
+#landing-host-grid .landing-host-name { font-weight: 600; color: #e5eaf0; }
+.landing-host-delete-btn {
+  position: static;
+  order: 3;
+  transform: none;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #555d66;
+  border-radius: 4px;
+  background: #303030;
+  color: #c2c8cf;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.landing-host-delete-btn:hover {
+  border-color: #8a6060;
+  background: #463333;
+  color: #f0d4d4;
+}
+#open-project-library { align-self: flex-start; margin-top: 12px; }
+.landing-section-label {
+  color: #aab5c0;
+  font-weight: 600;
+  letter-spacing: .09em;
+  border-top-color: #3e4650;
+}
+#landing-actions-grid { gap: 10px; }
+#landing-actions-grid .landing-host-tile {
+  min-height: 82px;
+  justify-content: center;
+  border-color: #414a54;
+}
+#landing-actions-grid .landing-host-name { font-weight: 600; }
+
+#modal-box, #capture-viewer, #connection-dialog, #project-selection-dialog,
+#deployment-preview-dialog {
+  border: 1px solid #59626d !important;
+  border-radius: 7px !important;
+  background: #303030;
+  box-shadow: 0 22px 60px #000a, inset 0 1px #ffffff0a;
+}
+dialog::backdrop { background: rgba(9, 12, 16, .68); backdrop-filter: blur(2px); }
+#connection-title, #project-selection-title, #deployment-preview-title, #modal-title {
+  color: #f0f3f6;
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom-color: #454d57;
+}
+#connection-fields input, #connection-fields textarea, #connection-fields select,
+#connection-name, #project-selection-form input, #project-selection-dialog input,
+#project-selection-dialog select, #deployment-preview-dialog select,
+#modal-input, #modal-textarea {
+  min-height: 34px;
+  border: 1px solid #171b20;
+  border-bottom-color: #56606b;
+  border-radius: 4px;
+  background: #252525;
+  color: var(--text);
+  box-shadow: inset 0 1px 2px #0005;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: #8b9198 !important;
+  box-shadow: 0 0 0 2px #858b922b, inset 0 1px 2px #0004;
+  outline: none;
+}
+.deployment-summary { border-color: #454d57; border-radius: 5px; overflow: hidden; }
+.deployment-summary-row { border-bottom-color: #3f4751; }
+.deployment-summary-row:nth-child(odd) { background: #292929; }
+.deployment-summary-row dt { color: #9faab6; font-weight: 500; }
+
+@media (max-width: 600px) {
+  #landing-view { padding: 26px 14px; }
+  #landing-header { padding-left: 50px; }
+  #landing-actions-grid .landing-host-tile { min-height: 76px; }
+}

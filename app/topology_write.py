@@ -153,24 +153,32 @@ def list_templates() -> dict[str, Any]:
 
 
 def add_node(app: FastAPI, name: str, role: str, image: str) -> None:
+    if not Settings.TOPOLOGY_FILE:
+        raise RuntimeError("Select a project before editing a live topology")
     backend = get_or_create_backend(app)
     backend.add_node(Settings.TOPOLOGY_FILE, name, role, image)
     app.state.graph = load_graph()
 
 
 def remove_node(app: FastAPI, name: str) -> None:
+    if not Settings.TOPOLOGY_FILE:
+        raise RuntimeError("Select a project before editing a live topology")
     backend = get_or_create_backend(app)
     backend.remove_node(Settings.TOPOLOGY_FILE, name)
     app.state.graph = load_graph()
 
 
 def add_link(app: FastAPI, node1: str, if1: str, node2: str, if2: str) -> None:
+    if not Settings.TOPOLOGY_FILE:
+        raise RuntimeError("Select a project before editing a live topology")
     backend = get_or_create_backend(app)
     backend.add_link(Settings.TOPOLOGY_FILE, node1, if1, node2, if2)
     app.state.graph = load_graph()
 
 
 def remove_link(app: FastAPI, node1: str, node2: str) -> None:
+    if not Settings.TOPOLOGY_FILE:
+        raise RuntimeError("Select a project before editing a live topology")
     backend = get_or_create_backend(app)
     backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2)
     app.state.graph = load_graph()

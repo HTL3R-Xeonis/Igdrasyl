@@ -27,6 +27,7 @@ from src.settings import Settings
 
 from app import (
     capture,
+    connection_settings,
     console,
     design,
     design_store,
@@ -36,6 +37,8 @@ from app import (
     lifecycle,
     logs,
     project_bundle,
+    project_library,
+    project_selection,
     settings_profiles,
     topology_write,
     vm_screen,
@@ -122,8 +125,12 @@ def _refresh_startup_state(app: FastAPI) -> None:
             )
         app.state.gns3_vm_ip = gns3_vm_ip
 
-        project_id = resolve_project_id(gns3_vm_ip, app.state.project_name)
-        if project_id is None:
+        project_id = (
+            resolve_project_id(gns3_vm_ip, app.state.project_name)
+            if app.state.project_name
+            else None
+        )
+        if project_id is None and app.state.project_name:
             raise RuntimeError(
                 f"No GNS3 project named '{app.state.project_name}' - has "
                 f"this topology actually been deployed?"
@@ -145,6 +152,7 @@ async def lifespan(app: FastAPI):
     settings_path = os.getenv(_SETTINGS_ENV_VAR)
     if settings_path:
         Settings.initialise_settings(settings_path)
+    project_selection.initialise(settings_path)
 
     # After initialise_settings, so a settings.yml's own log_file_path
     # override (if any) is already in effect - see app/logging_setup.py.
@@ -185,6 +193,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"Couldn't restore saved design sketch, starting empty: {exc}")
         app.state.design = design.new_state()
+    app.state.design_project_id = None
 
     app.state.gns3_vm_deploy_job = None
     _refresh_startup_state(app)
@@ -200,6 +209,7 @@ app.include_router(vm_screen.router)
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
+        "topology_file": Settings.TOPOLOGY_FILE,
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
         "gns3_port": Settings.GNS3.PORT,
@@ -660,8 +670,39 @@ def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
 def design_reset() -> dict[str, str]:
     """Clears the sketch and starts a fresh, empty one."""
     app.state.design = design.new_state()
+    app.state.design_project_id = None
     design_store.save(app.state.design)
     return {"status": "ok"}
+
+
+@app.get("/design/project")
+def current_design_project() -> dict[str, Any]:
+    project_id = getattr(app.state, "design_project_id", None)
+    return {
+        "project": _settings_call(project_library.get, project_id)
+        if project_id
+        else None
+    }
+
+
+@app.post("/design/project/{project_id}/open")
+def open_library_project(project_id: str) -> dict[str, Any]:
+    try:
+        state = project_library.load_design(project_id)
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(503, f"Template service unavailable: {exc}") from exc
+    app.state.design = state
+    app.state.design_project_id = project_id
+    design_store.save(state)
+    return {"project": _settings_call(project_library.get, project_id)}
+
+
+@app.put("/design/project/{project_id}")
+def save_library_project(project_id: str) -> dict[str, Any]:
+    project = _settings_call(project_library.save_design, project_id, app.state.design)
+    app.state.design_project_id = project_id
+    design_store.save(app.state.design)
+    return {"project": project}
 
 
 @app.get("/design/export")
@@ -829,6 +870,10 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
     reported progress is an approximation, not a real callback from the
     deploy itself.
     """
+    if not Settings.TOPOLOGY_FILE:
+        raise HTTPException(
+            409, "Select a project for this host before importing a deployment"
+        )
     data = await file.read()
     job = import_jobs.start_job(app, data)
     return {"job_id": job.id, "total": job.total}
@@ -889,6 +934,147 @@ async def upload_settings_profile(file: UploadFile) -> dict[str, str]:
     except settings_profiles.InvalidProfileName as exc:
         raise HTTPException(400, str(exc))
     return {"status": "ok"}
+
+
+class ConnectionSettingsUpdate(BaseModel):
+    fields: dict[str, str]
+
+
+def _settings_call(function, *args):
+    try:
+        return function(*args)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (TypeError, ValueError, settings_profiles.InvalidProfileName) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class CreateLibraryProject(BaseModel):
+    name: str
+    topology_yaml: str | None = None
+
+
+@app.get("/projects")
+def list_library_projects():
+    return {"projects": _settings_call(project_library.list_projects)}
+
+
+@app.post("/projects", status_code=201)
+def create_library_project(body: CreateLibraryProject):
+    return _settings_call(project_library.create, body.name, body.topology_yaml)
+
+
+@app.get("/projects/{project_id}/download")
+def download_library_project(project_id: str):
+    path = _settings_call(project_library.topology_path, project_id)
+    return Response(
+        path.read_bytes(),
+        media_type="application/yaml",
+        headers={"Content-Disposition": 'attachment; filename="topology.yaml"'},
+    )
+
+
+@app.get("/projects/{project_id}/deploy-preview/{filename}")
+def preview_library_deployment(project_id: str, filename: str):
+    return _settings_call(project_library.deployment_preview, project_id, filename)
+
+
+@app.post("/projects/{project_id}/deploy/{filename}")
+def deploy_library_project(project_id: str, filename: str):
+    preview = _settings_call(project_library.deployment_preview, project_id, filename)
+    if not preview["host"]["active"]:
+        raise HTTPException(409, "Activate this host before deploying")
+    if not preview["selected"]:
+        raise HTTPException(
+            409, "Select this project for the active host and restart before deploying"
+        )
+    try:
+        state = project_library.load_design(project_id)
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(503, f"Template service unavailable: {exc}") from exc
+    bundle = project_bundle.build_design_export(state, preview["project"]["name"])
+    job = import_jobs.start_job(app, bundle)
+    return {"job_id": job.id, "total": job.total}
+
+
+class ProjectSelectionRequest(BaseModel):
+    project_id: str | None = None
+    topology_file: str = ""
+    project_name: str = ""
+
+
+@app.get("/settings-profiles/{filename}/project")
+def get_host_project(filename: str):
+    return _settings_call(project_selection.get_selection, filename)
+
+
+@app.put("/settings-profiles/{filename}/project")
+def select_host_project(filename: str, body: ProjectSelectionRequest):
+    return _settings_call(
+        project_selection.save_selection,
+        filename,
+        body.topology_file.strip(),
+        body.project_name,
+        body.project_id,
+    )
+
+
+@app.get("/host-config/schema")
+def host_config_schema():
+    return {"groups": connection_settings.schema()}
+
+
+@app.post("/host-config/preview")
+def preview_host_config(body: ConnectionSettingsUpdate):
+    return {"yaml": _settings_call(connection_settings.render_config, body.fields)}
+
+
+class CreateHostConfig(ConnectionSettingsUpdate):
+    filename: str
+
+
+@app.post("/host-config/create")
+def create_host_config(body: CreateHostConfig):
+    try:
+        return _settings_call(
+            connection_settings.create_profile, body.filename, body.fields
+        )
+    except FileExistsError as exc:
+        raise HTTPException(
+            409, "A host profile with that filename already exists"
+        ) from exc
+
+
+@app.post("/host-config/test")
+def test_host_config(body: ConnectionSettingsUpdate):
+    return {
+        "results": _settings_call(
+            connection_settings.test_connections, None, body.fields
+        )
+    }
+
+
+@app.get("/settings-profiles/{filename}/connections")
+def get_connection_settings(filename: str):
+    return {"fields": _settings_call(connection_settings.read_fields, filename)}
+
+
+@app.put("/settings-profiles/{filename}/connections")
+def save_connection_settings(filename: str, body: ConnectionSettingsUpdate):
+    _settings_call(connection_settings.update_fields, filename, body.fields)
+    return {"status": "saved", "restart_required": True}
+
+
+@app.post("/settings-profiles/{filename}/connections/test")
+def test_connection_settings(filename: str, body: ConnectionSettingsUpdate):
+    return {
+        "results": _settings_call(
+            connection_settings.test_connections,
+            filename,
+            body.fields,
+            getattr(app.state, "gns3_vm_ip", None),
+        )
+    }
 
 
 @app.delete("/settings-profiles/{filename}")

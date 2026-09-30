@@ -100,6 +100,7 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             app.state.design = _load_generated_topology(
                 validator.nodes, validator.edges
             )
+            app.state.design_project_id = None
             design_store.save(app.state.design)
             job.status = "done"
             logger.info(f"Generate job {job.id} succeeded on attempt {attempt}")

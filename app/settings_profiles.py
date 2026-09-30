@@ -77,9 +77,15 @@ def _preview(path: Path) -> dict[str, Any]:
 def list_profiles() -> list[dict[str, Any]]:
     active_name = _active_settings_name()
     profiles = []
-    for path in sorted(_profiles_dir().glob("*.yml")) + sorted(
-        _profiles_dir().glob("*.yaml")
-    ):
+    paths = {
+        p.name: p
+        for p in sorted(_profiles_dir().glob("*.yml"))
+        + sorted(_profiles_dir().glob("*.yaml"))
+    }
+    active = os.getenv(_SETTINGS_ENV_VAR)
+    if active and Path(active).is_file():
+        paths[Path(active).name] = Path(active)
+    for path in paths.values():
         entry: dict[str, Any] = {
             "filename": path.name,
             "active": path.name == active_name,
@@ -111,7 +117,12 @@ def delete_profile(filename: str) -> None:
 def profile_path(filename: str) -> Path:
     """:raises InvalidProfileName: unsafe filename. :raises FileNotFoundError: no such profile."""
     _validate_name(filename)
-    path = _profiles_dir() / filename
+    active = os.getenv(_SETTINGS_ENV_VAR)
+    path = (
+        Path(active)
+        if active and Path(active).name == filename
+        else _profiles_dir() / filename
+    )
     if not path.exists():
         raise FileNotFoundError(f"no profile named {filename!r}")
     return path
