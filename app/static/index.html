@@ -23,6 +23,8 @@
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
+        <button class="menu-item" id="health-check-btn" title="Checks the live lab against the topology file (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups, links) and offers low-risk automatic repairs - never redeploys anything">Health Check…</button>
+        <button class="menu-item" id="find-orphans-btn" title="Lists live GNS3 nodes and ESXi VMs that no node in the topology file describes anymore (what a partially failed delete leaves behind) and can delete them">Find Orphans…</button>
         <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup, with an option to permanently delete it once the new VM is confirmed working">Deploy Fresh GNS3 VM…</button>
       </div>
     </div>

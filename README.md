@@ -108,6 +108,16 @@ infrastructure available so far.
   landing page, design mode, and the Logs panel all keep working
   regardless, since none of them touch `app.state.graph`.
 
+- **Health check and orphan cleanup** (`app/maintenance.py`): File menu >
+  "Health Check…" runs TopologyBuilder's structural `verify` against the
+  live lab (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups,
+  links) and, if anything fails, offers its curated low-risk repairs (start
+  stopped GNS3 nodes, power on stopped ESXi VMs, create missing port groups -
+  never a redeploy of a genuinely missing VM/node). "Find Orphans…" lists
+  live GNS3 nodes and tool-created ESXi VMs that no node in the topology
+  file describes anymore - what a partially failed live delete leaves behind
+  - and can delete them after a second, explicit confirmation (irreversible).
+
 ## GNS3 VM Deploy
 
 Replaces the configured GNS3 VM with a freshly imported one from its own
@@ -272,6 +282,10 @@ same restart flow as host changes. Import and live edits require a selected proj
   /design/drawings`, `POST /design/reset`, `GET /design/export`, `POST
   /design/generate`, `GET /design/generate/{job_id}` - design mode, all
   mirroring the equivalent live endpoint above (see Architecture above).
+- `POST /maintenance/verify` (`{"fix": bool}`; returns the repairs applied
+  and every check's result), `GET /maintenance/orphans`, `POST
+  /maintenance/orphans/delete` (`{"orphans": [{"type": "gns3_node" |
+  "esxi_vm", "name": ...}]}`, permanent) - see Architecture above.
 - `POST /gns3-vm/deploy`, `GET /gns3-vm/deploy/{job_id}` (see GNS3 VM
   Deploy above).
 - `WS /ws/console/{node}`, `WS /ws/vm-screen/{node}`.

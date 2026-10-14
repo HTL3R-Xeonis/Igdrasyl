@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 import requests
 from fastapi import FastAPI, HTTPException, Response, UploadFile
@@ -36,6 +36,7 @@ from app import (
     import_jobs,
     lifecycle,
     logs,
+    maintenance,
     project_bundle,
     project_library,
     project_selection,
@@ -805,6 +806,75 @@ def reload_gns3_project() -> dict[str, str]:
     except (requests.RequestException, TimeoutError) as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
+
+
+class VerifyRequest(BaseModel):
+    fix: bool = False
+
+
+class OrphanItem(BaseModel):
+    type: Literal["gns3_node", "esxi_vm"]
+    name: str
+    reason: str = ""
+
+
+class DeleteOrphansRequest(BaseModel):
+    orphans: list[OrphanItem]
+
+
+def _require_live_topology() -> None:
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+
+
+@app.post("/maintenance/verify")
+def maintenance_verify(request: VerifyRequest | None = None) -> dict[str, Any]:
+    """
+    Structural health check of the live lab against the topology file
+    (the same checks as TopologyBuilder's `verify`). With fix=true the
+    low-risk automatic repairs run first (start stopped GNS3 nodes, power
+    on stopped ESXi VMs, create missing port groups) and the checks
+    afterwards, so the result shows what is still wrong.
+    """
+    _require_live_topology()
+    fix = request.fix if request is not None else False
+    try:
+        return maintenance.run_verify(app, fix)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.get("/maintenance/orphans")
+def maintenance_orphans() -> dict[str, Any]:
+    """
+    Live GNS3 nodes and tool-created ESXi VMs that no node in the topology
+    file describes anymore (what a partially failed live delete leaves
+    behind). Read-only.
+    """
+    _require_live_topology()
+    try:
+        return {"orphans": maintenance.find_orphans(app)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/maintenance/orphans/delete")
+def maintenance_delete_orphans(request: DeleteOrphansRequest) -> dict[str, int]:
+    """Permanently deletes the given orphans (irreversible)."""
+    _require_live_topology()
+    try:
+        deleted = maintenance.delete_orphans(
+            app, [orphan.model_dump() for orphan in request.orphans]
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
+    return {"deleted": deleted}
 
 
 class DeployGns3VmRequest(BaseModel):

@@ -2959,6 +2959,8 @@ function applyDesignModeUI() {
   document.getElementById("import-project-btn").hidden = designMode;
   document.getElementById("reload-gns3-btn").hidden = designMode;
   document.getElementById("deploy-gns3-vm-btn").hidden = designMode;
+  document.getElementById("health-check-btn").hidden = designMode;
+  document.getElementById("find-orphans-btn").hidden = designMode;
   document.getElementById("tab-push").hidden = designMode;
   if (designMode) showTab("console");
 }
@@ -3473,6 +3475,92 @@ document.getElementById("reload-gns3-btn").addEventListener("click", async () =>
     setMenubarMessage("GNS3 project reloaded.");
   } catch (err) {
     setMenubarMessage(`Reload failed: ${err}`);
+  }
+});
+
+// Compact text report of a /maintenance/verify result: every failed
+// check, then the pass count - the full list of passing checks would
+// only make the dialog overflow.
+function formatVerifyReport(result) {
+  const failed = result.results.filter((r) => !r.ok).map((r) => `[FAIL] ${r.description}`);
+  const summary = `${result.passed}/${result.total} checks passed`;
+  return failed.length ? `${failed.join("\n")}\n\n${summary}` : `All ${result.total} checks passed.`;
+}
+
+async function maintenanceRequest(url, options) {
+  const resp = await fetch(url, options);
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(body.detail || resp.status);
+  return body;
+}
+
+document.getElementById("health-check-btn").addEventListener("click", async () => {
+  setMenubarBusy("Running health check…");
+  try {
+    const first = await maintenanceRequest("/maintenance/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fix: false }),
+    });
+    setMenubarMessage(`Health check: ${first.passed}/${first.total} checks passed.`);
+    if (first.passed === first.total) {
+      await showAlert(formatVerifyReport(first), { title: "Health Check" });
+      return;
+    }
+    const wantFix = await showConfirm(
+      `${formatVerifyReport(first)}\n\n` +
+      `Apply the automatic fixes (start stopped GNS3 nodes, power on stopped ` +
+      `ESXi VMs, create missing port groups) and check again? Anything that ` +
+      `needs a real redeploy is not touched.`,
+      { title: "Health Check", confirmLabel: "Fix" }
+    );
+    if (!wantFix) return;
+
+    setMenubarBusy("Applying fixes…");
+    const second = await maintenanceRequest("/maintenance/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fix: true }),
+    });
+    const applied = second.actions.length
+      ? `Applied:\n${second.actions.map((a) => `- ${a}`).join("\n")}\n\n`
+      : "No automatic fix was applicable.\n\n";
+    setMenubarMessage(`Health check after fixes: ${second.passed}/${second.total} checks passed.`);
+    await showAlert(applied + formatVerifyReport(second), { title: "Health Check" });
+    await loadCanvas();
+  } catch (err) {
+    setMenubarMessage(`Health check failed: ${err.message || err}`);
+  }
+});
+
+document.getElementById("find-orphans-btn").addEventListener("click", async () => {
+  setMenubarBusy("Looking for orphans…");
+  try {
+    const { orphans } = await maintenanceRequest("/maintenance/orphans");
+    if (!orphans.length) {
+      setMenubarMessage("No orphans found.");
+      await showAlert("No orphans found - every live node and tool-created VM is in the topology file.", { title: "Find Orphans" });
+      return;
+    }
+    setMenubarMessage(`${orphans.length} orphan(s) found.`);
+    const confirmed = await showConfirm(
+      `${orphans.map((o) => `[${o.type}] ${o.name}`).join("\n")}\n\n` +
+      `These exist live but no node in the topology file describes them. ` +
+      `Permanently delete ${orphans.length === 1 ? "it" : "all of them"}? This cannot be undone.`,
+      { title: `${orphans.length} Orphan(s) Found`, confirmLabel: "Delete", danger: true }
+    );
+    if (!confirmed) return;
+
+    setMenubarBusy("Deleting orphans…");
+    const { deleted } = await maintenanceRequest("/maintenance/orphans/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orphans }),
+    });
+    setMenubarMessage(`Deleted ${deleted} orphan(s).`);
+    await loadCanvas();
+  } catch (err) {
+    setMenubarMessage(`Find orphans failed: ${err.message || err}`);
   }
 });
 
