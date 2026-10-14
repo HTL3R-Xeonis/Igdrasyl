@@ -71,6 +71,10 @@ def _load_generated_topology(
 
 
 def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
+    # The reason the most recent attempt was rejected, so the final error
+    # can say WHY instead of only "no valid topology" - e.g. the LLM
+    # reusing an interface name, which the user can't see otherwise.
+    last_problem: str | None = None
     for attempt in range(1, job.max_attempts + 1):
         job.attempt = attempt
         try:
@@ -85,6 +89,9 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
 
         job.warnings = list(result.get("warnings", []))
         if not result.get("valid"):
+            last_problem = (
+                "; ".join(job.warnings) or "the generator reported it as invalid"
+            )
             logger.warning(
                 f"Generate job {job.id} attempt {attempt}: reported invalid, retrying"
             )
@@ -123,6 +130,7 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             )
             return
         except Exception as exc:
+            last_problem = str(exc)
             logger.warning(
                 f"Generate job {job.id} attempt {attempt}: "
                 f"{type(exc).__name__}: {exc}, retrying"
@@ -133,6 +141,8 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
 
     job.status = "error"
     job.error = f"No valid topology generated after {job.max_attempts} attempt(s)"
+    if last_problem:
+        job.error += f" - last problem: {last_problem}"
 
 
 def start_job(app: FastAPI, prompt: str) -> GenerateJob:

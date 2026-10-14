@@ -147,6 +147,51 @@ def test_run_generate_job_fails_after_max_attempts(app_state):
     assert app_state.design is original_design
 
 
+def test_run_generate_job_error_names_the_last_validation_problem(app_state):
+    # The real failure seen live: the generator's own check passed, but
+    # TopologyFileValidation rejected the LLM's reuse of an interface name.
+    app = _fake_app(app_state)
+    job = generate_jobs.GenerateJob(id="job-1", max_attempts=2)
+    duplicate_interface_yaml = (
+        "nodes:\n"
+        "  - image: VPCS\n    role: PC\n    names: [PC1, PC2]\n"
+        "  - image: Ethernet switch\n    role: SWITCH\n    names: [SW1]\n"
+        "edges:\n"
+        "  - [PC1, eth0, SW1, gi0/1]\n"
+        "  - [PC2, eth0, SW1, gi0/1]\n"
+    )
+
+    with patch(
+        "app.generate_jobs.TopologyGeneratorClient.generate_topology",
+        return_value={"valid": True, "warnings": [], "yaml": duplicate_interface_yaml},
+    ):
+        generate_jobs.run_generate_job(app, job, "prompt")
+
+    assert job.status == "error"
+    assert "2 attempt" in job.error
+    assert "last problem:" in job.error
+    assert "used twice" in job.error
+
+
+def test_run_generate_job_error_includes_the_generators_own_warnings(app_state):
+    app = _fake_app(app_state)
+    job = generate_jobs.GenerateJob(id="job-1", max_attempts=1)
+
+    with patch(
+        "app.generate_jobs.TopologyGeneratorClient.generate_topology",
+        return_value={
+            "valid": False,
+            "warnings": [
+                "Image 'X' (role=PC) is not in the list of available GNS3 templates."
+            ],
+        },
+    ):
+        generate_jobs.run_generate_job(app, job, "prompt")
+
+    assert job.status == "error"
+    assert "Image 'X' (role=PC) is not in the list" in job.error
+
+
 def test_run_generate_job_maps_request_failures_to_error_without_retrying(app_state):
     app = _fake_app(app_state)
     job = generate_jobs.GenerateJob(id="job-1", max_attempts=3)

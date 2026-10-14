@@ -79,7 +79,9 @@ infrastructure available so far.
   TopologyBuilder's own CLI `generate` command's retry-until-valid loop,
   then opens the result straight into design mode instead of writing a
   file. Runs as a background job (`POST /design/generate` → `job_id`,
-  `GET /design/generate/{job_id}` polls attempt/status/warnings). Every
+  `GET /design/generate/{job_id}` polls attempt/status/warnings). When every
+  attempt is rejected, the final error names the last validation problem
+  (e.g. an interface reused on a switch) instead of only "no valid topology". Every
   generated node gets a real position via the same force-directed layout
   algorithm (`src.graph.layout.compute_node_positions`) a deployed
   topology's own missing positions already fall back to, rather than
