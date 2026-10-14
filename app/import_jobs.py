@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import threading
+import time
 import uuid
 import zipfile
 from dataclasses import dataclass, field
@@ -28,9 +29,11 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
+from loguru import logger
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
+from app import template_health
 from app.gns3_state import resolve_project_id
 
 
@@ -88,6 +91,10 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
     from app import project_bundle
     from app.config_push import push_all
 
+    started = time.monotonic()
+    logger.info(
+        f"Import job {job.id} started: {job.total} node(s) in a {len(zip_bytes):,} byte bundle"
+    )
     try:
         result = project_bundle.apply_import(app, zip_bytes)
         if result["auto_config_push"] and result["configs"]:
@@ -96,14 +103,23 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
         job.result = result
         job.completed = job.total
         job.status = "done"
+        logger.info(
+            f"Import job {job.id} finished in {time.monotonic() - started:.1f}s: "
+            f"{job.total} node(s) deployed"
+        )
     except ValueError as exc:
         job.status = "error"
-        job.error = str(exc)
+        job.error = template_health.explain(str(exc))
         job.error_kind = "bad_bundle"
+        logger.warning(f"Import job {job.id} rejected the bundle: {job.error}")
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
         job.status = "error"
         job.error = str(exc)
         job.error_kind = "deploy_failed"
+        logger.error(
+            f"Import job {job.id} failed after {time.monotonic() - started:.1f}s: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
 
 def poll_progress(app: FastAPI, job: ImportJob) -> int:

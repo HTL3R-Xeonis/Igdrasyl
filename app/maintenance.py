@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI
+from loguru import logger
 from src.settings import Settings
 
 from app.topology_write import get_or_create_backend
@@ -24,8 +25,18 @@ def run_verify(app: FastAPI, fix: bool) -> dict[str, Any]:
     :param fix: apply the automatic repairs first, then check
     :return: {"actions": [str], "results": [{"ok": bool, "description": str}], "passed": int, "total": int}
     """
+    logger.info(f"Health check started (automatic fixes: {'on' if fix else 'off'})")
     backend = get_or_create_backend(app)
     actions, results = backend.verify(Settings.TOPOLOGY_FILE, fix=fix)
+    for action in actions:
+        logger.warning(f"Health check repaired: {action}")
+    failed = [description for ok, description in results if not ok]
+    for description in failed:
+        logger.warning(f"Health check FAILED: {description}")
+    logger.info(
+        f"Health check finished: {len(results) - len(failed)}/{len(results)} checks "
+        f"passed, {len(actions)} repair(s) applied"
+    )
     return {
         "actions": actions,
         "results": [{"ok": ok, "description": desc} for ok, desc in results],
@@ -35,7 +46,15 @@ def run_verify(app: FastAPI, fix: bool) -> dict[str, Any]:
 
 
 def find_orphans(app: FastAPI) -> list[dict[str, str]]:
-    return get_or_create_backend(app).find_orphans(Settings.TOPOLOGY_FILE)
+    orphans = get_or_create_backend(app).find_orphans(Settings.TOPOLOGY_FILE)
+    if orphans:
+        logger.warning(
+            f"Orphan scan found {len(orphans)}: "
+            f"{[(o['type'], o['name']) for o in orphans]}"
+        )
+    else:
+        logger.info("Orphan scan found nothing")
+    return orphans
 
 
 def delete_orphans(app: FastAPI, orphans: list[dict[str, str]]) -> int:
@@ -45,5 +64,10 @@ def delete_orphans(app: FastAPI, orphans: list[dict[str, str]]) -> int:
     simply skipped).
     :return: how many orphans were requested for deletion
     """
+    logger.warning(
+        f"Deleting {len(orphans)} orphan(s) permanently: "
+        f"{[(o['type'], o['name']) for o in orphans]}"
+    )
     get_or_create_backend(app).delete_orphans(Settings.TOPOLOGY_FILE, orphans)
+    logger.info("Orphan deletion finished")
     return len(orphans)

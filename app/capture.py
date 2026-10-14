@@ -36,6 +36,7 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI
+from loguru import logger
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
@@ -118,6 +119,7 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
 
 def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
     link = _live_link(app, node1, node2)
+    logger.info(f"Starting a packet capture on {node1} <-> {node2}")
     # GNS3's own controller state can silently drift from "opened" back
     # to "closed" independently of whether the project's nodes are still
     # running (confirmed live, not guessed - see GNS3Connection.
@@ -138,6 +140,7 @@ def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
 
 def stop_capture(app: FastAPI, node1: str, node2: str) -> None:
     link = _live_link(app, node1, node2)
+    logger.info(f"Stopping the packet capture on {node1} <-> {node2}")
     GNS3Connection.ensure_project_open(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )

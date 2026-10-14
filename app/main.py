@@ -35,6 +35,7 @@ from app import (
     gns3_vm_deploy_jobs,
     import_jobs,
     lifecycle,
+    log_store,
     logs,
     maintenance,
     ova_templates,
@@ -43,6 +44,7 @@ from app import (
     project_selection,
     public_text,
     settings_profiles,
+    template_health,
     topology_write,
     vm_screen,
 )
@@ -56,6 +58,7 @@ from app.gns3_state import (
 )
 from app.layout import load_layout, save_position
 from app.logging_setup import configure_logging
+from app.request_logging import RequestLoggingMiddleware
 from app.topology import load_graph, resolve_project_name
 
 # Widened alongside (RuntimeError, ConnectionError, TimeoutError) on the
@@ -106,7 +109,7 @@ def _refresh_startup_state(app: FastAPI) -> None:
         app.state.graph = load_graph()
     except Exception as exc:
         app.state.graph = None
-        warnings.append(str(exc))
+        warnings.append(template_health.explain(str(exc)))
         logger.warning(f"Starting without a loaded topology: {exc}")
 
     app.state.gns3_vm_ip = None
@@ -206,6 +209,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
+app.add_middleware(RequestLoggingMiddleware)
 app.include_router(console.router)
 app.include_router(vm_screen.router)
 
@@ -256,6 +260,48 @@ def get_logs(lines: int = 300) -> list[dict[str, Any]]:
     panel instead of a terminal.
     """
     return logs.tail_log_lines(lines)
+
+
+@app.get("/logs/entries")
+def get_log_entries(
+    lines: int = 500, level: str | None = None, search: str | None = None
+) -> dict[str, Any]:
+    """
+    The most recent `lines` log entries (a traceback stays one entry),
+    optionally only at/above `level` and containing `search`, plus how
+    full the log is - for the standalone log page (/logs.html). Server
+    file paths are redacted, same as everything else sent to a browser.
+    """
+    lines = max(1, min(lines, log_store.MAX_TOTAL_LINES))
+    return {
+        "entries": public_text.redact_paths(
+            log_store.read_entries(Settings.LOG_FILE_PATH, lines, level, search)
+        ),
+        "info": log_store.info(Settings.LOG_FILE_PATH),
+    }
+
+
+@app.get("/logs/download")
+def download_logs() -> StreamingResponse:
+    """The whole retained log (at most 100 000 lines) as plain text, paths redacted."""
+    return StreamingResponse(
+        (
+            public_text.redact_paths(line) + "\n"
+            for line in log_store.iter_lines(Settings.LOG_FILE_PATH)
+        ),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="topologyoperator.log"'},
+    )
+
+
+@app.get("/templates/health")
+def templates_health() -> dict[str, Any]:
+    """
+    Whether the template service (which TopologyBuilder asks what images
+    exist) works - see app/template_health.py. Cheap and cached for a few
+    seconds, the UI polls it.
+    """
+    return public_text.redact_paths(template_health.check())
 
 
 @app.get("/topology")
@@ -412,7 +458,7 @@ def add_node(request: AddNodeRequest) -> dict[str, str]:
     try:
         topology_write.add_node(app, request.name, request.role, request.image)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, template_health.explain(str(exc)))
     except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
     return {"status": "ok"}
@@ -609,7 +655,7 @@ def design_add_node(request: AddNodeRequest) -> dict[str, str]:
     try:
         design.add_node(app.state.design, request.name, request.role, request.image)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, template_health.explain(str(exc)))
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
         # Environment.get_environment couldn't reach the template
         # service - same degraded-mode story as GET /templates above,

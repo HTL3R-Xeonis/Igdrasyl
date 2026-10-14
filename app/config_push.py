@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 from src.graph.blocks.generic_node import GenericNode
 from src.graph.environment import Environment
@@ -155,7 +156,27 @@ def _push_via_guest_ops(
     )
 
 
+def _log_result(result: DeviceResult, command_count: int) -> None:
+    """One line per device - never the commands or the device's output, which can hold secrets."""
+    if result.ok:
+        logger.info(
+            f"Config push to {result.device} ({result.transport}): ok, "
+            f"{command_count} command(s)"
+        )
+        return
+    failed = [n for n, c in enumerate(result.commands, 1) if not c.ok]
+    where = f", command {failed[0]} of {command_count} failed" if failed else ""
+    logger.warning(
+        f"Config push to {result.device} ({result.transport}): FAILED{where}"
+        f"{f' - {result.error}' if result.error else ''}"
+    )
+
+
 def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
+    logger.info(
+        f"Config push started for {len(devices)} device(s): {list(devices)} "
+        f"({sum(len(c) for c in devices.values())} command(s) in total)"
+    )
     results: list[DeviceResult] = []
 
     live_by_name: dict[str, dict] = {}
@@ -218,4 +239,9 @@ def push_all(devices: dict[str, list[str]], app: Any) -> list[DeviceResult]:
                 )
             )
 
+    for result in results:
+        _log_result(result, len(devices.get(result.device, [])))
+    logger.info(
+        f"Config push finished: {sum(r.ok for r in results)}/{len(results)} device(s) ok"
+    )
     return results

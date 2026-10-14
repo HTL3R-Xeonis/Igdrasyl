@@ -85,10 +85,36 @@ against a real OVA import from the sister template API.
   algorithm (`src.graph.layout.compute_node_positions`) a deployed
   topology's own missing positions already fall back to, rather than
   landing all nodes on top of each other.
-- **Real application logging** (`app/logging_setup.py`, `app/logs.py`):
-  writes to `Settings.LOG_FILE_PATH` in the same format/rotation as
-  TopologyBuilder's own CLI logging, readable from the GUI itself via
-  View > Logs (`GET /logs`) - auto-refreshing, color-coded by level.
+- **Detailed application logging with a hard retention limit**
+  (`app/logging_setup.py`, `app/log_store.py`, `app/request_logging.py`):
+  the log file at `Settings.LOG_FILE_PATH` is written at DEBUG and keeps
+  **at most 100 000 lines** - the current file plus one previous file
+  (`<name>.1`) of at most 50 000 lines each; when the current file is full it
+  replaces the previous one, so the oldest lines simply fall away (a rename,
+  no big file is ever rewritten). Every line reads `time | LEVEL |
+  file:function:line - message`. What is logged: the configuration at
+  startup (never a credential), every HTTP request and WebSocket session
+  (method, path, status, duration, client - never query strings, headers or
+  bodies; polling reads at DEBUG, state changes at INFO, 4xx WARNING, 5xx and
+  exceptions ERROR with a traceback written without variable values), live
+  node/link changes, node start/stop/reload, packet captures, config pushes
+  (per device - never the commands or their output), import/generate/GNS3-VM
+  jobs, health checks and orphan deletions, plus everything uvicorn and the
+  libraries report. Read it from the landing page's **View Logs** link (next
+  to View License; `/logs.html`: level filter, search, up to the whole log,
+  auto-refresh, download) or from View > Logs inside a project. Server file
+  paths are redacted in everything sent to the browser. Older size-rotated
+  files from before this scheme (`app.<timestamp>.log`) are not touched - delete
+  them by hand if they are in the way.
+- **Template service status** (`app/template_health.py`): when the service
+  that tells TopologyBuilder which images exist is down or lists nothing,
+  every topology fails to validate with "Image X not found" - which points at
+  the topology although the cause is elsewhere (it happened when the ESXi
+  password changed and the service could no longer log in). The app now asks
+  both template APIs (and the GNS3 one's own `/api/servers`, which states
+  why a server is unreachable) and shows the problem in a banner on every
+  screen (`GET /templates/health`); "Image ... not found" errors get the
+  likely cause appended.
 - **Wireshark-style packet capture** (`app/capture.py`): start/stop a
   capture on any live link and view it as a live, in-browser
   Wireshark-style packet table (click a link on the canvas) - a
@@ -268,7 +294,9 @@ same restart flow as host changes. Import and live edits require a selected proj
   .../capture/stream` (proxies GNS3's own live pcap stream) - see
   Architecture above.
 - `POST /config-push`, `GET/POST /drawings`.
-- `GET /logs?lines=N` (see Architecture above).
+- `GET /logs?lines=N` (the in-project panel), `GET /logs/entries?lines=N&level=L&search=S` (entries with
+  tracebacks kept together, plus how full the log is), `GET /logs/download` (the whole retained log as text),
+  `GET /templates/health` - see Architecture above.
 - `GET /project/export`, `POST /project/import` (kicks off a background
   job, returns `{job_id, total}`), `GET /project/import/{job_id}`
   (progress + final result), `POST /project/reload-gns3` (closes and

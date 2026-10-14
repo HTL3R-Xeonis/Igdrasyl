@@ -4069,3 +4069,22 @@ document.getElementById("popout-btn").addEventListener("click", () => {
 
 showLandingView();
 initPalette();
+
+// The template service decides whether any topology validates at all; when
+// it is down or lists nothing, every error reads "Image X not found" - so
+// the real problem is shown on every screen instead of being guessed at.
+const TEMPLATE_HEALTH_INTERVAL_MS = 60000;
+async function refreshTemplateBanner() {
+  const banner = document.getElementById("template-banner");
+  try {
+    const resp = await fetch("/templates/health");
+    if (!resp.ok) return;
+    const health = await resp.json();
+    banner.textContent = health.ok ? "" : `Template service problem: ${health.problems.join(" ")}`;
+    banner.hidden = health.ok;
+  } catch (err) {
+    // Backend not reachable right now - the other screens already say so.
+  }
+}
+refreshTemplateBanner();
+setInterval(refreshTemplateBanner, TEMPLATE_HEALTH_INTERVAL_MS);

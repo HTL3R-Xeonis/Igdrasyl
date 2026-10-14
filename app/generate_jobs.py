@@ -32,7 +32,7 @@ from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.settings import Settings
 from src.topology_file_validation import TopologyFileValidation
 
-from app import design, design_store
+from app import design, design_store, template_health
 
 
 @dataclass
@@ -142,7 +142,8 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
     job.status = "error"
     job.error = f"No valid topology generated after {job.max_attempts} attempt(s)"
     if last_problem:
-        job.error += f" - last problem: {last_problem}"
+        job.error += f" - last problem: {template_health.explain(last_problem)}"
+    logger.error(f"Generate job {job.id} failed: {job.error}")
 
 
 def start_job(app: FastAPI, prompt: str) -> GenerateJob:

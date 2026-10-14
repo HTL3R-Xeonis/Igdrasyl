@@ -13,11 +13,11 @@ text - see _LINE_RE for the exact format this expects.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 from src.settings import Settings
 
+from app import log_store
 from app.public_text import redact_paths
 
 # Matches app/logging_setup.py's own _FILE_FORMAT once loguru has
@@ -40,12 +40,9 @@ def tail_log_lines(count: int) -> list[dict[str, Any]]:
     :param count: how many of the most recent lines to return
     :return: oldest first, same order the file itself has
     """
-    path = Path(Settings.LOG_FILE_PATH)
-    if not path.exists():
-        return []
-
-    with open(path) as file:
-        lines = file.readlines()[-count:]
+    # Spans the current file and its predecessor, so a view right after a
+    # rotation (see app/log_store.py) still has history.
+    lines = log_store.read_lines(Settings.LOG_FILE_PATH, count)
 
     parsed = []
     for raw_line in lines:

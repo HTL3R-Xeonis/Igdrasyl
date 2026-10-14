@@ -5,9 +5,10 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=managed-resources-1">
+<link rel="stylesheet" href="/styles.css?v=logging-and-template-hints-1">
 </head>
 <body>
+<div id="template-banner" role="status" hidden></div>
 <div id="app-view" hidden>
 <header id="menubar">
   <button class="menu-btn" id="home-btn" title="Back to host picker">Main Menu</button>
@@ -210,7 +211,10 @@
   <div id="landing-actions-grid"></div>
   <div id="landing-generate-status" hidden></div>
   <input type="file" id="landing-upload-input" accept=".yml,.yaml" hidden>
-  <a id="landing-license-link" href="/license" target="_blank" rel="noopener">View License</a>
+  <div id="landing-footer-links">
+    <a id="landing-license-link" href="/license" target="_blank" rel="noopener">View License</a>
+    <a id="landing-logs-link" href="/logs.html" target="_blank" rel="noopener">View Logs</a>
+  </div>
 </div>
 <dialog id="project-selection-dialog" aria-labelledby="project-selection-title">
   <h3 id="project-selection-title">Project library</h3>
@@ -317,7 +321,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=managed-resources-1"></script>
+<script src="/app.js?v=logging-and-template-hints-1"></script>
 <script src="/projects.js?v=project-empty-state-1"></script>
 </body>
 </html>

@@ -923,13 +923,13 @@
     max-width: 500px;
   }
   #landing-generate-status .landing-generate-warning { color: var(--warn); }
-  #landing-license-link {
+  #landing-license-link, #landing-logs-link {
     margin-top: 40px;
     font-size: 11px;
     color: var(--dim);
     text-decoration: none;
   }
-  #landing-license-link:hover { color: var(--accent); text-decoration: underline; }
+  #landing-license-link:hover, #landing-logs-link:hover { color: var(--accent); text-decoration: underline; }
   .landing-host-tile {
     position: relative;
     display: flex;
@@ -1271,7 +1271,16 @@ header#menubar { height: 30px; padding: 0 6px; background: #353535; }
 .landing-host-active-dot { top: 5px; right: 5px; width: 6px; height: 6px; }
 .landing-host-tile.add-tile { border-style: solid; color: var(--text); font: inherit; }
 #landing-actions-grid .landing-host-icon { width: 26px; height: 26px; font-size: 23px; }
-#landing-license-link { align-self: flex-start; margin-top: 24px; }
+#landing-footer-links { display: flex; align-self: flex-start; gap: 18px; margin-top: 24px; }
+#landing-footer-links a { margin-top: 0; }
+#template-banner {
+  padding: 8px 20px;
+  background: #3a2c14;
+  color: var(--warn);
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+#template-banner[hidden] { display: none; }
 @media (max-width: 600px) {
   #landing-view { padding: 18px 12px; }
   #landing-actions-grid { grid-template-columns: 1fr; }

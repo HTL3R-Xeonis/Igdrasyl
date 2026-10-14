@@ -9,6 +9,7 @@ app/gns3_state.py's own pattern instead.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from loguru import logger
 from src.connections.gns3_connection import GNS3Connection
 from src.graph.environment import Environment
 from src.settings import Settings
@@ -34,6 +35,7 @@ def start_node(app: FastAPI, name: str) -> None:
     node = app.state.graph.nodes.get(name)
     if node is None:
         raise ValueError(f"no node named {name!r}")
+    logger.info(f"Node {name!r} ({node.env.name}): start requested")
     if node.env == Environment.ON_GNS3:
         node_id = _live_gns3_node_id(app, name)
         GNS3Connection.start_node(
@@ -47,6 +49,7 @@ def stop_node(app: FastAPI, name: str) -> None:
     node = app.state.graph.nodes.get(name)
     if node is None:
         raise ValueError(f"no node named {name!r}")
+    logger.info(f"Node {name!r} ({node.env.name}): stop requested")
     if node.env == Environment.ON_GNS3:
         node_id = _live_gns3_node_id(app, name)
         GNS3Connection.stop_node(
@@ -60,6 +63,7 @@ def reload_node(app: FastAPI, name: str) -> None:
     node = app.state.graph.nodes.get(name)
     if node is None:
         raise ValueError(f"no node named {name!r}")
+    logger.info(f"Node {name!r} ({node.env.name}): reload requested")
     if node.env == Environment.ON_GNS3:
         node_id = _live_gns3_node_id(app, name)
         GNS3Connection.reload_node(
