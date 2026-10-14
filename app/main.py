@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal
 
 import requests
@@ -24,6 +25,7 @@ from pydantic import BaseModel, ConfigDict
 from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import (
     capture,
@@ -31,6 +33,7 @@ from app import (
     console,
     design,
     design_store,
+    error_pages,
     generate_jobs,
     gns3_vm_deploy_jobs,
     import_jobs,
@@ -39,6 +42,7 @@ from app import (
     logs,
     maintenance,
     ova_templates,
+    profile_secrets,
     project_bundle,
     project_library,
     project_selection,
@@ -158,12 +162,18 @@ async def lifespan(app: FastAPI):
     settings_path = os.getenv(_SETTINGS_ENV_VAR)
     if settings_path:
         Settings.initialise_settings(settings_path)
+        stored_secrets = profile_secrets.apply(Path(settings_path).name)
+    else:
+        stored_secrets = []
     ova_templates.initialise(settings_path)
     project_selection.initialise(settings_path)
 
     # After initialise_settings, so a settings.yml's own log_file_path
     # override (if any) is already in effect - see app/logging_setup.py.
     configure_logging()
+    if stored_secrets:
+        # Names only - never the values.
+        logger.info(f"Using stored credentials for: {', '.join(stored_secrets)}")
 
     # Opens a real, persistent pyvmomi session - done once here and
     # reused for the app's lifetime rather than per-request, same
@@ -214,13 +224,27 @@ app.include_router(console.router)
 app.include_router(vm_screen.router)
 
 
-@app.exception_handler(HTTPException)
-async def path_safe_http_error(_request: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def path_safe_http_error(request: Request, exc: StarletteHTTPException):
+    # Covers FastAPI's HTTPException and Starlette's own (unknown route,
+    # wrong method, missing static file). Browsers navigating get a page.
+    if error_pages.wants_html(request):
+        return error_pages.render(
+            exc.status_code, public_text.redact_paths(str(exc.detail))
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": public_text.redact_paths(exc.detail)},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, _exc: Exception):
+    # Already logged with its traceback by RequestLoggingMiddleware.
+    if error_pages.wants_html(request):
+        return error_pages.render(500)
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
 @app.get("/health")
@@ -1065,6 +1089,9 @@ async def upload_settings_profile(file: UploadFile) -> dict[str, str]:
 
 class ConnectionSettingsUpdate(BaseModel):
     fields: dict[str, str]
+    # Write-only: entered passwords (see app/profile_secrets.py). Blank or
+    # absent keeps what is stored; no endpoint ever returns a value.
+    secrets: dict[str, str] = {}
 
 
 def _settings_call(function, *args):
@@ -1170,14 +1197,17 @@ class CreateHostConfig(ConnectionSettingsUpdate):
 
 @app.post("/host-config/create")
 def create_host_config(body: CreateHostConfig):
+    _settings_call(profile_secrets.validate, body.secrets)
     try:
-        return _settings_call(
+        created = _settings_call(
             connection_settings.create_profile, body.filename, body.fields
         )
     except FileExistsError as exc:
         raise HTTPException(
             409, "A host profile with that filename already exists"
         ) from exc
+    _settings_call(profile_secrets.save, body.filename, body.secrets)
+    return created
 
 
 @app.post("/host-config/test")
@@ -1191,12 +1221,17 @@ def test_host_config(body: ConnectionSettingsUpdate):
 
 @app.get("/settings-profiles/{filename}/connections")
 def get_connection_settings(filename: str):
-    return {"fields": _settings_call(connection_settings.read_fields, filename)}
+    return {
+        "fields": _settings_call(connection_settings.read_fields, filename),
+        "passwords_set": _settings_call(profile_secrets.status, filename),
+    }
 
 
 @app.put("/settings-profiles/{filename}/connections")
 def save_connection_settings(filename: str, body: ConnectionSettingsUpdate):
+    _settings_call(profile_secrets.validate, body.secrets)
     _settings_call(connection_settings.update_fields, filename, body.fields)
+    _settings_call(profile_secrets.save, filename, body.secrets)
     return {"status": "saved", "restart_required": True}
 
 
@@ -1216,6 +1251,7 @@ def test_connection_settings(filename: str, body: ConnectionSettingsUpdate):
 def delete_settings_profile(filename: str) -> dict[str, str]:
     try:
         settings_profiles.delete_profile(filename)
+        profile_secrets.delete(filename)
     except settings_profiles.InvalidProfileName as exc:
         raise HTTPException(400, str(exc))
     except FileNotFoundError as exc:

@@ -3174,14 +3174,13 @@ let connectionFilename = null;
 let connectionBusy = false;
 let connectionLoaded = false;
 let connectionGroups = [];
-let connectionStep = 0;
+let connectionPreviewTimer = null;
 let connectionDirty = false;
 const connectionDialog = document.getElementById("connection-dialog");
 const connectionForm = document.getElementById("connection-form");
 const connectionResults = document.getElementById("connection-results");
 const connectionApply = document.getElementById("connection-apply");
 const connectionFields = document.getElementById("connection-fields");
-const connectionReview = document.getElementById("connection-review");
 
 async function settingsRequest(url, options = {}) {
   const response = await fetch(url, options);
@@ -3195,20 +3194,43 @@ function connectionRequest(suffix = "", options = {}) {
 function settingsOptions(fields, extra = {}) {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fields, ...extra }) };
 }
-function settingsValues() { return Object.fromEntries(new FormData(connectionForm)); }
+// Entered passwords use field names "secret.<key>" and travel separately from
+// the YAML fields - the server stores them apart from the profile file and
+// never sends a value back (only whether one is stored).
+const SECRET_PREFIX = "secret.";
+const SECRET_FIELDS = [
+  ["esxi_password", "ESXi password", "Password of the ESXi account above."],
+  ["gns3_password", "GNS3 password", "Password of the GNS3 account in the GNS3 section."],
+];
+function settingsEntries() { return [...new FormData(connectionForm)]; }
+function settingsValues() {
+  return Object.fromEntries(settingsEntries().filter(([name]) => !name.startsWith(SECRET_PREFIX)));
+}
+function settingsSecrets() {
+  return Object.fromEntries(settingsEntries()
+    .filter(([name, value]) => name.startsWith(SECRET_PREFIX) && value)
+    .map(([name, value]) => [name.slice(SECRET_PREFIX.length), value]));
+}
+function setPasswordHints(stored) {
+  for (const [key] of SECRET_FIELDS) {
+    const input = connectionForm.elements[SECRET_PREFIX + key];
+    if (!input) continue;
+    input.value = "";
+    input.placeholder = stored?.[key] ? "A password is stored - leave empty to keep it" : "Not set - paste it here";
+  }
+}
 
 async function openConnectionSettings(filename = null) {
   connectionFilename = filename;
   connectionLoaded = false;
   connectionDirty = false;
-  connectionStep = 0;
   connectionResults.textContent = "Loading settings…";
   connectionApply.hidden = true;
-  connectionReview.hidden = true;
+  document.getElementById("connection-yaml").textContent = "";
   document.getElementById("connection-title").textContent = filename ? `Settings — ${filename}` : "Design a host configuration";
   document.getElementById("connection-intro").textContent = filename
-    ? "Edit your host settings by category. Save, then apply when ready to restart the server."
-    : "Work through each section, review the YAML, then download it or add this host. Creating a host saves a profile; it does not deploy or activate it.";
+    ? "Edit all settings of this host on one page. Save, then apply when ready to restart the server."
+    : "Fill in the sections below - the YAML at the bottom updates as you go. Creating a host saves a profile; it does not deploy or activate it.";
   document.getElementById("connection-name-wrap").hidden = !!filename;
   document.getElementById("connection-name").value = "my-host.yml";
   connectionFields.replaceChildren();
@@ -3223,13 +3245,9 @@ async function openConnectionSettings(filename = null) {
     ]);
     connectionGroups = schema.groups;
     for (const [index, group] of connectionGroups.entries()) {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "toolbar-btn";
-      tab.textContent = `${index + 1}. ${group.title}`;
-      tab.addEventListener("click", () => { if (validateSettingsStep()) { connectionStep = index; showSettingsStep(); } });
-      document.getElementById("connection-tabs").appendChild(tab);
       const section = document.createElement("fieldset");
+      section.id = `connection-section-${index}`;
+      addSectionLink(group.title, section);
       const legend = document.createElement("legend");
       legend.textContent = group.title;
       section.appendChild(legend);
@@ -3270,58 +3288,74 @@ async function openConnectionSettings(filename = null) {
       }
       connectionFields.appendChild(section);
     }
+    connectionFields.appendChild(buildCredentialsSection());
+    setPasswordHints(body.passwords_set);
     connectionLoaded = true;
     connectionResults.textContent = "";
-    showSettingsStep();
+    updateSettingsActions();
+    await refreshSettingsPreview();
   } catch (error) { connectionResults.textContent = error.message; }
   finally { setConnectionBusy(false); }
 }
-function showSettingsStep() {
-  const review = connectionStep === connectionGroups.length;
-  [...connectionFields.children].forEach((el, i) => { el.hidden = i !== connectionStep; });
-  [...document.getElementById("connection-tabs").children].forEach((el, i) => {
-    el.classList.toggle("primary", i === connectionStep);
-    el.setAttribute("aria-current", i === connectionStep ? "step" : "false");
-  });
-  connectionReview.hidden = !review;
-  document.getElementById("connection-step").textContent = `Step ${connectionStep + 1} of ${connectionGroups.length + 1} · ${review ? "Review" : connectionGroups[connectionStep].title}`;
-  document.getElementById("connection-back").hidden = connectionStep === 0;
-  document.getElementById("connection-next").hidden = review;
-  document.getElementById("connection-next").textContent = connectionStep === connectionGroups.length - 1 ? "Review configuration" : "Next";
-  document.getElementById("connection-save").hidden = !review;
+function addSectionLink(title, section) {
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "toolbar-btn";
+  link.textContent = title;
+  link.addEventListener("click", () => section.scrollIntoView({ block: "start" }));
+  document.getElementById("connection-tabs").appendChild(link);
+}
+function buildCredentialsSection() {
+  const section = document.createElement("fieldset");
+  section.id = "connection-section-credentials";
+  const legend = document.createElement("legend");
+  legend.textContent = "Credentials";
+  section.appendChild(legend);
+  addSectionLink("Credentials", section);
+  for (const [key, title, help] of SECRET_FIELDS) {
+    const label = document.createElement("label");
+    const text = document.createElement("span");
+    text.textContent = title;
+    const input = document.createElement("input");
+    input.type = "password";
+    input.name = SECRET_PREFIX + key;
+    input.autocomplete = "new-password";
+    input.spellcheck = false;
+    const note = document.createElement("small");
+    note.textContent = `${help} Stored on the server only, never shown again.`;
+    label.append(text, input, note);
+    section.appendChild(label);
+  }
+  return section;
+}
+function updateSettingsActions() {
   document.getElementById("connection-save").textContent = connectionFilename ? "Save settings" : "Create host";
-  document.getElementById("connection-download").hidden = !review;
 }
-function validateSettingsStep() {
-  const section = connectionFields.children[connectionStep];
-  return !section || [...section.querySelectorAll("input, textarea, select")].every(el => el.reportValidity());
-}
-async function settingsReview() {
-  if (!validateSettingsStep()) return;
-  const fields = settingsValues();
-  setConnectionBusy(true);
+async function refreshSettingsPreview() {
+  const target = document.getElementById("connection-yaml");
   try {
-    const result = await settingsRequest("/host-config/preview", settingsOptions(fields));
-    document.getElementById("connection-yaml").textContent = result.yaml;
-    connectionStep = connectionGroups.length;
-    showSettingsStep();
-    connectionResults.textContent = "Review the configuration. Passwords must be set on the server using ESXI_PASSWORD and GNS3_PASSWORD (for example in .env).";
-  } catch (error) { connectionResults.textContent = error.message; }
-  finally { setConnectionBusy(false); }
+    target.textContent = (await settingsRequest("/host-config/preview", settingsOptions(settingsValues()))).yaml;
+  } catch (error) {
+    target.textContent = `The YAML can't be shown yet: ${error.message}`;
+  }
 }
 function setConnectionBusy(busy) {
   connectionBusy = busy;
   connectionDialog.querySelectorAll("button, input, textarea, select").forEach(el => { el.disabled = busy || (!connectionLoaded && el.id !== "connection-close"); });
 }
 connectionForm.addEventListener("input", () => {
+  clearTimeout(connectionPreviewTimer);
+  connectionPreviewTimer = setTimeout(refreshSettingsPreview, 400);
   connectionDirty = true;
   connectionApply.hidden = true;
   connectionResults.textContent = "Unsaved changes. Connection results must be checked again after changes.";
 });
 connectionForm.addEventListener("submit", async event => {
   event.preventDefault();
-  if (connectionStep !== connectionGroups.length) { document.getElementById("connection-next").click(); return; }
+  if (!connectionForm.reportValidity()) return;
+  // Read before setConnectionBusy: disabled inputs are left out of FormData.
   const fields = settingsValues();
+  const secrets = settingsSecrets();
   const filename = document.getElementById("connection-name").value.trim();
   if (!connectionFilename && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.ya?ml$/.test(filename)) {
     connectionResults.textContent = "Use a filename ending in .yml or .yaml, with letters, numbers, dots, hyphens or underscores."; return;
@@ -3329,15 +3363,17 @@ connectionForm.addEventListener("submit", async event => {
   setConnectionBusy(true);
   try {
     if (connectionFilename) {
-      await connectionRequest("", { ...settingsOptions(fields), method: "PUT" });
+      await connectionRequest("", { ...settingsOptions(fields, { secrets }), method: "PUT" });
       connectionResults.textContent = "Saved. Apply / restart when ready. Other settings are retained; YAML comments are removed.";
+      setPasswordHints((await connectionRequest()).passwords_set);
       connectionApply.hidden = false;
     } else {
-      await settingsRequest("/host-config/create", settingsOptions(fields, { filename }));
+      await settingsRequest("/host-config/create", settingsOptions(fields, { filename, secrets }));
       connectionFilename = filename;
       document.getElementById("connection-title").textContent = `Settings — ${filename}`;
       document.getElementById("connection-name-wrap").hidden = true;
-      document.getElementById("connection-save").textContent = "Save settings";
+      updateSettingsActions();
+      setPasswordHints((await connectionRequest()).passwords_set);
       connectionResults.textContent = "Host created. It is available on the home screen. Apply / restart to activate it.";
       connectionApply.hidden = false;
     }
@@ -3346,12 +3382,6 @@ connectionForm.addEventListener("submit", async event => {
   } catch (error) { connectionResults.textContent = error.message; }
   finally { setConnectionBusy(false); }
 });
-document.getElementById("connection-next").addEventListener("click", () => {
-  if (!validateSettingsStep()) return;
-  if (connectionStep === connectionGroups.length - 1) settingsReview();
-  else { connectionStep++; showSettingsStep(); }
-});
-document.getElementById("connection-back").addEventListener("click", () => { connectionStep--; showSettingsStep(); });
 document.getElementById("connection-download").addEventListener("click", () => {
   const name = connectionFilename || document.getElementById("connection-name").value.trim() || "settings.yml";
   const url = URL.createObjectURL(new Blob([document.getElementById("connection-yaml").textContent], { type: "application/yaml" }));
@@ -3359,7 +3389,7 @@ document.getElementById("connection-download").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 document.getElementById("connection-test").addEventListener("click", async () => {
-  if (!validateSettingsStep()) return;
+  if (!connectionForm.reportValidity()) return;
   const fields = settingsValues();
   setConnectionBusy(true);
   connectionResults.textContent = "Checking services from the server…";

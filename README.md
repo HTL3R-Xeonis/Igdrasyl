@@ -209,17 +209,27 @@ has something to click into immediately.
 ## Host configuration designer and settings
 
 Choose **Design a host configuration** on the home screen to build a host
-profile. Five guided sections cover 22 host/runtime settings, with
+profile. The whole form is one scrollable page (a row of buttons at the top
+jumps to a section): General, ESXi host, Networking, GNS3, API services and
+Credentials cover 22 host/runtime settings plus both passwords, with
 TopologyBuilder defaults filled in and automatic options left blank.
-The final review shows the generated YAML. **Download YAML** saves a local copy;
-**Create host** adds a named profile without activating it or deploying anything.
-Existing filenames are rejected rather than overwritten.
+The generated YAML at the bottom updates while you type. **Download YAML**
+saves a local copy; **Create host** adds a named profile without activating it
+or deploying anything. Existing filenames are rejected rather than overwritten.
 
-Each host tile's **Settings** button opens the same grouped editor for an existing
+Each host tile's **Settings** button opens the same page for an existing
 profile. Optional values, booleans, ports, protected port-group lists, and MAC
-ranges have dedicated inputs and validation. Passwords remain server environment
-variables (`ESXI_PASSWORD` and `GNS3_PASSWORD`), because the settings loader does
-not accept passwords in YAML.
+ranges have dedicated inputs and validation.
+
+**Passwords** can be pasted into the Credentials section. The settings loader
+does not accept passwords in YAML, so they are stored apart from it, per host, in
+`<profiles dir>/.secrets/<profile>.json` (mode 0600) and applied at startup
+(they win over `ESXI_PASSWORD`/`GNS3_PASSWORD` for that host; those variables
+still work when nothing is stored). They are write-only: the server only reports
+*whether* one is stored, an empty field keeps it, and they never appear in the
+YAML, the preview, the Test connections request or the log. Deleting a host
+deletes its stored passwords; a changed password takes effect after
+Apply / restart.
 
 **Test connections** uses the unsaved form values from the server. Each service
 shows its address, check type, elapsed time, status, and diagnostic message.
@@ -278,6 +288,13 @@ same restart flow as host changes. Import and live edits require a selected proj
   and project to be active after any required restart.
 - `GET/PUT /settings-profiles/{filename}/project`: independent host selection;
   PUT accepts a managed library `project_id` only.
+- `GET/PUT /settings-profiles/{filename}/connections`, `POST /host-config/create`:
+  host settings; the optional `secrets` body field (`esxi_password`,
+  `gns3_password`) is write-only - GET returns `passwords_set` (booleans) only.
+- Browsers navigating to an unknown address, a wrong method or a failing page get
+  a readable 404/405/5xx page (`app/error_pages.py`); requests that don't ask for
+  HTML (fetch, curl) keep getting the JSON `{"detail": ...}` body. There is no
+  separate 403 page - nothing here is access-controlled.
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
   filenames, source directories, credentials, and server paths are omitted.
 
@@ -327,7 +344,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-360 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+377 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

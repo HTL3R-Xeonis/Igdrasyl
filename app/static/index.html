@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=logging-and-template-hints-1">
+<link rel="stylesheet" href="/styles.css?v=host-form-2">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -252,22 +252,21 @@
 <dialog id="connection-dialog" aria-labelledby="connection-title">
   <h3 id="connection-title">Host settings</h3>
   <p id="connection-intro"></p>
-  <nav id="connection-tabs" aria-label="Configuration sections"></nav>
-  <p id="connection-step" aria-live="polite"></p>
-  <p>Passwords are managed outside this form. Tests use the values below without saving them. Saving retains other settings but removes YAML comments.</p>
+  <nav id="connection-tabs" aria-label="Jump to a section"></nav>
   <form id="connection-form" novalidate>
-    <div id="connection-fields"></div>
-    <section id="connection-review" hidden>
-      <h4>Review configuration</h4>
-      <label id="connection-name-wrap">Profile filename <input id="connection-name" value="my-host.yml"></label>
-      <pre id="connection-yaml"></pre>
-    </section>
+    <div id="connection-body">
+      <p id="connection-note">Everything is on this page - scroll to see all sections. Tests use the values below without saving them. Saving retains other settings but removes YAML comments.</p>
+      <div id="connection-fields"></div>
+      <section id="connection-review">
+        <h4>Review configuration</h4>
+        <label id="connection-name-wrap">Profile filename <input id="connection-name" value="my-host.yml"></label>
+        <pre id="connection-yaml"></pre>
+      </section>
+    </div>
     <div id="connection-actions">
-      <button type="button" class="toolbar-btn" id="connection-back">Back</button>
-      <button type="button" class="toolbar-btn primary" id="connection-next">Next</button>
-      <button type="button" class="toolbar-btn" id="connection-download" hidden>Download YAML</button>
+      <button type="submit" class="toolbar-btn primary" id="connection-save">Save settings</button>
       <button type="button" class="toolbar-btn" id="connection-test">Test connections</button>
-      <button type="submit" class="toolbar-btn primary" id="connection-save" hidden>Save settings</button>
+      <button type="button" class="toolbar-btn" id="connection-download">Download YAML</button>
       <button type="button" class="toolbar-btn" id="connection-apply" hidden>Apply / restart…</button>
       <button type="button" class="toolbar-btn" id="connection-close">Close</button>
     </div>
@@ -321,7 +320,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=logging-and-template-hints-1"></script>
+<script src="/app.js?v=host-form-2"></script>
 <script src="/projects.js?v=project-empty-state-1"></script>
 </body>
 </html>

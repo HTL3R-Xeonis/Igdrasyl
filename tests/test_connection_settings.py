@@ -1,3 +1,4 @@
+import stat
 from unittest.mock import patch
 
 import pytest
@@ -194,3 +195,80 @@ def test_optional_and_list_fields_round_trip(profile):
     connection_settings.update_fields("host.yml", values)
     fields = connection_settings.read_fields("host.yml")
     assert all(fields[key] == value for key, value in values.items())
+
+
+def test_entered_passwords_are_stored_apart_and_never_returned(profile, client):
+    secret = "pw-for-test-only"
+    response = client.put(
+        "/settings-profiles/host.yml/connections",
+        json={"fields": {"esxi.port": "8443"}, "secrets": {"esxi_password": secret}},
+    )
+    assert response.status_code == 200
+    assert secret not in response.text
+    assert secret not in profile.read_text()
+    stored = profile.parent / ".secrets" / "host.yml.json"
+    assert stat.S_IMODE(stored.stat().st_mode) == 0o600
+    body = client.get("/settings-profiles/host.yml/connections")
+    assert secret not in body.text
+    assert body.json()["passwords_set"] == {
+        "esxi_password": True,
+        "gns3_password": False,
+    }
+
+
+def test_blank_password_keeps_the_stored_one(profile):
+    from app import profile_secrets
+
+    profile_secrets.save("host.yml", {"esxi_password": "one", "gns3_password": "two"})
+    profile_secrets.save("host.yml", {"esxi_password": "", "gns3_password": "three"})
+    assert profile_secrets._read("host.yml") == {
+        "esxi_password": "one",
+        "gns3_password": "three",
+    }
+
+
+@pytest.mark.parametrize(
+    "secrets",
+    [{"esxi_password": "a\nb"}, {"esxi_password": "x" * 300}, {"other": "x"}],
+)
+def test_invalid_password_input_changes_nothing(profile, client, secrets):
+    before = profile.read_bytes()
+    response = client.put(
+        "/settings-profiles/host.yml/connections",
+        json={"fields": {"esxi.port": "9000"}, "secrets": secrets},
+    )
+    assert response.status_code == 400
+    assert profile.read_bytes() == before
+
+
+def test_apply_overrides_settings_and_delete_removes_them(profile):
+    from src.settings import Settings
+
+    from app import profile_secrets
+
+    profile_secrets.save("host.yml", {"gns3_password": "g"})
+    old = Settings.GNS3.PASSWORD
+    try:
+        assert profile_secrets.apply("host.yml") == ["gns3_password"]
+        assert Settings.GNS3.PASSWORD == "g"
+    finally:
+        Settings.GNS3.PASSWORD = old
+    profile_secrets.delete("host.yml")
+    assert profile_secrets.status("host.yml") == {
+        "esxi_password": False,
+        "gns3_password": False,
+    }
+
+
+def test_create_host_with_passwords_stores_them(profile, client):
+    response = client.post(
+        "/host-config/create",
+        json={
+            "filename": "new.yml",
+            "fields": {"esxi.ip": "192.0.2.7"},
+            "secrets": {"esxi_password": "abc"},
+        },
+    )
+    assert response.status_code == 200
+    assert "abc" not in (profile.parent / "new.yml").read_text()
+    assert (profile.parent / ".secrets" / "new.yml.json").exists()

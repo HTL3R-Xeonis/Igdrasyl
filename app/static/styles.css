@@ -1614,3 +1614,17 @@ input:focus, select:focus, textarea:focus {
   #landing-header { padding-left: 50px; }
   #landing-actions-grid .landing-host-tile { min-height: 76px; }
 }
+
+/* Host settings: one scrollable page instead of steps. Header and action bar
+   stay put, only the sections scroll. */
+#connection-dialog[open] { display: flex; flex-direction: column; height: 88vh; overflow: hidden; }
+#connection-form { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
+#connection-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 10px; scroll-behavior: smooth; }
+#connection-note, #connection-intro { margin-top: 0; }
+#connection-tabs { margin: 0 0 8px; flex-shrink: 0; }
+#connection-fields { gap: 0; }
+#connection-fields fieldset { border-top: 1px solid #454d57; margin: 0; }
+#connection-fields fieldset:first-child { border-top: 0; }
+#connection-review { border-top: 1px solid #454d57; padding-top: 12px; }
+#connection-actions { position: static; flex-shrink: 0; margin-top: 8px; padding: 12px 0 0; }
+#connection-results:not(:empty) { flex-shrink: 0; max-height: 30vh; overflow-y: auto; }
