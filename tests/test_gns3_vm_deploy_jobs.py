@@ -1,10 +1,11 @@
 import time
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 from src.settings import Settings
 
-from app import gns3_vm_deploy_jobs
+from app import gns3_vm_deploy_jobs, ova_templates
 
 
 def _fake_app(app_state):
@@ -15,13 +16,20 @@ def _fake_app(app_state):
 
 
 @pytest.fixture(autouse=True)
-def _reset_gns3_vm_settings():
+def _reset_gns3_vm_settings(monkeypatch):
     original = (
         Settings.ESXI.GNS3_VM_OVA_PATH,
         Settings.ESXI.GNS3_VM_MGMT_NETWORK,
         Settings.ESXI.DATASTORE,
         Settings.ESXI.GNS3_VM_MAC_RANGE,
     )
+    ova_templates._selected_template_id = None
+
+    @contextmanager
+    def fake_downloaded(template_id):
+        yield template_id
+
+    monkeypatch.setattr(ova_templates, "downloaded", fake_downloaded)
     yield
     (
         Settings.ESXI.GNS3_VM_OVA_PATH,
@@ -29,6 +37,7 @@ def _reset_gns3_vm_settings():
         Settings.ESXI.DATASTORE,
         Settings.ESXI.GNS3_VM_MAC_RANGE,
     ) = original
+    ova_templates._selected_template_id = None
 
 
 def test_start_job_raises_not_configured_without_ova_path(app_state):

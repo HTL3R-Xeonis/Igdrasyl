@@ -18,6 +18,8 @@ from typing import Any
 
 from src.settings import Settings
 
+from app.public_text import redact_paths
+
 # Matches app/logging_setup.py's own _FILE_FORMAT once loguru has
 # substituted it: "2026-09-24 21:34:04.917 | ERROR    | api_handler.py:50 - message"
 _LINE_RE = re.compile(
@@ -55,9 +57,16 @@ def tail_log_lines(count: int) -> list[dict[str, Any]]:
                     "time": match.group("time"),
                     "level": match.group("level").strip(),
                     "location": match.group("location"),
-                    "message": match.group("message"),
+                    "message": redact_paths(match.group("message")),
                 }
             )
         else:
-            parsed.append({"time": "", "level": "", "location": "", "message": line})
+            parsed.append(
+                {
+                    "time": "",
+                    "level": "",
+                    "location": "",
+                    "message": redact_paths(line),
+                }
+            )
     return parsed

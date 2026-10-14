@@ -16,11 +16,11 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import requests
-from fastapi import FastAPI, HTTPException, Response, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
@@ -37,9 +37,11 @@ from app import (
     lifecycle,
     logs,
     maintenance,
+    ova_templates,
     project_bundle,
     project_library,
     project_selection,
+    public_text,
     settings_profiles,
     topology_write,
     vm_screen,
@@ -153,6 +155,7 @@ async def lifespan(app: FastAPI):
     settings_path = os.getenv(_SETTINGS_ENV_VAR)
     if settings_path:
         Settings.initialise_settings(settings_path)
+    ova_templates.initialise(settings_path)
     project_selection.initialise(settings_path)
 
     # After initialise_settings, so a settings.yml's own log_file_path
@@ -207,16 +210,24 @@ app.include_router(console.router)
 app.include_router(vm_screen.router)
 
 
+@app.exception_handler(HTTPException)
+async def path_safe_http_error(_request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": public_text.redact_paths(exc.detail)},
+        headers=exc.headers,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
-        "topology_file": Settings.TOPOLOGY_FILE,
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
         "gns3_port": Settings.GNS3.PORT,
         "gns3_project_name": app.state.project_name,
         "gns3_project_id": app.state.project_id,
-        "warning": app.state.startup_warning,
+        "warning": public_text.redact_paths(app.state.startup_warning),
         "incremental_deploy": Settings.INCREMENTAL_DEPLOY,
     }
 
@@ -762,7 +773,7 @@ def generate_design_status(job_id: str) -> dict[str, Any]:
         "warnings": job.warnings,
     }
     if job.status == "error":
-        response["error"] = job.error
+        response["error"] = public_text.redact_paths(job.error)
     return response
 
 
@@ -885,7 +896,7 @@ class DeployGns3VmRequest(BaseModel):
 def deploy_gns3_vm(request: DeployGns3VmRequest | None = None) -> dict[str, str]:
     """
     Kicks off a background job that replaces the configured GNS3 VM
-    with a freshly imported one from gns3_vm_ova_path - the same action
+    with a freshly imported one from the selected OVA template resource - the same action
     the app's own startup takes automatically when that VM is found
     completely missing, available here as an explicit, on-demand GUI
     action (e.g. to recover from a corrupted GNS3 VM without restarting
@@ -921,7 +932,7 @@ def gns3_vm_deploy_status(job_id: str) -> dict[str, Any]:
 
     response: dict[str, Any] = {"status": job.status, "stage": job.stage}
     if job.status == "error":
-        response["error"] = job.error
+        response["error"] = public_text.redact_paths(job.error)
     elif job.status == "done":
         response["ip_address"] = job.ip_address
     return response
@@ -976,7 +987,7 @@ def import_job_status(job_id: str) -> dict[str, Any]:
         "completed": completed,
     }
     if job.status == "error":
-        response["error"] = job.error
+        response["error"] = public_text.redact_paths(job.error)
         response["error_kind"] = job.error_kind
     elif job.status == "done" and job.result is not None:
         response.update(job.result)
@@ -987,10 +998,7 @@ def import_job_status(job_id: str) -> dict[str, Any]:
 def list_settings_profiles() -> list[dict[str, Any]]:
     """
     Every uploaded settings.yml profile (see app/settings_profiles.py),
-    each with a best-effort preview (esxi_ip/gns3_vm_name/topology_file/
-    project_name - None or an "error" string if that particular file
-    doesn't parse) and whether it's the one this running process was
-    actually started with.
+    each with a path-free preview and whether it is active.
     """
     return settings_profiles.list_profiles()
 
@@ -1068,8 +1076,9 @@ def deploy_library_project(project_id: str, filename: str):
 
 
 class ProjectSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     project_id: str | None = None
-    topology_file: str = ""
     project_name: str = ""
 
 
@@ -1083,7 +1092,6 @@ def select_host_project(filename: str, body: ProjectSelectionRequest):
     return _settings_call(
         project_selection.save_selection,
         filename,
-        body.topology_file.strip(),
         body.project_name,
         body.project_id,
     )
@@ -1092,6 +1100,14 @@ def select_host_project(filename: str, body: ProjectSelectionRequest):
 @app.get("/host-config/schema")
 def host_config_schema():
     return {"groups": connection_settings.schema()}
+
+
+@app.get("/ova-templates")
+def list_ova_templates():
+    try:
+        return {"templates": ova_templates.list_public()}
+    except (RuntimeError, TypeError) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.post("/host-config/preview")

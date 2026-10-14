@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=text-menu-1">
+<link rel="stylesheet" href="/styles.css?v=managed-resources-1">
 </head>
 <body>
 <div id="app-view" hidden>
@@ -215,15 +215,11 @@
 <dialog id="project-selection-dialog" aria-labelledby="project-selection-title">
   <h3 id="project-selection-title">Project library</h3>
   <p>Create or upload a topology, then select it for a host. Files are managed by TopologyOperator.</p>
+  <p id="project-selection-status" role="status"></p>
   <form id="project-selection-form">
     <label>Project<select id="project-library-picker"></select></label>
     <a class="toolbar-btn" id="project-library-download" hidden>Download YAML</a>
     <button class="toolbar-btn primary" id="project-library-open" type="button" hidden>Open in designer</button>
-    <details id="project-selection-advanced">
-      <summary>Advanced: existing server file</summary>
-      <label>Topology YAML path<input id="project-selection-path" placeholder="/path/to/topology.yaml"></label>
-      <p>Choose “Existing server file” in the project list to use this path.</p>
-    </details>
     <label id="project-name-label">GNS3 project name (optional)<input id="project-selection-name" placeholder="Defaults to the library project name"></label>
     <p id="project-selection-help">Selection changes take effect when the host is activated or restarted.</p>
     <button class="toolbar-btn primary" id="project-selection-save" type="submit">Save selection</button>
@@ -237,7 +233,6 @@
     <p>Leave the file empty to create an empty topology. Uploads are checked for structure; host templates are checked at activation.</p>
     <button class="toolbar-btn" type="submit">Add to library</button>
   </form>
-  <p id="project-selection-status" role="status"></p>
   <button class="toolbar-btn" id="project-selection-close" type="button">Close</button>
 </dialog>
 
@@ -322,7 +317,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=text-menu-1"></script>
-<script src="/projects.js?v=project-editor-1"></script>
+<script src="/app.js?v=managed-resources-1"></script>
+<script src="/projects.js?v=project-empty-state-1"></script>
 </body>
 </html>

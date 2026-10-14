@@ -5,6 +5,7 @@ let projectLibraryBusy = false;
 let projectSelectionLoaded = false;
 const projectSelectionDialog = document.getElementById("project-selection-dialog");
 const projectSelectionStatus = document.getElementById("project-selection-status");
+const projectSelectionForm = document.getElementById("project-selection-form");
 const projectPicker = document.getElementById("project-library-picker");
 const projectApply = document.getElementById("project-selection-apply");
 const projectSave = document.getElementById("project-selection-save");
@@ -41,34 +42,32 @@ async function refreshProjectLibrary(selected = "") {
     const label = counts.get(project.name) > 1 ? `${project.name} (${project.id.slice(0, 8)})` : project.name;
     projectPicker.add(new Option(label, project.id));
   });
-  if (projectSelectionHost) projectPicker.add(new Option("Existing server file (Advanced)", "external"));
   projectPicker.value = selected;
+  projectSelectionForm.hidden = body.projects.length === 0;
   updateProjectDownload();
+  return body.projects.length;
 }
 async function openProjectSelection(filename = null) {
   projectSelectionHost = filename;
   projectSelectionLoaded = false;
   projectSelectionStatus.textContent = "Loading…";
+  projectSelectionForm.hidden = true;
   projectApply.hidden = true;
   projectSave.hidden = !filename;
   document.getElementById("project-name-label").hidden = !filename;
   document.getElementById("project-selection-help").hidden = !filename;
-  const advanced = document.getElementById("project-selection-advanced");
-  advanced.hidden = !filename;
-  advanced.open = false;
-  document.getElementById("project-selection-path").value = "";
   document.getElementById("project-selection-name").value = "";
   document.getElementById("project-library-create").reset();
   projectSelectionDialog.showModal();
   projectBusy(true);
   try {
     const selection = filename ? await settingsRequest(`/settings-profiles/${encodeURIComponent(filename)}/project`) : {};
-    await refreshProjectLibrary(selection.project_id || (selection.topology_file ? "external" : ""));
-    document.getElementById("project-selection-path").value = selection.project_id ? "" : selection.topology_file || "";
+    const projectCount = await refreshProjectLibrary(selection.project_id || "");
     document.getElementById("project-selection-name").value = selection.project_name || "";
-    advanced.open = Boolean(selection.topology_file && !selection.project_id);
     projectSelectionLoaded = true;
-    projectSelectionStatus.textContent = selection.legacy ? "Your existing server file is still selected. Upload a copy to add it to the library." : "Projects are stored independently of host settings.";
+    projectSelectionStatus.textContent = projectCount
+      ? "Projects are stored independently of host settings."
+      : "No projects yet. Create an empty project or upload a topology YAML below.";
   } catch (error) { projectSelectionStatus.textContent = error.message; }
   finally { projectBusy(false); }
 }
@@ -77,7 +76,6 @@ document.getElementById("open-library-project-btn").addEventListener("click", ()
 projectPicker.addEventListener("change", () => {
   updateProjectDownload();
   document.getElementById("project-selection-name").value = "";
-  document.getElementById("project-selection-advanced").open = projectPicker.value === "external";
 });
 document.getElementById("project-selection-form").addEventListener("input", () => { projectApply.hidden = true; });
 document.getElementById("project-library-create").addEventListener("submit", async event => {
@@ -102,8 +100,7 @@ document.getElementById("project-selection-form").addEventListener("submit", asy
   event.preventDefault();
   if (projectLibraryBusy || !projectSelectionLoaded || !projectSelectionHost) return;
   const id = projectPicker.value;
-  const payload = { project_id: id && id !== "external" ? id : null,
-    topology_file: id === "external" ? document.getElementById("project-selection-path").value : "",
+  const payload = { project_id: id || null,
     project_name: document.getElementById("project-selection-name").value };
   projectBusy(true);
   try {

@@ -90,14 +90,14 @@ def test_select_library_project_preserves_host(client, tmp_path, monkeypatch):
     selected = project_selection.get_selection("host.yml")
     assert selected["project_id"] == project["id"]
     assert selected["project_name"] == "Named project"
-    assert Path(selected["topology_file"]).read_text() == "nodes: []\nedges: []\n"
+    assert "topology_file" not in selected
     assert host.read_bytes() == original
     assert (
         client.put(
             "/settings-profiles/host.yml/project",
             json={"project_id": project["id"], "topology_file": "other.yml"},
         ).status_code
-        == 400
+        == 422
     )
     assert (
         client.put(
@@ -106,7 +106,7 @@ def test_select_library_project_preserves_host(client, tmp_path, monkeypatch):
         == 404
     )
     assert client.put("/settings-profiles/host.yml/project", json={}).status_code == 200
-    assert project_selection.get_selection("host.yml")["topology_file"] is None
+    assert project_selection.get_selection("host.yml")["project_id"] is None
 
 
 def test_design_roundtrip_is_stored_per_project(client):
@@ -154,7 +154,7 @@ def test_deployment_preview_is_read_only_and_descriptive(client, tmp_path, monke
         "Preview",
         "nodes:\n  - {names: [R1, R2], role: ROUTER, image: VPCS}\nedges:\n  - [R1, eth0, R2, eth0]\n",
     )
-    project_selection.save_selection("host.yml", "", "", project["id"])
+    project_selection.save_selection("host.yml", "", project["id"])
 
     response = client.get(f"/projects/{project['id']}/deploy-preview/host.yml")
     assert response.status_code == 200

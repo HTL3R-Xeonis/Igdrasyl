@@ -15,8 +15,7 @@ config-push, project import/export, multi-host switching, design mode,
 Generate via LLM, packet capture, and the template-outage degrade path
 have all been exercised live, not just in the test suite. The GNS3 VM
 Deploy feature (below) is thoroughly unit-tested but not yet exercised
-against a real OVA import - no OVA path has been configured on the
-infrastructure available so far.
+against a real OVA import from the sister template API.
 
 ## Architecture
 
@@ -133,10 +132,10 @@ available two ways:
   found *genuinely absent* - never just because it exists but isn't
   reporting an IP yet (e.g. still booting).
 
-Requires `esxi.gns3_vm_ova_path` and `esxi.gns3_vm_mgmt_network` set in
-`settings.yml` (see [`settings.example.yml`](settings.example.yml)) -
-unset (the default) leaves this feature unavailable entirely, both the
-button and the auto-recovery.
+Requires an OVA resource selected from the sister template API and
+`esxi.gns3_vm_mgmt_network`. The browser receives only the template ID and safe
+display metadata. The backend streams `/api/download/{id}` into a private
+temporary file for the import and deletes it afterward.
 
 An existing same-named VM is always powered off and renamed as a
 timestamped backup first, never touched destructively by default. Two
@@ -231,17 +230,14 @@ the host uses incremental or full deployment. The preview is read-only. Starting
 deployment selects the project for that host; if the host or project is not active,
 the app restarts once and resumes the confirmed deployment afterward.
 
-Choose **No project selected** to clear the selection. Existing server files remain
-available through **Existing server file (Advanced)** for migration. Save the selection,
-then use **Apply / restart** (or activate that host later). Selecting a project
+Choose **No project selected** to clear the selection. Save the selection, then
+use **Apply / restart** (or activate that host later). Selecting a project
 does not deploy it; importing a `.topoproj` remains an explicit deployment.
 
-Selections live in `project_selections.json`, keyed by host profile path, and
+Selections live in `project_selections.json`, keyed by host profile filename, and
 survive restarts. Override the store path with `TOPOLOGYOPERATOR_PROJECT_SELECTIONS`.
-The same topology can be selected for different hosts. Existing profiles with
-`topology_file` and `gns3.project_name` remain compatible: those values are used
-until a separate selection is saved, including an explicit empty selection.
-New host YAML downloads contain neither field. TopologyBuilder's global settings
+The same topology can be selected for different hosts. Host YAML downloads contain
+no topology path. TopologyBuilder's global settings
 are populated from the selection only at startup, so project changes use the
 same restart flow as host changes. Import and live edits require a selected project.
 
@@ -255,7 +251,9 @@ same restart flow as host changes. Import and live edits require a selected proj
   inspect and start a library deployment. The start endpoint requires that host
   and project to be active after any required restart.
 - `GET/PUT /settings-profiles/{filename}/project`: independent host selection;
-  PUT accepts a library `project_id` or an advanced `topology_file` path.
+  PUT accepts a managed library `project_id` only.
+- `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
+  filenames, source directories, credentials, and server paths are omitted.
 
 - `GET /health` (includes `warning` - see the graceful-degrade point
   above), `POST /reload` (manual retry once a down dependency recovers),

@@ -41,8 +41,8 @@ def test_save_profile_then_list_shows_a_preview():
     assert profiles[0]["filename"] == "host-a.yml"
     assert profiles[0]["esxi_ip"] == "10.0.0.1"
     assert profiles[0]["gns3_vm_name"] == "GNS3-VM"
-    assert profiles[0]["topology_file"] == "./topo.yaml"
-    assert profiles[0]["project_name"] == "myproj"
+    assert "topology_file" not in profiles[0]
+    assert "project_name" not in profiles[0]
     assert profiles[0]["active"] is False
 
 

@@ -64,13 +64,10 @@ def _preview(path: Path) -> dict[str, Any]:
     except (yaml.YAMLError, OSError) as exc:
         return {"error": f"couldn't read/parse this file: {exc}"}
     esxi = data.get("esxi") or {}
-    gns3 = data.get("gns3") or {}
     return {
         "error": None,
         "esxi_ip": esxi.get("ip"),
         "gns3_vm_name": esxi.get("gns3_vm_name"),
-        "topology_file": data.get("topology_file"),
-        "project_name": gns3.get("project_name"),
     }
 
 

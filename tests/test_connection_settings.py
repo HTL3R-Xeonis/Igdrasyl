@@ -132,7 +132,10 @@ def test_builder_defaults_round_trip_and_create_without_activation(
     fields = {
         field["key"]: field["default"] for group in groups for field in group["fields"]
     }
-    assert len(fields) == 22
+    assert len(fields) == 21
+    assert "log_file_path" not in fields
+    assert "esxi.gns3_vm_ova_path" not in fields
+    assert "esxi.gns3_vm_template_id" in fields
     preview = client.post("/host-config/preview", json={"fields": fields})
     assert preview.status_code == 200, preview.text
     data = yaml.safe_load(preview.json()["yaml"])
@@ -163,7 +166,7 @@ def test_builder_defaults_round_trip_and_create_without_activation(
         {"incremental_deploy": "yes"},
         {"esxi.gns3_vm_mac_range": "00:50:56:00:00:02,00:50:56:00:00:01"},
         {"esxi.gns3_vm_mac_range": "invalid"},
-        {"esxi.gns3_vm_ova_path": "/tmp/vm.ova"},
+        {"esxi.gns3_vm_template_id": "../invalid"},
     ],
 )
 def test_builder_rejects_invalid_config(client, fields):

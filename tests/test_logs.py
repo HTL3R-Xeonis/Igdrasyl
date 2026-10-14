@@ -82,6 +82,21 @@ def test_tail_log_lines_keeps_unparseable_lines_as_raw_message(tmp_path):
     assert result[2]["message"] == '  File "main.py", line 1, in <module>'
 
 
+def test_tail_log_lines_redacts_server_paths(tmp_path):
+    log_file = tmp_path / "app.log"
+    log_file.write_text(
+        "2026-09-24 21:34:04.917 | ERROR    | main.py:1 - failed at /srv/private/topology.yaml\n"
+    )
+    original = Settings.LOG_FILE_PATH
+    Settings.LOG_FILE_PATH = str(log_file)
+    try:
+        result = logs.tail_log_lines(10)
+    finally:
+        Settings.LOG_FILE_PATH = original
+
+    assert result[0]["message"] == "failed at [server file]"
+
+
 def test_get_logs_endpoint_returns_parsed_lines(client, app_state, tmp_path):
     log_file = tmp_path / "app.log"
     log_file.write_text("2026-09-24 21:34:04.917 | INFO     | main.py:1 - hello\n")

@@ -27,11 +27,12 @@ from loguru import logger
 from src.gns3_vm_deploy import deploy_fresh_gns3_vm
 from src.settings import Settings
 
+from app import ova_templates
 from app.gns3_state import resolve_project_id
 
 
 class NotConfigured(Exception):
-    """gns3_vm_ova_path and/or gns3_vm_mgmt_network aren't set - see settings.example.yml."""
+    """An OVA resource and/or management network has not been selected."""
 
 
 class AlreadyRunning(Exception):
@@ -48,10 +49,12 @@ class GNS3VMDeployJob:
 
 
 def _require_configured() -> None:
-    if not Settings.ESXI.GNS3_VM_OVA_PATH or not Settings.ESXI.GNS3_VM_MGMT_NETWORK:
+    if (
+        not ova_templates.selected_template_id()
+        or not Settings.ESXI.GNS3_VM_MGMT_NETWORK
+    ):
         raise NotConfigured(
-            "gns3_vm_ova_path and gns3_vm_mgmt_network must both be set in "
-            "settings.yml to deploy a GNS3 VM - see settings.example.yml"
+            "Select a GNS3 VM template and management network in host settings"
         )
 
 
@@ -64,8 +67,8 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     matters because deploy_fresh_gns3_vm powers off and renames-as-
     backup any existing same-named VM unconditionally, and this must
     never risk doing that to a VM that's merely slow, only one that
-    isn't there. A no-op (not an error) when gns3_vm_ova_path/
-    gns3_vm_mgmt_network aren't configured - the caller (main.py's own
+    isn't there. A no-op (not an error) when a template resource or
+    management network isn't configured - the caller (main.py's own
     lifespan) falls through to its ordinary "not found" warning either
     way, this just sometimes fixes that before it happens.
     :raises RuntimeError/ConnectionError/TimeoutError/ValueError: propagated
@@ -73,27 +76,29 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
         (already there for the ordinary "VM not found" case) turns this
         into the same non-fatal startup_warning, not a crash.
     """
-    if not Settings.ESXI.GNS3_VM_OVA_PATH or not Settings.ESXI.GNS3_VM_MGMT_NETWORK:
+    template_id = ova_templates.selected_template_id()
+    if not template_id or not Settings.ESXI.GNS3_VM_MGMT_NETWORK:
         return
     if app.state.esxi_connection.get_vm(Settings.ESXI.GNS3_VM_NAME) is not None:
         return
 
     logger.warning(
         f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}' not found at all - "
-        f"auto-deploying from {Settings.ESXI.GNS3_VM_OVA_PATH}"
+        "auto-deploying from the selected OVA template"
     )
     datastore_name = Settings.ESXI.DATASTORE
     if datastore_name is None:
         datastore_name = app.state.esxi_connection.find_biggest_datastore().name
-    deploy_fresh_gns3_vm(
-        app.state.esxi_connection,
-        Settings.ESXI.GNS3_VM_NAME,
-        Settings.ESXI.GNS3_VM_OVA_PATH,
-        datastore_name,
-        Settings.ESXI.GNS3_VM_MGMT_NETWORK,
-        Settings.ESXI.TRUNK_PORT_GROUP,
-        mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
-    )
+    with ova_templates.downloaded(template_id) as ova_path:
+        deploy_fresh_gns3_vm(
+            app.state.esxi_connection,
+            Settings.ESXI.GNS3_VM_NAME,
+            ova_path,
+            datastore_name,
+            Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+            Settings.ESXI.TRUNK_PORT_GROUP,
+            mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
+        )
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
 
@@ -101,21 +106,26 @@ def run_deploy_job(
     app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = False
 ) -> None:
     try:
+        template_id = ova_templates.selected_template_id()
+        if not template_id:
+            raise ValueError("No GNS3 VM template is selected")
         datastore_name = Settings.ESXI.DATASTORE
         if datastore_name is None:
             datastore_name = app.state.esxi_connection.find_biggest_datastore().name
 
-        ip_address = deploy_fresh_gns3_vm(
-            app.state.esxi_connection,
-            Settings.ESXI.GNS3_VM_NAME,
-            Settings.ESXI.GNS3_VM_OVA_PATH,
-            datastore_name,
-            Settings.ESXI.GNS3_VM_MGMT_NETWORK,
-            Settings.ESXI.TRUNK_PORT_GROUP,
-            on_stage=lambda stage: setattr(job, "stage", stage),
-            delete_old_vm=delete_old_vm,
-            mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
-        )
+        job.stage = "downloading GNS3 VM template"
+        with ova_templates.downloaded(template_id) as ova_path:
+            ip_address = deploy_fresh_gns3_vm(
+                app.state.esxi_connection,
+                Settings.ESXI.GNS3_VM_NAME,
+                ova_path,
+                datastore_name,
+                Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+                Settings.ESXI.TRUNK_PORT_GROUP,
+                on_stage=lambda stage: setattr(job, "stage", stage),
+                delete_old_vm=delete_old_vm,
+                mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
+            )
         job.ip_address = ip_address
         app.state.gns3_vm_ip = ip_address
 
@@ -149,7 +159,7 @@ def start_job(app: FastAPI, delete_old_vm: bool = False) -> GNS3VMDeployJob:
         timestamped backup indefinitely. See that function's own
         docstring for why this only ever happens after the new VM is
         proven up, never before.
-    :raises NotConfigured: gns3_vm_ova_path/gns3_vm_mgmt_network aren't set
+    :raises NotConfigured: an OVA resource or management network isn't selected
     :raises AlreadyRunning: a job for this app is already in progress
     """
     _require_configured()

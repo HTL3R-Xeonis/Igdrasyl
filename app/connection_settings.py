@@ -28,8 +28,8 @@ FIELDS = {
 # Every override accepted by TopologyBuilder's YAML loader.
 FIELDS.update(
     {
-        "log_file_path": Settings.LOG_FILE_PATH,
         "generate_max_retries": Settings.GENERATE_MAX_RETRIES,
+        "esxi.gns3_vm_template_id": None,
         "incremental_deploy": Settings.INCREMENTAL_DEPLOY,
         **{
             f"esxi.{name}": getattr(Settings.ESXI, name.upper())
@@ -39,7 +39,6 @@ FIELDS.update(
                 "ignore_port_groups",
                 "datastore",
                 "delete_unused_vms",
-                "gns3_vm_ova_path",
                 "gns3_vm_mgmt_network",
                 "gns3_vm_mac_range",
             )
@@ -52,7 +51,6 @@ GROUPS = [
     (
         "General",
         [
-            "log_file_path",
             "generate_max_retries",
             "incremental_deploy",
         ],
@@ -80,9 +78,9 @@ GROUPS = [
         "GNS3",
         [
             "esxi.gns3_vm_name",
+            "esxi.gns3_vm_template_id",
             "gns3.username",
             "gns3.port",
-            "esxi.gns3_vm_ova_path",
             "esxi.gns3_vm_mgmt_network",
             "esxi.gns3_vm_mac_range",
         ],
@@ -90,13 +88,12 @@ GROUPS = [
     ("API services", [key for key in FIELDS if key.startswith("api.")]),
 ]
 HELP = {
-    "log_file_path": "Path on the server for application logs.",
     "generate_max_retries": "Retries after the first unsuccessful generation attempt.",
     "incremental_deploy": "Keep enabled to reuse existing devices. Disabling resets networking and redeploys the topology.",
     "esxi.delete_unused_vms": "During a full deployment, delete tool-created VMs absent from the new topology.",
+    "esxi.gns3_vm_template_id": "OVA resource used to create or recover the GNS3 VM. Templates come from the configured template API.",
     "esxi.ignore_port_groups": "One per line. Include the GNS3 management port group to protect it during full deployments.",
     "esxi.datastore": "Leave blank to select the datastore with most free space.",
-    "esxi.gns3_vm_ova_path": "Optional server path. With a management network, enables fresh GNS3 VM deployment and recovery when missing.",
     "esxi.gns3_vm_mgmt_network": "Management port group for the GNS3 VM's first network adapter.",
     "esxi.gns3_vm_mac_range": "Optional inclusive range: start and end MAC addresses, one per line.",
     "gns3.parent_interface": "Leave blank to detect the trunk interface by MAC address.",
@@ -130,6 +127,8 @@ def schema():
                     if isinstance(FIELDS[key], int)
                     else "list"
                     if key in ("esxi.ignore_port_groups", "esxi.gns3_vm_mac_range")
+                    else "ova-template"
+                    if key == "esxi.gns3_vm_template_id"
                     else "url"
                     if key.startswith("api.")
                     else "text",
@@ -146,12 +145,6 @@ def build_document(values):
     defaults = {key: field_string(value) for key, value in FIELDS.items()}
     defaults.update(values)
     fields = validate_fields(defaults)
-    if bool(fields["esxi.gns3_vm_ova_path"]) != bool(
-        fields["esxi.gns3_vm_mgmt_network"]
-    ):
-        raise ValueError(
-            "GNS3 VM deployment needs both an OVA path and a management network"
-        )
     data = {}
     for key, value in fields.items():
         section, _, name = key.rpartition(".")
@@ -244,6 +237,10 @@ def validate_fields(values):
                 raise ValueError("Generation retries must be a whole number") from None
             if value < 0:
                 raise ValueError("Generation retries cannot be negative")
+        elif key == "esxi.gns3_vm_template_id":
+            if value and not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
+                raise ValueError("GNS3 VM template selection is invalid")
+            value = value or None
         elif not value and FIELDS[key] is None:
             value = None
         elif key.endswith(".port"):

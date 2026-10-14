@@ -35,6 +35,23 @@ def test_health_reports_gns3_port(client, app_state):
     assert resp.json()["gns3_port"] == Settings.GNS3.PORT
 
 
+def test_health_never_exposes_the_topology_path(client, app_state):
+    original = Settings.TOPOLOGY_FILE
+    try:
+        Settings.TOPOLOGY_FILE = "/srv/private/projects/topology.yaml"
+        response = client.get("/health")
+        assert "topology_file" not in response.json()
+        assert "/srv/private" not in response.text
+    finally:
+        Settings.TOPOLOGY_FILE = original
+
+
+def test_health_redacts_paths_from_warnings(client, app_state):
+    app_state.startup_warning = "Could not open /srv/private/topology.yaml"
+    response = client.get("/health")
+    assert response.json()["warning"] == "Could not open [server file]"
+
+
 def test_license_serves_the_repo_root_license_file(client, app_state):
     resp = client.get("/license")
     assert resp.status_code == 200

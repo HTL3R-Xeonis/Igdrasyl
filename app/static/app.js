@@ -3216,9 +3216,10 @@ async function openConnectionSettings(filename = null) {
   connectionDialog.showModal();
   setConnectionBusy(true);
   try {
-    const [schema, body] = await Promise.all([
+    const [schema, body, ovaCatalog] = await Promise.all([
       settingsRequest("/host-config/schema"),
       filename ? connectionRequest() : Promise.resolve({ fields: {} }),
+      settingsRequest("/ova-templates").catch(error => ({ templates: [], error: error.message })),
     ]);
     connectionGroups = schema.groups;
     for (const [index, group] of connectionGroups.entries()) {
@@ -3237,10 +3238,20 @@ async function openConnectionSettings(filename = null) {
         const title = document.createElement("span");
         title.textContent = field.key.split(".").pop().replaceAll("_", " ").replace(/\b(esxi|gns3|api|vm|ova|mac|ip)\b/g, word => word.toUpperCase());
         label.appendChild(title);
-        const input = document.createElement(field.type === "boolean" ? "select" : field.type === "list" ? "textarea" : "input");
+        const input = document.createElement(field.type === "boolean" || field.type === "ova-template" ? "select" : field.type === "list" ? "textarea" : "input");
         if (field.type === "boolean") {
           for (const [value, text] of [["true", "Enabled"], ["false", "Disabled"]]) {
             const option = document.createElement("option"); option.value = value; option.textContent = text; input.appendChild(option);
+          }
+        } else if (field.type === "ova-template") {
+          input.appendChild(new Option(ovaCatalog.templates.length ? "No GNS3 VM template selected" : "No GNS3 VM templates available", ""));
+          for (const template of ovaCatalog.templates) {
+            const details = [template.category, template.size].filter(Boolean).join(" · ");
+            input.appendChild(new Option(details ? `${template.name} (${details})` : template.name, template.id));
+          }
+          const selected = body.fields[field.key] ?? field.default;
+          if (selected && ![...input.options].some(option => option.value === selected)) {
+            input.appendChild(new Option("Selected template is unavailable", selected));
           }
         } else if (field.type === "list") input.rows = 3;
         else {
