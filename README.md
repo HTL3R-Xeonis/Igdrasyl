@@ -102,7 +102,7 @@ against a real OVA import from the sister template API.
   jobs, health checks and orphan deletions, plus everything uvicorn and the
   libraries report. Read it from the landing page's **View Logs** link (next
   to View License; `/logs.html`: level filter, search, up to the whole log,
-  auto-refresh, download) or from View > Logs inside a project. Server file
+  auto-refresh, download, Clear logs) or from View > Logs inside a project (also with Clear logs). Server file
   paths are redacted in everything sent to the browser. Older size-rotated
   files from before this scheme (`app.<timestamp>.log`) are not touched - delete
   them by hand if they are in the way.
@@ -209,13 +209,19 @@ has something to click into immediately.
 ## Host configuration designer and settings
 
 Choose **Design a host configuration** on the home screen to build a host
-profile. The whole form is one scrollable page (a row of buttons at the top
-jumps to a section): General, ESXi host, Networking, GNS3, API services and
+profile. The whole form is one scrollable page: General, ESXi host, Networking, GNS3, API services and
 Credentials cover 22 host/runtime settings plus both passwords, with
 TopologyBuilder defaults filled in and automatic options left blank.
 The generated YAML at the bottom updates while you type. **Download YAML**
 saves a local copy; **Create host** adds a named profile without activating it
 or deploying anything. Existing filenames are rejected rather than overwritten.
+
+**Default values** of the form come from TopologyBuilder, optionally overridden
+by a dedicated file: copy `host_defaults.example.yml` to `host_defaults.yml` (or
+set `TOPOLOGYOPERATOR_HOST_DEFAULTS`), keep only the lines to change - same
+layout as a host settings file, no passwords. It is read each time the form is
+opened (no restart); an invalid file is ignored as a whole and the reason is
+logged. Existing hosts still show the real default for anything they don't set.
 
 Each host tile's **Settings** button opens the same page for an existing
 profile. Optional values, booleans, ports, protected port-group lists, and MAC
@@ -295,6 +301,8 @@ same restart flow as host changes. Import and live edits require a selected proj
   a readable 404/405/5xx page (`app/error_pages.py`); requests that don't ask for
   HTML (fetch, curl) keep getting the JSON `{"detail": ...}` body. There is no
   separate 403 page - nothing here is access-controlled.
+- `DELETE /logs`: permanently clears the log (both rotation files); the first
+  new line records that it happened.
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
   filenames, source directories, credentials, and server paths are omitted.
 
@@ -344,7 +352,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-377 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+387 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

@@ -172,3 +172,19 @@ def test_the_template_banner_exists_on_every_screen():
     html = (STATIC / "index.html").read_text()
 
     assert html.index('id="template-banner"') < html.index('id="app-view"')
+
+
+def test_delete_logs_clears_everything_and_notes_it(client, tmp_path, monkeypatch):
+    from app import logging_setup
+
+    path = tmp_path / "app.log"
+    path.write_text("2026-01-01 00:00:00.000 | INFO     | x.py:f:1 - old entry\n")
+    log_store.backup_path(path).write_text("older\n")
+    monkeypatch.setattr(Settings, "LOG_FILE_PATH", str(path))
+    monkeypatch.setattr(logging_setup, "_file_sink", None)
+
+    response = client.delete("/logs")
+
+    assert response.status_code == 200
+    assert not log_store.backup_path(path).exists()
+    assert "old entry" not in path.read_text()

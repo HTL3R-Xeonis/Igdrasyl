@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=host-form-2">
+<link rel="stylesheet" href="/styles.css?v=host-form-3">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -185,6 +185,7 @@
         Auto-refresh
       </label>
       <button class="toolbar-btn" id="logs-refresh-btn">Refresh</button>
+      <button class="toolbar-btn" id="logs-clear-btn">Clear logs</button>
     </div>
     <div id="logs-output"></div>
   </div>
@@ -251,11 +252,8 @@
 
 <dialog id="connection-dialog" aria-labelledby="connection-title">
   <h3 id="connection-title">Host settings</h3>
-  <p id="connection-intro"></p>
-  <nav id="connection-tabs" aria-label="Jump to a section"></nav>
   <form id="connection-form" novalidate>
     <div id="connection-body">
-      <p id="connection-note">Everything is on this page - scroll to see all sections. Tests use the values below without saving them. Saving retains other settings but removes YAML comments.</p>
       <div id="connection-fields"></div>
       <section id="connection-review">
         <h4>Review configuration</h4>
@@ -320,7 +318,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=host-form-2"></script>
+<script src="/app.js?v=host-form-3"></script>
 <script src="/projects.js?v=project-empty-state-1"></script>
 </body>
 </html>

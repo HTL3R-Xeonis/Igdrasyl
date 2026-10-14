@@ -1,13 +1,16 @@
 """Editable, non-secret profile fields and bounded reachability checks."""
 
+import os
 import re
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 import yaml
+from loguru import logger
 from src.settings import Settings
 
 from app import settings_profiles
@@ -102,6 +105,68 @@ HELP = {
 }
 
 
+_DEFAULTS_FILE_ENV_VAR = "TOPOLOGYOPERATOR_HOST_DEFAULTS"
+_DEFAULT_DEFAULTS_FILE = "host_defaults.yml"
+
+
+def _defaults_path():
+    return Path(os.getenv(_DEFAULTS_FILE_ENV_VAR, _DEFAULT_DEFAULTS_FILE))
+
+
+def effective_defaults():
+    """
+    The value every field starts with in the "Design a host configuration"
+    form: TopologyBuilder's own default, overridden by whatever the
+    dedicated defaults file sets (host_defaults.yml next to the app, or the
+    path in TOPOLOGYOPERATOR_HOST_DEFAULTS - same nested layout as a host
+    settings file, see host_defaults.example.yml). Read on every call, so an
+    edit applies to the next form that is opened, no restart. A missing
+    file means no overrides; an unreadable or invalid one is logged and
+    ignored as a whole rather than half-applied. Passwords are never read
+    from it. Existing profiles are unaffected: a field they don't set
+    still shows TopologyBuilder's real default, since that is what runs.
+    """
+    defaults = {key: field_string(value) for key, value in FIELDS.items()}
+    path = _defaults_path()
+    if not path.is_file():
+        return defaults
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+        if not isinstance(data, dict) or any(
+            not isinstance(data.get(section, {}), dict)
+            for section in ("esxi", "gns3", "api")
+        ):
+            raise ValueError(
+                "the file and its esxi, gns3 and api sections must be mappings"
+            )
+        overrides = {}
+        for key in FIELDS:
+            section, _, name = key.rpartition(".")
+            source = data.get(section, {}) if section else data
+            if name in source:
+                overrides[key] = field_string(source[name])
+        unknown = sorted(_unknown_keys(data))
+        validate_fields({**defaults, **overrides})
+    except (yaml.YAMLError, OSError, ValueError) as exc:
+        logger.warning(f"Ignoring host defaults file {path.name}: {exc}")
+        return defaults
+    if unknown:
+        logger.warning(
+            f"Host defaults file {path.name}: ignoring unknown keys {unknown}"
+        )
+    return {**defaults, **overrides}
+
+
+def _unknown_keys(data):
+    for name, value in data.items():
+        if isinstance(value, dict):
+            for inner in value:
+                if f"{name}.{inner}" not in FIELDS:
+                    yield f"{name}.{inner}"
+        elif name not in FIELDS:
+            yield name
+
+
 def field_string(value):
     if value is None:
         return ""
@@ -113,13 +178,14 @@ def field_string(value):
 
 
 def schema():
+    defaults = effective_defaults()
     return [
         {
             "title": title,
             "fields": [
                 {
                     "key": key,
-                    "default": field_string(FIELDS[key]),
+                    "default": defaults[key],
                     "optional": FIELDS[key] is None or isinstance(FIELDS[key], set),
                     "type": "boolean"
                     if isinstance(FIELDS[key], bool)
@@ -142,7 +208,7 @@ def schema():
 
 
 def build_document(values):
-    defaults = {key: field_string(value) for key, value in FIELDS.items()}
+    defaults = effective_defaults()
     defaults.update(values)
     fields = validate_fields(defaults)
     data = {}
@@ -362,11 +428,7 @@ def _probe(item):
 
 
 def test_connections(filename, values, gns3_ip=None):
-    fields = (
-        read_fields(filename)
-        if filename
-        else {key: field_string(value) for key, value in FIELDS.items()}
-    )
+    fields = read_fields(filename) if filename else effective_defaults()
     fields.update(values)
     fields = validate_fields(fields)
     targets = [("ESXi", fields["esxi.ip"], fields["esxi.port"])]

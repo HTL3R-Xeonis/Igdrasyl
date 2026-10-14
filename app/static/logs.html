@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TopologyOperator - Logs</title>
-<link rel="stylesheet" href="/styles.css?v=host-form-2">
+<link rel="stylesheet" href="/styles.css?v=host-form-3">
 <style>
   /* styles.css lays <body> out for the single-page app (full height, no
      scrolling) - this page is its own document. */
@@ -62,6 +62,7 @@
     <label><input type="checkbox" id="lp-auto" checked> Auto-refresh</label>
     <label><input type="checkbox" id="lp-follow" checked> Follow newest</label>
     <button class="toolbar-btn" id="lp-refresh" type="button">Refresh</button>
+    <button class="toolbar-btn" id="lp-clear" type="button">Clear logs</button>
     <a class="toolbar-btn" id="lp-download" href="/logs/download" download="topologyoperator.log">Download</a>
   </div>
 
@@ -180,6 +181,17 @@
     if ($("lp-follow").checked) out.scrollTop = out.scrollHeight;
   });
   $("lp-refresh").addEventListener("click", load);
+  $("lp-clear").addEventListener("click", async () => {
+    if (!window.confirm("Delete all log entries permanently? This can't be undone.")) return;
+    try {
+      const resp = await fetch("/logs", { method: "DELETE" });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.status);
+    } catch (err) {
+      $("lp-info").textContent = `Couldn't clear the logs: ${err.message || err}`;
+      return;
+    }
+    load();
+  });
 
   load();
   schedule();

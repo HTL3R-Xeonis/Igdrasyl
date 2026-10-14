@@ -6,6 +6,7 @@ venv/
 .idea/
 
 settings.yml
+host_defaults.yml
 .env
 logs/
 layout.json

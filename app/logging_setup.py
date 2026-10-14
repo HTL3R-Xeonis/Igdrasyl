@@ -113,6 +113,15 @@ def _describe_configuration() -> dict[str, Any]:
     }
 
 
+def clear_logs() -> None:
+    """Deletes the whole log (both files) and records that it happened as its first new line."""
+    if _file_sink is not None:
+        _file_sink.clear()
+    else:
+        log_store.clear_files(Settings.LOG_FILE_PATH)
+    logger.warning("Log cleared on request - earlier entries are gone")
+
+
 def configure_logging() -> None:
     global _file_sink
     logger.remove()

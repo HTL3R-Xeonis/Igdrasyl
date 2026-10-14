@@ -272,3 +272,69 @@ def test_create_host_with_passwords_stores_them(profile, client):
     assert response.status_code == 200
     assert "abc" not in (profile.parent / "new.yml").read_text()
     assert (profile.parent / ".secrets" / "new.yml.json").exists()
+
+
+@pytest.fixture
+def defaults_file(tmp_path, monkeypatch):
+    path = tmp_path / "host_defaults.yml"
+    monkeypatch.setenv("TOPOLOGYOPERATOR_HOST_DEFAULTS", str(path))
+    return path
+
+
+def _schema_defaults(client):
+    groups = client.get("/host-config/schema").json()["groups"]
+    return {f["key"]: f["default"] for g in groups for f in g["fields"]}
+
+
+def test_defaults_file_overrides_the_form_defaults(defaults_file, client):
+    before = _schema_defaults(client)
+    defaults_file.write_text(
+        "esxi:\n  ip: 192.0.2.50\n  datastore: ds9\napi:\n"
+        "  topology_generator_url: http://192.0.2.9:8002\nincremental_deploy: false\n"
+    )
+    after = _schema_defaults(client)
+    assert after["esxi.ip"] == "192.0.2.50"
+    assert after["esxi.datastore"] == "ds9"
+    assert after["api.topology_generator_url"] == "http://192.0.2.9:8002"
+    assert after["incremental_deploy"] == "false"
+    assert after["esxi.port"] == before["esxi.port"]
+    assert "ip: 192.0.2.50" in connection_settings.render_config({})
+
+
+def test_missing_defaults_file_changes_nothing(defaults_file, client):
+    assert not defaults_file.exists()
+    assert _schema_defaults(client)["esxi.port"] == "443"
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["esxi: [a, b]\n", "esxi:\n  port: abc\n", "esxi: {ip: 'a/b'}\n", ": : :\n"],
+)
+def test_invalid_defaults_file_is_ignored_as_a_whole(defaults_file, client, content):
+    baseline = _schema_defaults(client)
+    defaults_file.write_text("api:\n  topology_generator_url: http://192.0.2.9:8002\n")
+    assert _schema_defaults(client) != baseline
+    defaults_file.write_text(content)
+    assert _schema_defaults(client) == baseline
+
+
+def test_passwords_and_unknown_keys_in_defaults_file_are_not_used(
+    defaults_file, client
+):
+    defaults_file.write_text(
+        "esxi:\n  password: hunter2\n  bogus: 1\n  ip: 192.0.2.60\n"
+    )
+    defaults = connection_settings.effective_defaults()
+    assert defaults["esxi.ip"] == "192.0.2.60"
+    assert "hunter2" not in str(defaults)
+    assert "hunter2" not in client.get("/host-config/schema").text
+
+
+def test_existing_profile_still_shows_the_real_default(defaults_file, profile, client):
+    defaults_file.write_text("esxi:\n  port: 9999\n")
+    assert (
+        client.get("/settings-profiles/host.yml/connections").json()["fields"][
+            "esxi.port"
+        ]
+        == "443"
+    )

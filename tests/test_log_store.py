@@ -197,3 +197,18 @@ def test_lines_can_be_streamed_oldest_first_across_both_files(tmp_path):
     _write_numbered(sink, 5)
 
     assert list(log_store.iter_lines(path)) == [f"line {n}" for n in range(1, 6)]
+
+
+def test_clear_empties_both_files_and_logging_continues(tmp_path):
+    path = tmp_path / "app.log"
+    sink = log_store.LineLimitedFile(path, lines_per_file=3)
+    for number in range(5):
+        sink.write(f"line {number}\n")
+    assert log_store.backup_path(path).exists()
+    sink.clear()
+    assert not log_store.backup_path(path).exists()
+    assert log_store.read_lines(path) == []
+    assert sink.line_count == 0
+    sink.write("after\n")
+    sink.stop()
+    assert log_store.read_lines(path) == ["after"]

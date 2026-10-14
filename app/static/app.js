@@ -3228,13 +3228,9 @@ async function openConnectionSettings(filename = null) {
   connectionApply.hidden = true;
   document.getElementById("connection-yaml").textContent = "";
   document.getElementById("connection-title").textContent = filename ? `Settings — ${filename}` : "Design a host configuration";
-  document.getElementById("connection-intro").textContent = filename
-    ? "Edit all settings of this host on one page. Save, then apply when ready to restart the server."
-    : "Fill in the sections below - the YAML at the bottom updates as you go. Creating a host saves a profile; it does not deploy or activate it.";
   document.getElementById("connection-name-wrap").hidden = !!filename;
   document.getElementById("connection-name").value = "my-host.yml";
   connectionFields.replaceChildren();
-  document.getElementById("connection-tabs").replaceChildren();
   connectionDialog.showModal();
   setConnectionBusy(true);
   try {
@@ -3247,7 +3243,6 @@ async function openConnectionSettings(filename = null) {
     for (const [index, group] of connectionGroups.entries()) {
       const section = document.createElement("fieldset");
       section.id = `connection-section-${index}`;
-      addSectionLink(group.title, section);
       const legend = document.createElement("legend");
       legend.textContent = group.title;
       section.appendChild(legend);
@@ -3297,21 +3292,12 @@ async function openConnectionSettings(filename = null) {
   } catch (error) { connectionResults.textContent = error.message; }
   finally { setConnectionBusy(false); }
 }
-function addSectionLink(title, section) {
-  const link = document.createElement("button");
-  link.type = "button";
-  link.className = "toolbar-btn";
-  link.textContent = title;
-  link.addEventListener("click", () => section.scrollIntoView({ block: "start" }));
-  document.getElementById("connection-tabs").appendChild(link);
-}
 function buildCredentialsSection() {
   const section = document.createElement("fieldset");
   section.id = "connection-section-credentials";
   const legend = document.createElement("legend");
   legend.textContent = "Credentials";
   section.appendChild(legend);
-  addSectionLink("Credentials", section);
   for (const [key, title, help] of SECRET_FIELDS) {
     const label = document.createElement("label");
     const text = document.createElement("span");
@@ -3938,6 +3924,18 @@ function stopLogsAutoRefresh() {
   }
 }
 document.getElementById("logs-refresh-btn").addEventListener("click", () => loadLogs());
+document.getElementById("logs-clear-btn").addEventListener("click", async () => {
+  if (!await showConfirm(
+    "Delete all log entries permanently? This can't be undone.",
+    { title: "Clear logs", confirmLabel: "Clear", danger: true }
+  )) return;
+  const resp = await fetch("/logs", { method: "DELETE" });
+  if (!resp.ok) {
+    await showAlert(`Clearing the logs failed: ${(await resp.json().catch(() => ({}))).detail || resp.status}`, { title: "Clear logs" });
+    return;
+  }
+  await loadLogs();
+});
 document.getElementById("logs-auto-refresh").addEventListener("change", () => startLogsAutoRefresh());
 
 function renderPushResults(deviceResults) {

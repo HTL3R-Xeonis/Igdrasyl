@@ -119,6 +119,14 @@ class LineLimitedFile:
         self._handle = open(self._path, "a", encoding="utf-8")  # noqa: SIM115
         self._count = 0
 
+    def clear(self) -> None:
+        """Deletes every logged line, from both files, and keeps writing to the (now empty) current one."""
+        with self._lock:
+            self._handle.close()
+            self._backup.unlink(missing_ok=True)
+            self._handle = open(self._path, "w", encoding="utf-8")  # noqa: SIM115
+            self._count = 0
+
     def stop(self) -> None:
         with self._lock:
             self._handle.close()
@@ -127,6 +135,13 @@ class LineLimitedFile:
 def _files(path: str | os.PathLike[str]) -> list[Path]:
     """The log files that exist, oldest first."""
     return [p for p in (backup_path(path), Path(path)) if p.exists()]
+
+
+def clear_files(path: str | os.PathLike[str]) -> None:
+    """Empties the log without a running sink (a sink's own clear() is the normal way)."""
+    backup_path(path).unlink(missing_ok=True)
+    if Path(path).exists():
+        Path(path).write_text("")
 
 
 def read_lines(path: str | os.PathLike[str], count: int | None = None) -> list[str]:

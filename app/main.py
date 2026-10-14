@@ -39,6 +39,7 @@ from app import (
     import_jobs,
     lifecycle,
     log_store,
+    logging_setup,
     logs,
     maintenance,
     ova_templates,
@@ -306,6 +307,13 @@ def get_log_entries(
         ],
         "info": log_store.info(Settings.LOG_FILE_PATH),
     }
+
+
+@app.delete("/logs")
+def clear_logs() -> dict[str, str]:
+    """Permanently deletes every retained log line (both rotation files)."""
+    logging_setup.clear_logs()
+    return {"status": "cleared"}
 
 
 @app.get("/logs/download")

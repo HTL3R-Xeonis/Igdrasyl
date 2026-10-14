@@ -1,0 +1,28 @@
+# Starting values for the "Design a host configuration" form.
+#
+# Copy to host_defaults.yml (next to the app, or point
+# TOPOLOGYOPERATOR_HOST_DEFAULTS at another path) and keep only the lines you
+# want to change - everything else stays at TopologyBuilder's own default.
+# Same layout as a host settings file. Edits apply the next time the form is
+# opened, no restart needed. Passwords are not accepted here (enter them in
+# the form's Credentials section). Existing hosts are not affected.
+#
+# An invalid file is ignored as a whole and the reason is written to the log.
+
+esxi:
+  # ip: 192.168.1.10
+  # username: root
+  # datastore: datastore1
+  # virtual_switch: internal_network
+  # trunk_port_group: PG_GNS3_TRUNK
+  # gns3_vm_name: GNS3
+gns3:
+  # username: gns3
+  # port: 80
+api:
+  # esxi_template_server_url: http://10.20.20.171:8000
+  # gns3_template_server_url: http://10.20.20.171:8001
+  # topology_generator_url: http://10.20.20.172:8002
+  # ova_deploy_url: http://10.20.20.172:8003
+# generate_max_retries: 3
+# incremental_deploy: true

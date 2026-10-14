@@ -1171,7 +1171,6 @@
   #connection-results { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
 
   #connection-dialog { width: 820px; padding: 24px; }
-  #connection-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
   #connection-fields fieldset { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; border: 0; padding: 12px 0; }
   #connection-fields legend { font-size: 18px; font-weight: 600; padding: 8px 0; }
   #connection-fields input, #connection-fields textarea, #connection-fields select, #connection-name { box-sizing: border-box; width: 100%; padding: 9px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
@@ -1246,9 +1245,6 @@ header#menubar { height: 30px; padding: 0 6px; background: #353535; }
   border: 1px solid #191919; border-bottom-color: #595959;
   border-radius: 2px; background: #292929; color: var(--text); padding: 6px 8px;
 }
-#connection-tabs { gap: 0; border-bottom: 1px solid #666; }
-#connection-tabs .toolbar-btn { border-radius: 3px 3px 0 0; box-shadow: none; margin-right: 2px; }
-#connection-tabs .toolbar-btn.primary { background: #494949; border-bottom-color: #494949; }
 #connection-fields legend { font-size: 13px; }
 #connection-fields label > span { text-transform: none; }
 #connection-actions, #modal-actions { gap: 6px; }
@@ -1620,8 +1616,6 @@ input:focus, select:focus, textarea:focus {
 #connection-dialog[open] { display: flex; flex-direction: column; height: 88vh; overflow: hidden; }
 #connection-form { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
 #connection-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 10px; scroll-behavior: smooth; }
-#connection-note, #connection-intro { margin-top: 0; }
-#connection-tabs { margin: 0 0 8px; flex-shrink: 0; }
 #connection-fields { gap: 0; }
 #connection-fields fieldset { border-top: 1px solid #454d57; margin: 0; }
 #connection-fields fieldset:first-child { border-top: 0; }
