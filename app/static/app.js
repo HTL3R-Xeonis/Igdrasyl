@@ -376,7 +376,8 @@ const ROLE_ICON_FILES = {
 };
 
 let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
-let selectedName = null;
+let selectedName = null;   // the one selected node while exactly one is selected (drives the single-node popup)
+let selectedNames = new Set(); // every selected node (one or several)
 let linkMode = false;
 let linkFirstNode = null;
 let linkFirstIf = null; // node1's own already-picked interface name, chosen right when it was clicked
@@ -550,6 +551,9 @@ async function loadCanvas() {
       const pos = positions[node.name] || { x: 100, y: 100 };
       nodesData[node.name] = { ...node, live: liveByName.get(node.name) || null, x: pos.x, y: pos.y };
     }
+    selectedNames = new Set([...selectedNames].filter((n) => nodesData[n]));
+    if (selectedName && !nodesData[selectedName]) selectedName = null;
+    if (selectedNames.size < 2 && !document.getElementById("multi-actions").hidden) deselectNode();
     await refreshLiveLinks();
     renderCanvas();
     renderSummary();
@@ -564,6 +568,7 @@ async function loadCanvas() {
         if (Array.isArray(serverDrawings) && serverDrawings.length) {
           drawings = serverDrawings;
           drawIdCounter = Math.max(0, ...drawings.map((d) => d.id || 0));
+          lastPersistedDrawings = cloneDrawings(drawings);
           renderDrawings();
         }
       } catch (err) {
@@ -571,6 +576,7 @@ async function loadCanvas() {
       }
     }
     updateStatusBar(true);
+    refreshHistoryState();
   } catch (err) {
     updateStatusBar(false);
     throw err;
@@ -634,6 +640,13 @@ function setDrawMode(mode) {
 }
 
 async function persistDrawings() {
+  if (!designMode) {
+    const after = cloneDrawings(drawings);
+    if (JSON.stringify(after) !== JSON.stringify(lastPersistedDrawings)) {
+      pushLiveHistory({ kind: "drawings", before: lastPersistedDrawings, after });
+    }
+    lastPersistedDrawings = after;
+  }
   try {
     await fetch(apiPath("/drawings"), {
       method: "POST",
@@ -643,6 +656,7 @@ async function persistDrawings() {
   } catch (err) {
     // best-effort - drawings already work locally even if this fails
   }
+  refreshHistoryState();
 }
 
 // True for a color string that already encodes its own alpha
@@ -1311,7 +1325,9 @@ function renderCanvas() {
 
       const line = document.createElementNS(SVG_NS, "line");
       const isCapturing = !!(liveLinksData[pairKey] && liveLinksData[pairKey].capturing);
-      line.setAttribute("class", isCapturing ? "link-line link-line-capturing" : "link-line");
+      const liveLink = liveLinksData[pairKey];
+      const impaired = !!(liveLink && (liveLink.delay_ms || liveLink.loss_percent || liveLink.corrupt_percent));
+      line.setAttribute("class", `link-line${isCapturing ? " link-line-capturing" : ""}${impaired ? " link-line-impaired" : ""}${liveLink && liveLink.suspended ? " link-line-suspended" : ""}`);
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, neighbour);
       line.addEventListener("pointerdown", (evt) => {
@@ -1341,7 +1357,7 @@ function setLineEndpoints(line, a, b) {
 
 function buildNodeShape(node) {
   const g = document.createElementNS(SVG_NS, "g");
-  g.setAttribute("class", `node-shape${node.name === selectedName ? " selected" : ""}`);
+  g.setAttribute("class", `node-shape${selectedNames.has(node.name) ? " selected" : ""}`);
   g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
   g.dataset.name = node.name;
 
@@ -1398,7 +1414,7 @@ function renderSummary() {
     const statusText = node.live && node.live.status ? node.live.status : "no live data";
 
     const li = document.createElement("li");
-    li.className = `summary-row${name === selectedName ? " selected" : ""}`;
+    li.className = `summary-row${selectedNames.has(name) ? " selected" : ""}`;
 
     const dot = document.createElement("span");
     dot.className = `summary-dot ${statusClassFor(node)}`;
@@ -1416,20 +1432,33 @@ function renderSummary() {
     statusEl.textContent = statusText;
 
     li.append(dot, iconWrap, nameEl, statusEl);
-    li.addEventListener("click", () => {
+    li.addEventListener("click", (evt) => {
       const r = li.getBoundingClientRect();
-      selectNode(name, { x: r.left, y: r.top + r.height / 2 });
+      const anchor = { x: r.left, y: r.top + r.height / 2 };
+      if (evt.ctrlKey || evt.metaKey || evt.shiftKey) toggleNodeSelection(name, anchor);
+      else selectNode(name, anchor);
     });
     list.appendChild(li);
   }
 }
 
-function updateStatusBar(connectionOk) {
+let statusConnectionOk = true;
+
+function updateStatusBar(connectionOk = statusConnectionOk) {
+  statusConnectionOk = connectionOk;
   const nodes = Object.values(nodesData);
   const running = nodes.filter(isNodeRunning).length;
   const text = document.getElementById("status-connection-text");
+  const parts = [`${nodes.length} node${nodes.length === 1 ? "" : "s"}`];
+  if (!designMode) parts.push(`${running} running`);
+  const links = Object.values(liveLinksData);
+  const capturing = designMode ? 0 : links.filter((l) => l.capturing).length;
+  const impaired = designMode ? 0 : links.filter((l) => l.suspended || l.delay_ms || l.loss_percent || l.corrupt_percent).length;
+  if (capturing) parts.push(`${capturing} capturing`);
+  if (impaired) parts.push(`${impaired} link${impaired === 1 ? "" : "s"} with conditions`);
+  if (selectedNames.size > 1) parts.push(`${selectedNames.size} selected`);
   text.textContent = connectionOk
-    ? `Connected · ${nodes.length} node${nodes.length === 1 ? "" : "s"}, ${running} running`
+    ? `${designMode ? "Design" : "Connected"} · ${parts.join(", ")}`
     : "Disconnected - failed to reach the server";
   const zoomPercent = Math.round((1600 / viewBoxState.w) * 100);
   document.getElementById("zoom-readout").textContent = `${zoomPercent}%`;
@@ -1484,16 +1513,55 @@ function svgToScreenPoint(svgX, svgY) {
 
 let dragState = null;
 
+function moveNodeShape(name) {
+  const node = nodesData[name];
+  const g = document.querySelector(`.node-shape[data-name="${name}"]`);
+  if (g) g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
+  document.querySelectorAll(".link-line").forEach((line) => {
+    const [a, b] = line.dataset.pair.split("|");
+    if (a !== name && b !== name) return;
+    const other = a === name ? b : a;
+    setLineEndpoints(line, node, nodesData[other]);
+  });
+  document.querySelectorAll(".link-endpoint").forEach((dot) => {
+    if (dot.dataset.for !== name && dot.dataset.other !== name) return;
+    const p2 = edgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other]);
+    dot.setAttribute("cx", p2.x);
+    dot.setAttribute("cy", p2.y);
+  });
+  document.querySelectorAll(".port-label").forEach((label) => {
+    if (label.dataset.for !== name && label.dataset.other !== name) return;
+    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other]);
+    label.setAttribute("x", labelPoint.x);
+    label.setAttribute("y", labelPoint.y);
+  });
+}
+
 function startNodeDrag(evt, name) {
   evt.stopPropagation();
   if (linkMode) {
     handleLinkModeClick(name, { x: evt.clientX, y: evt.clientY });
     return;
   }
+  const anchor = { x: evt.clientX, y: evt.clientY };
+  // Ctrl/Cmd/Shift-click adds or removes a node from the selection, no drag.
+  if (evt.ctrlKey || evt.metaKey || evt.shiftKey) {
+    toggleNodeSelection(name, anchor);
+    return;
+  }
+  // Grabbing a node that is already part of a multi-selection moves the
+  // whole group; anything else selects just this node first.
+  if (!(selectedNames.size > 1 && selectedNames.has(name))) selectNode(name, anchor);
   const node = nodesData[name];
   const p = svgPoint(evt);
-  dragState = { name, offsetX: p.x - node.x, offsetY: p.y - node.y, moved: false };
-  selectNode(name, { x: evt.clientX, y: evt.clientY });
+  const members = [...selectedNames].filter((n) => nodesData[n]);
+  dragState = {
+    name,
+    offsetX: p.x - node.x,
+    offsetY: p.y - node.y,
+    moved: false,
+    start: Object.fromEntries(members.map((n) => [n, { x: nodesData[n].x, y: nodesData[n].y }])),
+  };
   window.addEventListener("pointermove", onNodeDrag);
   window.addEventListener("pointerup", endNodeDrag);
 }
@@ -1502,49 +1570,48 @@ function onNodeDrag(evt) {
   if (!dragState) return;
   dragState.moved = true;
   const p = svgPoint(evt);
-  const node = nodesData[dragState.name];
-  node.x = p.x - dragState.offsetX;
-  node.y = p.y - dragState.offsetY;
+  const lead = nodesData[dragState.name];
+  let x = p.x - dragState.offsetX;
+  let y = p.y - dragState.offsetY;
   if (snapToGridEnabled) {
-    node.x = snapToGrid(node.x);
-    node.y = snapToGrid(node.y);
+    x = snapToGrid(x);
+    y = snapToGrid(y);
   }
-
-  const g = document.querySelector(`.node-shape[data-name="${dragState.name}"]`);
-  g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
-
-  document.querySelectorAll(".link-line").forEach((line) => {
-    const [a, b] = line.dataset.pair.split("|");
-    if (a !== dragState.name && b !== dragState.name) return;
-    const other = a === dragState.name ? b : a;
-    setLineEndpoints(line, node, nodesData[other]);
-  });
-  document.querySelectorAll(".link-endpoint").forEach((dot) => {
-    if (dot.dataset.for !== dragState.name && dot.dataset.other !== dragState.name) return;
-    const p2 = edgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other]);
-    dot.setAttribute("cx", p2.x);
-    dot.setAttribute("cy", p2.y);
-  });
-  document.querySelectorAll(".port-label").forEach((label) => {
-    if (label.dataset.for !== dragState.name && label.dataset.other !== dragState.name) return;
-    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other]);
-    label.setAttribute("x", labelPoint.x);
-    label.setAttribute("y", labelPoint.y);
-  });
+  const dx = x - dragState.start[dragState.name].x;
+  const dy = y - dragState.start[dragState.name].y;
+  for (const [name, origin] of Object.entries(dragState.start)) {
+    nodesData[name].x = origin.x + dx;
+    nodesData[name].y = origin.y + dy;
+  }
+  lead.x = x;
+  lead.y = y;
+  for (const name of Object.keys(dragState.start)) moveNodeShape(name);
 }
 
 function endNodeDrag() {
   window.removeEventListener("pointermove", onNodeDrag);
   window.removeEventListener("pointerup", endNodeDrag);
   if (dragState && dragState.moved) {
-    const node = nodesData[dragState.name];
-    fetch(apiPath("/layout"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: dragState.name, x: node.x, y: node.y }),
-    });
+    const before = dragState.start;
+    const after = Object.fromEntries(Object.keys(before).map((n) => [n, { x: nodesData[n].x, y: nodesData[n].y }]));
+    commitMove(before, after);
   }
   dragState = null;
+}
+
+// Saves a move of one or more nodes in a single request (so it is one undo
+// step) - see also undoLastMove for live mode's own history.
+function commitMove(before, after) {
+  if (!designMode) pushLiveHistory({ kind: "move", before, after });
+  postPositions(after).then(refreshHistoryState);
+}
+
+function postPositions(positions) {
+  return fetch(apiPath("/layout/batch"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positions }),
+  });
 }
 
 svg.addEventListener("wheel", (evt) => {
@@ -1575,6 +1642,17 @@ svg.addEventListener("drop", (evt) => {
 });
 
 let panState = null;
+let bandState = null; // {x1,y1,x2,y2,additive,moved} while a rubber band is being dragged
+
+function renderSelectionBand() {
+  const rect = document.getElementById("selection-rect");
+  if (!bandState || !bandState.moved) { rect.hidden = true; return; }
+  rect.hidden = false;
+  rect.setAttribute("x", Math.min(bandState.x1, bandState.x2));
+  rect.setAttribute("y", Math.min(bandState.y1, bandState.y2));
+  rect.setAttribute("width", Math.abs(bandState.x2 - bandState.x1));
+  rect.setAttribute("height", Math.abs(bandState.y2 - bandState.y1));
+}
 svg.addEventListener("pointerdown", (evt) => {
   if (evt.target !== svg) return;
   if (placementImage) {
@@ -1594,10 +1672,24 @@ svg.addEventListener("pointerdown", (evt) => {
     renderDrawings();
     return;
   }
+  if (evt.shiftKey) {
+    // Shift-drag on empty canvas: rubber-band selection (a plain drag pans).
+    const p = svgPoint(evt);
+    bandState = { x1: p.x, y1: p.y, x2: p.x, y2: p.y, additive: evt.ctrlKey || evt.metaKey, moved: false };
+    return;
+  }
   panState = { startX: evt.clientX, startY: evt.clientY, startVB: { ...viewBoxState } };
   svg.classList.add("panning");
 });
 window.addEventListener("pointermove", (evt) => {
+  if (bandState) {
+    const p = svgPoint(evt);
+    bandState.x2 = p.x;
+    bandState.y2 = p.y;
+    bandState.moved = bandState.moved || Math.abs(p.x - bandState.x1) > 3 || Math.abs(p.y - bandState.y1) > 3;
+    renderSelectionBand();
+    return;
+  }
   if (drawDraft) {
     const p = svgPoint(evt);
     drawDraft.x2 = p.x;
@@ -1612,7 +1704,24 @@ window.addEventListener("pointermove", (evt) => {
   viewBoxState.y = panState.startVB.y - dy;
   applyViewBox();
 });
-window.addEventListener("pointerup", () => {
+window.addEventListener("pointerup", (evt) => {
+  if (bandState) {
+    const band = bandState;
+    bandState = null;
+    renderSelectionBand();
+    if (band.moved) {
+      ignoreNextDocumentClick = true;
+      setTimeout(() => { ignoreNextDocumentClick = false; }, 50);
+      const left = Math.min(band.x1, band.x2), right = Math.max(band.x1, band.x2);
+      const top = Math.min(band.y1, band.y2), bottom = Math.max(band.y1, band.y2);
+      const inside = Object.values(nodesData)
+        .filter((n) => n.x >= left && n.x <= right && n.y >= top && n.y <= bottom)
+        .map((n) => n.name);
+      const names = band.additive ? new Set([...selectedNames, ...inside]) : new Set(inside);
+      setSelection(names, { x: evt.clientX, y: evt.clientY });
+    }
+    return;
+  }
   if (drawDraft) {
     // A plain click with barely any drag gets a sensible default size
     // instead of a degenerate sliver - GNS3's own drawing tools do the
@@ -1683,15 +1792,62 @@ function fitViewToNodes() {
   updateStatusBar(true);
 }
 
-function selectNode(name, anchor) {
-  selectedName = name;
+function refreshSelectionHighlight() {
+  updateStatusBar();
   document.querySelectorAll(".node-shape").forEach((g) => {
-    g.classList.toggle("selected", g.dataset.name === name);
+    g.classList.toggle("selected", selectedNames.has(g.dataset.name));
   });
   document.querySelectorAll(".summary-row").forEach((row) => {
-    row.classList.toggle("selected", row.querySelector(".summary-name").textContent === name);
+    row.classList.toggle("selected", selectedNames.has(row.querySelector(".summary-name").textContent));
   });
+}
+
+function selectNode(name, anchor) {
+  selectedName = name;
+  selectedNames = new Set([name]);
+  hideMultiActions();
+  refreshSelectionHighlight();
   showNodeActions(name, anchor);
+}
+
+// Replaces the selection. One node behaves exactly like a plain click
+// (single-node popup); several get the selection popup instead.
+function setSelection(names, anchor) {
+  const valid = [...names].filter((n) => nodesData[n]);
+  if (valid.length === 0) { deselectNode(); return; }
+  if (valid.length === 1) { selectNode(valid[0], anchor); return; }
+  selectedName = null;
+  selectedNames = new Set(valid);
+  document.getElementById("node-actions").hidden = true;
+  refreshSelectionHighlight();
+  showMultiActions(anchor);
+}
+
+function toggleNodeSelection(name, anchor) {
+  const next = new Set(selectedNames);
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  setSelection(next, anchor);
+}
+
+function hideMultiActions() {
+  document.getElementById("multi-actions").hidden = true;
+}
+
+function showMultiActions(anchor) {
+  const names = [...selectedNames];
+  const popup = document.getElementById("multi-actions");
+  popup.hidden = false;
+  document.getElementById("multi-count").textContent = `${names.length} nodes selected`;
+  const withLive = names.filter((n) => nodesData[n].live).length;
+  document.getElementById("multi-note").textContent = designMode ? "" : `${withLive} live`;
+  for (const id of ["multi-start-btn", "multi-stop-btn", "multi-reload-btn"]) {
+    const btn = document.getElementById(id);
+    btn.hidden = designMode;
+    btn.disabled = withLive === 0;
+  }
+  document.getElementById("multi-copy-btn").hidden = !designMode;
+  positionNear(popup, anchor);
 }
 
 function showNodeActions(name, anchor) {
@@ -1781,13 +1937,488 @@ document.getElementById("selected-delete-btn").addEventListener("click", async (
       return;
     }
     closeSessionsForNode(name);
-    selectedName = null;
-    document.getElementById("node-actions").hidden = true;
+    deselectNode();
     await loadCanvas();
   } catch (err) {
     await showAlert(`Failed to delete node: ${err}`);
   }
 });
+
+// --- Undo / redo ---
+// Design mode: the server keeps the history (app/design_history.py) - every
+// design change is already a step there, we only ask it to undo/redo.
+// Live mode: node/link changes are real VMs and not undoable, so only
+// moves and drawings have a (client-side) history.
+const LIVE_HISTORY_LIMIT = 100;
+let liveHistory = { undo: [], redo: [] };
+let lastPersistedDrawings = [];
+let historyState = { can_undo: false, can_redo: false };
+
+function cloneDrawings(list) {
+  return JSON.parse(JSON.stringify(list));
+}
+
+function pushLiveHistory(entry) {
+  liveHistory.undo.push(entry);
+  if (liveHistory.undo.length > LIVE_HISTORY_LIMIT) liveHistory.undo.shift();
+  liveHistory.redo = [];
+}
+
+async function refreshHistoryState() {
+  if (designMode) {
+    try {
+      historyState = await fetch("/design/history").then((r) => r.json());
+    } catch (err) {
+      historyState = { can_undo: false, can_redo: false };
+    }
+  } else {
+    historyState = { can_undo: liveHistory.undo.length > 0, can_redo: liveHistory.redo.length > 0 };
+  }
+  document.getElementById("edit-undo").disabled = !historyState.can_undo;
+  document.getElementById("edit-redo").disabled = !historyState.can_redo;
+}
+
+async function reloadDrawingsFromServer() {
+  try {
+    const list = await fetch(apiPath("/drawings")).then((r) => (r.ok ? r.json() : []));
+    drawings = Array.isArray(list) ? list : [];
+    drawIdCounter = Math.max(0, ...drawings.map((d) => d.id || 0));
+    selectedDrawingId = null;
+    renderDrawings();
+  } catch (err) {
+    // keep what is shown
+  }
+}
+
+async function applyLiveHistoryEntry(entry, direction) {
+  const state = direction === "undo" ? entry.before : entry.after;
+  if (entry.kind === "move") {
+    for (const [name, pos] of Object.entries(state)) {
+      if (nodesData[name]) { nodesData[name].x = pos.x; nodesData[name].y = pos.y; }
+    }
+    const existing = Object.fromEntries(Object.entries(state).filter(([name]) => nodesData[name]));
+    for (const name of Object.keys(existing)) moveNodeShape(name);
+    if (Object.keys(existing).length) await postPositions(existing);
+  } else {
+    drawings = cloneDrawings(state);
+    drawIdCounter = Math.max(drawIdCounter, ...drawings.map((d) => d.id || 0));
+    selectedDrawingId = null;
+    renderDrawings();
+    lastPersistedDrawings = cloneDrawings(state);
+    try {
+      await fetch(apiPath("/drawings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drawings }),
+      });
+    } catch (err) { /* local state is already right */ }
+  }
+}
+
+async function undoRedo(direction) {
+  if (designMode) {
+    const resp = await fetch(`/design/${direction}`, { method: "POST" });
+    if (!resp.ok) { await refreshHistoryState(); return; }
+    deselectNode();
+    await loadCanvas();
+    await reloadDrawingsFromServer();
+    setMenubarMessage(direction === "undo" ? "Undone." : "Redone.");
+    return;
+  }
+  const from = direction === "undo" ? liveHistory.undo : liveHistory.redo;
+  const to = direction === "undo" ? liveHistory.redo : liveHistory.undo;
+  const entry = from.pop();
+  if (!entry) return;
+  await applyLiveHistoryEntry(entry, direction);
+  to.push(entry);
+  await refreshHistoryState();
+  setMenubarMessage(direction === "undo" ? "Undone." : "Redone.");
+}
+const undoAction = () => undoRedo("undo");
+const redoAction = () => undoRedo("redo");
+
+document.getElementById("edit-undo").addEventListener("click", undoAction);
+document.getElementById("edit-redo").addEventListener("click", redoAction);
+
+// --- Copy / paste / duplicate (design mode only: pasting in a live lab would
+// deploy real VMs). The clipboard holds the nodes' role/image, their
+// positions and the links between the copied nodes; one /design/paste call
+// adds everything (or nothing) as a single undo step. ---
+
+let nodeClipboard = null;   // {nodes: [{name, role, image, x, y}], links: [{node1, if1, node2, if2}]}
+let pasteCount = 0;         // each paste of the same copy lands a bit further along
+
+function nextFreeName(base, taken) {
+  const match = /^(.*?)(\d+)$/.exec(base);
+  const prefix = match ? match[1] : `${base}-`;
+  let n = match ? parseInt(match[2], 10) + 1 : 2;
+  while (taken.has(`${prefix}${n}`) || nodesData[`${prefix}${n}`]) n++;
+  return `${prefix}${n}`;
+}
+
+function copySelection() {
+  if (!designMode) return false;
+  const names = [...selectedNames].filter((n) => nodesData[n]);
+  if (!names.length) return false;
+  const inSet = new Set(names);
+  const links = [];
+  const seen = new Set();
+  for (const name of names) {
+    for (const [ifName, neighbour] of Object.entries(nodesData[name].interfaces)) {
+      if (!neighbour || !inSet.has(neighbour)) continue;
+      const key = [name, ifName].join("|");
+      if (seen.has(key)) continue;
+      const other = Object.entries(nodesData[neighbour].interfaces).find(([otherIf, n]) => n === name && !seen.has([neighbour, otherIf].join("|")));
+      if (!other) continue;
+      seen.add(key);
+      seen.add([neighbour, other[0]].join("|"));
+      links.push({ node1: name, if1: ifName, node2: neighbour, if2: other[0] });
+    }
+  }
+  nodeClipboard = {
+    nodes: names.map((n) => ({ name: n, role: nodesData[n].role, image: nodesData[n].image, x: nodesData[n].x, y: nodesData[n].y })),
+    links,
+  };
+  pasteCount = 0;
+  setMenubarMessage(`Copied ${names.length} node${names.length === 1 ? "" : "s"}.`);
+  return true;
+}
+
+async function pasteClipboard() {
+  if (!designMode || !nodeClipboard) return;
+  pasteCount++;
+  const step = 40 * pasteCount;
+  const taken = new Set();
+  const renamed = {};
+  for (const node of nodeClipboard.nodes) {
+    renamed[node.name] = nextFreeName(node.name, taken);
+    taken.add(renamed[node.name]);
+  }
+  const place = (v) => (snapToGridEnabled ? snapToGrid(v) : v);
+  const body = {
+    nodes: nodeClipboard.nodes.map((n) => ({
+      name: renamed[n.name], role: n.role, image: n.image, x: place(n.x + step), y: place(n.y + step),
+    })),
+    links: nodeClipboard.links.map((l) => ({ node1: renamed[l.node1], if1: l.if1, node2: renamed[l.node2], if2: l.if2 })),
+  };
+  try {
+    const resp = await fetch("/design/paste", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      await showAlert(`Couldn't paste: ${(await resp.json().catch(() => ({}))).detail || resp.status}`, { title: "Paste" });
+      return;
+    }
+    await loadCanvas();
+    setSelection(new Set(Object.values(renamed)), null);
+    setMenubarMessage(`Pasted ${body.nodes.length} node${body.nodes.length === 1 ? "" : "s"}.`);
+  } catch (err) {
+    await showAlert(`Couldn't paste: ${err}`, { title: "Paste" });
+  }
+}
+
+async function duplicateSelection() {
+  if (copySelection()) await pasteClipboard();
+}
+
+function selectAllNodes() {
+  setSelection(new Set(Object.keys(nodesData)), null);
+}
+
+function deleteSelection() {
+  const names = [...selectedNames].filter((n) => nodesData[n]);
+  if (names.length) deleteNodesMany(names);
+}
+
+function updateEditMenu() {
+  const hasSelection = selectedNames.size > 0;
+  for (const id of ["edit-copy", "edit-paste", "edit-duplicate"]) {
+    document.getElementById(id).hidden = !designMode;
+  }
+  document.getElementById("edit-copy").disabled = !hasSelection;
+  document.getElementById("edit-duplicate").disabled = !hasSelection;
+  document.getElementById("edit-paste").disabled = !nodeClipboard;
+  document.getElementById("edit-delete").disabled = !hasSelection;
+  document.getElementById("edit-select-all").disabled = Object.keys(nodesData).length === 0;
+  refreshHistoryState();
+}
+document.querySelector('.menu-btn[data-menu="edit"]').addEventListener("click", updateEditMenu);
+document.getElementById("edit-copy").addEventListener("click", copySelection);
+document.getElementById("edit-paste").addEventListener("click", pasteClipboard);
+document.getElementById("edit-duplicate").addEventListener("click", duplicateSelection);
+document.getElementById("edit-delete").addEventListener("click", deleteSelection);
+document.getElementById("edit-select-all").addEventListener("click", selectAllNodes);
+document.getElementById("multi-copy-btn").addEventListener("click", () => { copySelection(); });
+
+// --- Find node ---
+
+let finderMatches = [];
+let finderIndex = 0;
+
+function renderFinderResults() {
+  const query = document.getElementById("node-finder-input").value.trim().toLowerCase();
+  const list = document.getElementById("node-finder-results");
+  list.replaceChildren();
+  finderMatches = Object.values(nodesData)
+    .filter((n) => !query || [n.name, n.role, n.image].some((v) => String(v || "").toLowerCase().includes(query)))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  finderIndex = Math.min(finderIndex, Math.max(0, finderMatches.length - 1));
+  if (!finderMatches.length) {
+    const li = document.createElement("li");
+    li.className = "finder-empty";
+    li.textContent = "No node matches.";
+    list.appendChild(li);
+    return;
+  }
+  finderMatches.forEach((node, index) => {
+    const li = document.createElement("li");
+    li.className = index === finderIndex ? "active" : "";
+    const name = document.createElement("span");
+    name.textContent = node.name;
+    const meta = document.createElement("span");
+    meta.className = "finder-meta";
+    meta.textContent = [node.role, node.image].filter(Boolean).join(" · ");
+    li.append(name, meta);
+    li.addEventListener("click", () => pickFinderMatch(index));
+    list.appendChild(li);
+  });
+}
+
+function openNodeFinder() {
+  const box = document.getElementById("node-finder");
+  box.hidden = false;
+  const input = document.getElementById("node-finder-input");
+  input.value = "";
+  finderIndex = 0;
+  renderFinderResults();
+  input.focus();
+}
+
+function closeNodeFinder() {
+  document.getElementById("node-finder").hidden = true;
+}
+
+// Centres the view on the node (keeping the current zoom) and selects it.
+function focusNode(name) {
+  const node = nodesData[name];
+  if (!node) return;
+  viewBoxState.x = node.x - viewBoxState.w / 2;
+  viewBoxState.y = node.y - viewBoxState.h / 2;
+  applyViewBox();
+  updateStatusBar(true);
+  const p = svgToScreenPoint(node.x, node.y);
+  selectNode(name, { x: p.x + 40, y: p.y });
+}
+
+function pickFinderMatch(index) {
+  const node = finderMatches[index];
+  if (!node) return;
+  closeNodeFinder();
+  focusNode(node.name);
+}
+
+document.getElementById("node-finder-input").addEventListener("input", () => { finderIndex = 0; renderFinderResults(); });
+document.getElementById("node-finder-input").addEventListener("keydown", (evt) => {
+  if (evt.key === "ArrowDown" || evt.key === "ArrowUp") {
+    evt.preventDefault();
+    if (!finderMatches.length) return;
+    finderIndex = (finderIndex + (evt.key === "ArrowDown" ? 1 : -1) + finderMatches.length) % finderMatches.length;
+    renderFinderResults();
+    document.querySelector("#node-finder-results li.active")?.scrollIntoView({ block: "nearest" });
+  } else if (evt.key === "Enter") {
+    evt.preventDefault();
+    pickFinderMatch(finderIndex);
+  } else if (evt.key === "Escape") {
+    evt.stopPropagation();
+    closeNodeFinder();
+  }
+});
+document.addEventListener("pointerdown", (evt) => {
+  const box = document.getElementById("node-finder");
+  if (!box.hidden && !box.contains(evt.target)) closeNodeFinder();
+});
+document.getElementById("edit-find").addEventListener("click", () => setTimeout(openNodeFinder, 0));
+
+// --- Nodes menu: lifecycle for every node ---
+for (const action of ["start", "stop", "reload"]) {
+  document.getElementById(`nodes-${action}-all`).addEventListener("click", () => confirmAndRunMany(action, Object.keys(nodesData)));
+}
+
+// --- Keyboard shortcuts ---
+
+const SHORTCUTS = [
+  ["Ctrl+Z", "Undo"],
+  ["Ctrl+Y / Ctrl+Shift+Z", "Redo"],
+  ["Ctrl+A", "Select all nodes"],
+  ["Ctrl+Click, Shift+Click", "Add or remove a node from the selection"],
+  ["Shift+Drag on the canvas", "Rubber-band selection (Ctrl adds to it)"],
+  ["Ctrl+C / Ctrl+V / Ctrl+D", "Copy / paste / duplicate nodes (design mode)"],
+  ["Delete, Backspace", "Delete the selected nodes (or the selected drawing)"],
+  ["Arrow keys", "Move the selection (Shift = 5x further)"],
+  ["Ctrl+F", "Find a node"],
+  ["+  /  -  /  0", "Zoom in / zoom out / fit to nodes"],
+  ["Esc", "Cancel the current mode, close popups, clear the selection"],
+  ["?", "This list"],
+];
+function openShortcutsDialog() {
+  const table = document.getElementById("shortcuts-table");
+  if (!table.children.length) {
+    for (const [keys, what] of SHORTCUTS) {
+      const row = table.insertRow();
+      row.insertCell().textContent = keys;
+      row.insertCell().textContent = what;
+    }
+  }
+  document.getElementById("shortcuts-dialog").showModal();
+}
+document.getElementById("edit-shortcuts").addEventListener("click", openShortcutsDialog);
+document.getElementById("shortcuts-close").addEventListener("click", () => document.getElementById("shortcuts-dialog").close());
+
+let arrowMove = null; // {before, timer} - held arrow keys become one undo step
+function moveSelectionBy(dx, dy) {
+  const names = [...selectedNames].filter((n) => nodesData[n]);
+  if (!names.length) return;
+  if (!arrowMove) arrowMove = { before: Object.fromEntries(names.map((n) => [n, { x: nodesData[n].x, y: nodesData[n].y }])), timer: null };
+  for (const n of names) {
+    nodesData[n].x += dx;
+    nodesData[n].y += dy;
+    moveNodeShape(n);
+  }
+  clearTimeout(arrowMove.timer);
+  arrowMove.timer = setTimeout(() => {
+    const { before } = arrowMove;
+    arrowMove = null;
+    const after = Object.fromEntries(Object.keys(before).map((n) => [n, { x: nodesData[n].x, y: nodesData[n].y }]));
+    commitMove(before, after);
+  }, 500);
+}
+
+function typingInside(el) {
+  return !!(el && el.closest && el.closest("input, textarea, select, [contenteditable='true'], .xterm"));
+}
+
+window.addEventListener("keydown", async (evt) => {
+  if (document.getElementById("app-view").hidden) return;
+  if (typingInside(evt.target)) return;
+  if (document.querySelector("dialog[open]") || !document.getElementById("modal-overlay").hidden) return;
+  if (svg.getClientRects().length === 0) return; // canvas not shown (Config Push / Logs tab)
+  const mod = evt.ctrlKey || evt.metaKey;
+  const key = evt.key.toLowerCase();
+  const handled = () => evt.preventDefault();
+
+  if (mod && key === "z") { handled(); await (evt.shiftKey ? redoAction() : undoAction()); return; }
+  if (mod && key === "y") { handled(); await redoAction(); return; }
+  if (mod && key === "a") { handled(); selectAllNodes(); return; }
+  if (mod && key === "c") { if (designMode && selectedNames.size) { handled(); copySelection(); } return; }
+  if (mod && key === "v") { if (designMode && nodeClipboard) { handled(); await pasteClipboard(); } return; }
+  if (mod && key === "d") { handled(); if (designMode) await duplicateSelection(); return; }
+  if (mod && key === "f") { handled(); openNodeFinder(); return; }
+  if (mod || evt.altKey) return;
+
+  if (key === "delete" || key === "backspace") {
+    if (selectedNames.size) { handled(); deleteSelection(); }
+    else if (selectedDrawingId !== null) {
+      handled();
+      drawings = drawings.filter((d) => d.id !== selectedDrawingId);
+      selectedDrawingId = null;
+      renderDrawings();
+      persistDrawings();
+    }
+    return;
+  }
+  if (key.startsWith("arrow")) {
+    if (!selectedNames.size) return;
+    handled();
+    const step = (snapToGridEnabled ? GRID_SIZE : 10) * (evt.shiftKey ? 5 : 1);
+    moveSelectionBy(key === "arrowleft" ? -step : key === "arrowright" ? step : 0, key === "arrowup" ? -step : key === "arrowdown" ? step : 0);
+    return;
+  }
+  const center = { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 };
+  if (key === "+" || key === "=") { handled(); zoomBy(0.9, center); return; }
+  if (key === "-" || key === "_") { handled(); zoomBy(1.1, center); return; }
+  if (key === "0") { handled(); fitViewToNodes(); return; }
+  if (key === "?" || key === "f1") { handled(); openShortcutsDialog(); }
+});
+
+// --- Actions on a multi-selection (and, for "Nodes > ... all", on every node) ---
+
+async function lifecycleMany(action, names) {
+  const live = names.filter((n) => nodesData[n] && nodesData[n].live);
+  if (!live.length) return;
+  const label = { start: "Starting", stop: "Stopping", reload: "Reloading" }[action];
+  const failures = [];
+  for (const [index, name] of live.entries()) {
+    setMenubarProgress(`${label} nodes…`, index, live.length);
+    try {
+      const resp = await fetch(`/nodes/${encodeURIComponent(name)}/${action}`, { method: "POST" });
+      if (!resp.ok) failures.push(`${name}: ${(await resp.json().catch(() => ({}))).detail || resp.status}`);
+    } catch (err) {
+      failures.push(`${name}: ${err}`);
+    }
+  }
+  clearMenubarStatus();
+  await loadCanvas();
+  if (failures.length) {
+    await showAlert(`${failures.length} of ${live.length} nodes failed to ${action}:\n${failures.join("\n")}`, { title: "Nodes" });
+  } else {
+    setMenubarMessage(`${label.replace("ing", "ed")} ${live.length} node${live.length === 1 ? "" : "s"}.`);
+  }
+}
+
+async function confirmAndRunMany(action, names) {
+  const live = names.filter((n) => nodesData[n] && nodesData[n].live);
+  if (!live.length) { await showAlert("None of these nodes has a live instance.", { title: "Nodes" }); return; }
+  if (action !== "start") {
+    const verb = action === "stop" ? "Stop" : "Reload";
+    const extra = action === "reload" ? " This restarts them from scratch." : "";
+    if (!await showConfirm(`${verb} ${live.length} node${live.length === 1 ? "" : "s"}?${extra}`, { danger: true, confirmLabel: verb })) return;
+  }
+  await lifecycleMany(action, names);
+}
+
+async function deleteNodesMany(names) {
+  if (!names.length) return;
+  const count = `${names.length} node${names.length === 1 ? "" : "s"}`;
+  const them = names.length === 1 ? "it" : "them";
+  const message = designMode
+    ? `Delete ${count}? This also removes any links to ${them}. (Ctrl+Z undoes it.)`
+    : `Delete ${count}? This removes ${names.length === 1 ? "its" : "their"} live GNS3/ESXi instance${names.length === 1 ? "" : "s"} and any links to ${them} - it can't be undone.`;
+  if (!await showConfirm(message, { danger: true, confirmLabel: "Delete" })) return;
+  try {
+    if (designMode) {
+      const resp = await fetch("/design/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodes: names }),
+      });
+      if (!resp.ok) { await showAlert(`Failed to delete: ${(await resp.json()).detail || resp.status}`); return; }
+    } else {
+      for (const [index, name] of names.entries()) {
+        setMenubarProgress("Deleting nodes…", index, names.length);
+        const resp = await fetch(`/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (!resp.ok) {
+          clearMenubarStatus();
+          await showAlert(`Failed to delete "${name}": ${(await resp.json().catch(() => ({}))).detail || resp.status}\nStopped after ${index} of ${names.length}.`);
+          break;
+        }
+        closeSessionsForNode(name);
+      }
+      clearMenubarStatus();
+    }
+    deselectNode();
+    await loadCanvas();
+  } catch (err) {
+    clearMenubarStatus();
+    await showAlert(`Failed to delete: ${err}`);
+  }
+}
+
+document.getElementById("multi-start-btn").addEventListener("click", () => confirmAndRunMany("start", [...selectedNames]));
+document.getElementById("multi-stop-btn").addEventListener("click", () => confirmAndRunMany("stop", [...selectedNames]));
+document.getElementById("multi-reload-btn").addEventListener("click", () => confirmAndRunMany("reload", [...selectedNames]));
+document.getElementById("multi-delete-btn").addEventListener("click", () => deleteNodesMany([...selectedNames]));
 
 // Reproduces GNS3's own adapter-naming rule (see app/topology_write.py's
 // _gns3_template_port_specs docstring for where port_name_format/
@@ -1949,6 +2580,7 @@ async function refreshLiveLinks() {
   } catch (err) {
     liveLinksData = {};
   }
+  updateStatusBar();
 }
 
 function renderLinkActionsPopup(node1, if1, node2, if2) {
@@ -1959,14 +2591,26 @@ function renderLinkActionsPopup(node1, if1, node2, if2) {
   const stopBtn = document.getElementById("link-stop-capture-btn");
   const wsBtn = document.getElementById("link-wireshark-btn");
 
+  const optionsBox = document.getElementById("link-options");
   if (designMode) {
     startBtn.hidden = true;
     stopBtn.hidden = true;
     wsBtn.hidden = true;
+    optionsBox.hidden = true;
     return;
   }
 
   const live = liveLinksData[linkPairKey(node1, node2)];
+  optionsBox.hidden = !live;
+  if (live) {
+    document.getElementById("lo-delay").value = live.delay_ms || 0;
+    document.getElementById("lo-jitter").value = live.jitter_ms || 0;
+    document.getElementById("lo-loss").value = live.loss_percent || 0;
+    document.getElementById("lo-corrupt").value = live.corrupt_percent || 0;
+    document.getElementById("lo-suspend").checked = !!live.suspended;
+    document.getElementById("link-options-note").textContent = (live.other_filters || []).length
+      ? `Also active on GNS3 (kept): ${live.other_filters.join(", ")}` : "";
+  }
   const capturing = !!(live && live.capturing);
   startBtn.hidden = capturing;
   stopBtn.hidden = !capturing;
@@ -1989,6 +2633,38 @@ function showLinkActions(node1, if1, node2, if2, anchor) {
   renderLinkActionsPopup(node1, if1, node2, if2);
   positionNear(popup, anchor);
 }
+
+async function applyLinkOptions(values) {
+  if (!selectedLinkPair) return;
+  const { node1, node2 } = selectedLinkPair;
+  try {
+    const resp = await fetch(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/options`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    if (!resp.ok) {
+      await showAlert(`Couldn't set the link conditions: ${(await resp.json().catch(() => ({}))).detail || resp.status}`, { title: "Link conditions" });
+      return;
+    }
+    await refreshLiveLinks();
+    renderCanvas();
+    if (selectedLinkPair) renderLinkActionsPopup(selectedLinkPair.node1, selectedLinkPair.if1, selectedLinkPair.node2, selectedLinkPair.if2);
+    setMenubarMessage(`Link conditions updated on ${node1} <-> ${node2}.`);
+  } catch (err) {
+    await showAlert(`Couldn't set the link conditions: ${err}`, { title: "Link conditions" });
+  }
+}
+document.getElementById("lo-apply").addEventListener("click", () => {
+  const num = (id) => parseInt(document.getElementById(id).value, 10) || 0;
+  applyLinkOptions({
+    delay_ms: num("lo-delay"), jitter_ms: num("lo-jitter"), loss_percent: num("lo-loss"),
+    corrupt_percent: num("lo-corrupt"), suspended: document.getElementById("lo-suspend").checked,
+  });
+});
+document.getElementById("lo-reset").addEventListener("click", () => {
+  applyLinkOptions({ delay_ms: 0, jitter_ms: 0, loss_percent: 0, corrupt_percent: 0, suspended: false });
+});
 
 function deselectLink() {
   selectedLinkPair = null;
@@ -2433,7 +3109,7 @@ window.addEventListener("keydown", (evt) => {
   if (drawMode) { drawDraft = null; renderDrawings(); setDrawMode(null); }
   if (closeOpenDrawingPopup) closeOpenDrawingPopup();
   closeAllMenus();
-  if (!document.getElementById("node-actions").hidden) deselectNode();
+  if (!document.getElementById("node-actions").hidden || selectedNames.size) deselectNode();
 });
 
 // Left device palette (GNS3 Desktop's own node-selection dock, adapted
@@ -2962,6 +3638,7 @@ function applyDesignModeUI() {
   document.getElementById("health-check-btn").hidden = designMode;
   document.getElementById("find-orphans-btn").hidden = designMode;
   document.getElementById("tab-push").hidden = designMode;
+  document.getElementById("nodes-menu").hidden = designMode;
   if (designMode) showTab("console");
 }
 
@@ -3405,6 +4082,8 @@ connectionApply.addEventListener("click", async () => { connectionDialog.close()
 async function enterHost(filename, isActive) {
   if (isActive) {
     designMode = false;
+    liveHistory = { undo: [], redo: [] };
+    lastPersistedDrawings = [];
     drawingsLoaded = false;
     initialFitDone = false;
     applyDesignModeUI();
@@ -3725,13 +4404,20 @@ document.addEventListener("click", closeAllMenus);
 // result is visible without re-selecting the node).
 function deselectNode() {
   selectedName = null;
+  selectedNames = new Set();
+  updateStatusBar();
+  hideMultiActions();
   document.getElementById("node-actions").hidden = true;
   document.querySelectorAll(".node-shape.selected").forEach((g) => g.classList.remove("selected"));
   document.querySelectorAll(".summary-row.selected").forEach((r) => r.classList.remove("selected"));
 }
+let ignoreNextDocumentClick = false; // set when a rubber-band drag ends: its trailing click must not clear the new selection
 document.addEventListener("click", (evt) => {
+  if (ignoreNextDocumentClick) { ignoreNextDocumentClick = false; return; }
   const popup = document.getElementById("node-actions");
-  if (popup.hidden || popup.contains(evt.target)) return;
+  const multi = document.getElementById("multi-actions");
+  if (popup.hidden && multi.hidden) return;
+  if (popup.contains(evt.target) || multi.contains(evt.target)) return;
   if (evt.target.closest(".node-shape") || evt.target.closest(".summary-row")) return;
   deselectNode();
 });

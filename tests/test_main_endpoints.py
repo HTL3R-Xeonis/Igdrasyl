@@ -792,6 +792,12 @@ def test_link_capture_start_stop_and_stream(client, app_state):
                 "node2": "SW1",
                 "if2": "Ethernet0",
                 "capturing": False,
+                "delay_ms": 0,
+                "jitter_ms": 0,
+                "loss_percent": 0,
+                "corrupt_percent": 0,
+                "suspended": False,
+                "other_filters": [],
             }
         ]
 

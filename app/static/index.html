@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=host-form-3">
+<link rel="stylesheet" href="/styles.css?v=canvas-select-4">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -27,6 +27,31 @@
         <button class="menu-item" id="health-check-btn" title="Checks the live lab against the topology file (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups, links) and offers low-risk automatic repairs - never redeploys anything">Health Check…</button>
         <button class="menu-item" id="find-orphans-btn" title="Lists live GNS3 nodes and ESXi VMs that no node in the topology file describes anymore (what a partially failed delete leaves behind) and can delete them">Find Orphans…</button>
         <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup, with an option to permanently delete it once the new VM is confirmed working">Deploy Fresh GNS3 VM…</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="edit">Edit</button>
+      <div class="menu-dropdown" id="menu-edit" hidden>
+        <button class="menu-item" id="edit-undo">Undo<span class="menu-shortcut">Ctrl+Z</span></button>
+        <button class="menu-item" id="edit-redo">Redo<span class="menu-shortcut">Ctrl+Y</span></button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="edit-copy">Copy<span class="menu-shortcut">Ctrl+C</span></button>
+        <button class="menu-item" id="edit-paste">Paste<span class="menu-shortcut">Ctrl+V</span></button>
+        <button class="menu-item" id="edit-duplicate">Duplicate<span class="menu-shortcut">Ctrl+D</span></button>
+        <button class="menu-item" id="edit-delete">Delete<span class="menu-shortcut">Del</span></button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="edit-select-all">Select All<span class="menu-shortcut">Ctrl+A</span></button>
+        <button class="menu-item" id="edit-find">Find Node…<span class="menu-shortcut">Ctrl+F</span></button>
+        <div class="menu-separator"></div>
+        <button class="menu-item" id="edit-shortcuts">Keyboard Shortcuts<span class="menu-shortcut">?</span></button>
+      </div>
+    </div>
+    <div class="menu" id="nodes-menu">
+      <button class="menu-btn" data-menu="nodes">Nodes</button>
+      <div class="menu-dropdown" id="menu-nodes" hidden>
+        <button class="menu-item" id="nodes-start-all">Start All</button>
+        <button class="menu-item" id="nodes-stop-all">Stop All</button>
+        <button class="menu-item" id="nodes-reload-all">Reload All</button>
       </div>
     </div>
     <div class="menu">
@@ -117,6 +142,10 @@
       <button class="toolbar-btn" id="link-mode-btn">Link</button>
       <span id="link-mode-hint" hidden>Click two nodes to connect them (Esc to cancel)</span>
     </div>
+    <div id="node-finder" hidden>
+      <input type="search" id="node-finder-input" placeholder="Find node (name, role or image)" autocomplete="off" spellcheck="false">
+      <ul id="node-finder-results"></ul>
+    </div>
     <svg id="canvas" viewBox="0 0 1600 900">
       <defs>
         <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -127,6 +156,7 @@
       <g id="drawings-layer"></g>
       <g id="links-layer"></g>
       <g id="nodes-layer"></g>
+      <rect id="selection-rect" hidden></rect>
     </svg>
   </div>
   <div id="right-panel-resize-handle" title="Drag to resize"></div>
@@ -154,11 +184,35 @@
         <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
+      <div id="multi-actions" hidden>
+        <div id="multi-actions-header">
+          <strong id="multi-count"></strong>
+          <span class="multi-note" id="multi-note"></span>
+        </div>
+        <button class="console-btn" id="multi-start-btn">Start</button>
+        <button class="console-btn" id="multi-stop-btn">Stop</button>
+        <button class="console-btn" id="multi-reload-btn">Reload</button>
+        <button class="console-btn" id="multi-copy-btn">Copy</button>
+        <button class="console-btn" id="multi-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
+      </div>
       <div id="link-actions" hidden>
         <div id="link-actions-header"></div>
         <button class="console-btn" id="link-start-capture-btn">Start Capture</button>
         <button class="console-btn" id="link-stop-capture-btn" hidden>Stop Capture</button>
         <button class="console-btn" id="link-wireshark-btn" disabled>View Capture</button>
+        <div id="link-options" hidden>
+          <div id="link-options-title">Link conditions</div>
+          <label>Delay (ms)<input type="number" id="lo-delay" min="0" max="10000" step="1"></label>
+          <label>Jitter (ms)<input type="number" id="lo-jitter" min="0" max="10000" step="1"></label>
+          <label>Packet loss (%)<input type="number" id="lo-loss" min="0" max="100" step="1"></label>
+          <label>Corruption (%)<input type="number" id="lo-corrupt" min="0" max="100" step="1"></label>
+          <label class="lo-check"><input type="checkbox" id="lo-suspend"> Suspend link</label>
+          <div id="link-options-note"></div>
+          <div id="link-options-buttons">
+            <button class="console-btn" id="lo-apply">Apply</button>
+            <button class="console-btn" id="lo-reset">Reset</button>
+          </div>
+        </div>
         <button class="console-btn" id="link-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="session-tabbar" hidden></div>
@@ -250,6 +304,12 @@
   <button class="toolbar-btn" id="deployment-preview-close" type="button">Close</button>
 </dialog>
 
+<dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <h3 id="shortcuts-title">Keyboard shortcuts</h3>
+  <table id="shortcuts-table"></table>
+  <button class="toolbar-btn" id="shortcuts-close" type="button">Close</button>
+</dialog>
+
 <dialog id="connection-dialog" aria-labelledby="connection-title">
   <h3 id="connection-title">Host settings</h3>
   <form id="connection-form" novalidate>
@@ -318,7 +378,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=host-form-3"></script>
+<script src="/app.js?v=canvas-select-4"></script>
 <script src="/projects.js?v=project-empty-state-1"></script>
 </body>
 </html>

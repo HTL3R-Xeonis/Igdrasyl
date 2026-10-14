@@ -25,6 +25,7 @@ and coming back doesn't lose an in-progress sketch.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -110,6 +111,60 @@ def remove_link(state: DesignState, node1: str, node2: str) -> None:
     n1, if1, n2, if2 = match
     state.nodes[n1].interfaces.pop(if1, None)
     state.nodes[n2].interfaces.pop(if2, None)
+
+
+def remove_many(
+    state: DesignState, nodes: list[str], links: list[tuple[str, str]]
+) -> None:
+    """
+    Removes the given links, then the given nodes (with their remaining
+    links), as one change: everything is checked first, so an unknown
+    name leaves the sketch untouched.
+    :raises KeyError: a node or link that doesn't exist
+    """
+    for name in nodes:
+        if name not in state.nodes:
+            raise KeyError(f"no node named '{name}'")
+    for node1, node2 in links:
+        if not any({link[0], link[2]} == {node1, node2} for link in state.links):
+            raise KeyError(f"no link between '{node1}' and '{node2}'")
+    for node1, node2 in links:
+        # An earlier entry (or a node removed below) may already have taken it.
+        if any({link[0], link[2]} == {node1, node2} for link in state.links):
+            remove_link(state, node1, node2)
+    for name in nodes:
+        remove_node(state, name)
+
+
+def paste(
+    state: DesignState,
+    nodes: list[dict[str, Any]],
+    links: list[tuple[str, str, str, str]],
+) -> None:
+    """
+    Adds copied nodes ({name, role, image, x, y}) and the links between
+    them as one change: on any error the sketch is put back exactly as it
+    was, so a half-pasted selection never remains.
+    :raises ValueError: a name already in use, an unknown image, an
+        interface already used, ... (add_node/add_link's own messages)
+    """
+    before = copy.deepcopy(to_dict(state))
+    try:
+        for entry in nodes:
+            add_node(state, entry["name"], entry["role"], entry["image"])
+            state.layout[entry["name"]] = {
+                "x": float(entry["x"]),
+                "y": float(entry["y"]),
+            }
+        for node1, if1, node2, if2 in links:
+            add_link(state, node1, if1, node2, if2)
+    except Exception:
+        restored = from_dict(before)
+        state.nodes = restored.nodes
+        state.links = restored.links
+        state.layout = restored.layout
+        state.drawings = restored.drawings
+        raise
 
 
 def to_topology_view(state: DesignState) -> list[dict[str, Any]]:

@@ -92,6 +92,7 @@ def app_state(graph):
     app.state.project_id = None
     app.state.startup_warning = None
     app.state.design = design.new_state()
+    app.state.design_history = None
     app.state.gns3_vm_deploy_job = None
     return app.state
 

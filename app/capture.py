@@ -47,6 +47,7 @@ from src.settings import Settings
 # as GNS3's own desktop client leaving a capture open indefinitely.
 _STREAM_CONNECT_TIMEOUT_SECONDS = 15
 
+from app import link_options
 from app.gns3_state import list_live_nodes
 
 
@@ -112,6 +113,7 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
                 "node2": n2,
                 "if2": e2.get("label", {}).get("text", ""),
                 "capturing": bool(link.get("capturing")),
+                **link_options.options_from_link(link),
             }
         )
     return result

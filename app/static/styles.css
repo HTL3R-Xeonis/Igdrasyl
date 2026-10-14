@@ -409,7 +409,7 @@
   /* Node-actions popup: a vertical, context-menu-style list - a header
      row with the node's identity, then one full-width row per action,
      stacked underneath each other instead of wrapping pill buttons. */
-  #node-actions-header {
+  #node-actions-header, #multi-actions-header {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -417,7 +417,7 @@
     margin-bottom: 4px;
     border-bottom: 1px solid var(--border);
   }
-  #node-actions button.console-btn, #link-actions button.console-btn {
+  #node-actions button.console-btn, #link-actions button.console-btn, #multi-actions button.console-btn {
     display: block;
     width: 100%;
     text-align: left;
@@ -430,8 +430,8 @@
     padding: 7px 12px;
     cursor: pointer;
   }
-  #node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
-  #node-actions button.console-btn:disabled, #link-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
+  #node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled), #multi-actions button.console-btn:hover:not(:disabled) { background: var(--panel-2); }
+  #node-actions button.console-btn:disabled, #link-actions button.console-btn:disabled, #multi-actions button.console-btn:disabled { color: var(--dim); cursor: not-allowed; }
   #right-panel {
     width: var(--right-panel-width, 360px);
     flex-shrink: 0;
@@ -531,7 +531,7 @@
      Topology Summary row) - not docked in the page flow, so it stays
      out of #console-area's own layout (that's just the live session
      area now). */
-  #node-actions, #link-actions {
+  #node-actions, #link-actions, #multi-actions {
     position: fixed;
     z-index: 150;
     min-width: 180px;
@@ -1221,17 +1221,17 @@ button.toolbar-btn.danger:hover:not(:disabled) { background: #754444; border-col
 header#menubar { height: 30px; padding: 0 6px; background: #353535; }
 .menu-btn { font-size: 12px; padding: 0 10px; border-radius: 0; }
 .menu-btn:hover, .menu-btn.open { background: var(--selection); }
-.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions {
+.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions, #multi-actions {
   border-radius: 2px; border: 1px solid #676767;
   background: #353535; box-shadow: 2px 3px 8px #0007;
 }
 .menu-dropdown { padding: 3px; }
 .menu-item, .menu-settings-checkbox { border-radius: 0; font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
 .menu-item:hover:not(:disabled), .menu-settings-checkbox:hover,
-#node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled) {
+#node-actions button.console-btn:hover:not(:disabled), #link-actions button.console-btn:hover:not(:disabled), #multi-actions button.console-btn:hover:not(:disabled) {
   background: var(--selection); color: #fff;
 }
-#node-actions button.console-btn, #link-actions button.console-btn { box-shadow: none; min-height: 27px; }
+#node-actions button.console-btn, #link-actions button.console-btn, #multi-actions button.console-btn { box-shadow: none; min-height: 27px; }
 .menu-separator { background: #555; border-bottom: 1px solid #262626; }
 #modal-box, #capture-viewer, #connection-dialog, #project-selection-dialog {
   border-radius: 3px !important; border: 1px solid #737373 !important;
@@ -1384,7 +1384,7 @@ header#menubar {
   border-right-color: transparent;
   border-bottom-color: transparent;
 }
-.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions {
+.menu-dropdown, .inline-dropdown, .color-popover, #node-actions, #link-actions, #multi-actions {
   background: #303030;
   border-color: #616161;
   border-radius: 5px;
@@ -1622,3 +1622,35 @@ input:focus, select:focus, textarea:focus {
 #connection-review { border-top: 1px solid #454d57; padding-top: 12px; }
 #connection-actions { position: static; flex-shrink: 0; margin-top: 8px; padding: 12px 0 0; }
 #connection-results:not(:empty) { flex-shrink: 0; max-height: 30vh; overflow-y: auto; }
+
+/* Selection: rubber band while dragging, and a node in a multi-selection. */
+#selection-rect { fill: rgba(124, 179, 66, 0.12); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+#multi-actions-header { color: var(--text); }
+#multi-actions-header .multi-note { color: var(--dim); font-size: 12px; }
+
+.menu-shortcut { float: right; margin-left: 28px; color: var(--dim); font-size: 11px; }
+
+#node-finder { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 60; width: min(360px, 80%); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,.45); padding: 8px; }
+#node-finder-input { width: 100%; box-sizing: border-box; padding: 7px 9px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+#node-finder-results { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+#node-finder-results li { display: flex; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 3px; cursor: pointer; font-size: 13px; }
+#node-finder-results li.active { background: var(--panel-2); }
+#node-finder-results .finder-meta { color: var(--dim); font-size: 11px; margin-left: auto; }
+#node-finder-results .finder-empty { color: var(--dim); cursor: default; }
+#shortcuts-dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; }
+#shortcuts-dialog::backdrop { background: rgba(9,12,16,.68); }
+#shortcuts-dialog h3 { margin-top: 0; }
+#shortcuts-table { border-collapse: collapse; margin-bottom: 14px; }
+#shortcuts-table td { padding: 4px 18px 4px 0; font-size: 13px; }
+#shortcuts-table td:first-child { color: var(--dim); font-family: ui-monospace, monospace; white-space: nowrap; }
+
+#link-options { border-top: 1px solid var(--border); margin-top: 4px; padding: 8px 12px 4px; display: grid; gap: 6px; }
+#link-options-title { font-size: 12px; color: var(--dim); }
+#link-options label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
+#link-options input[type="number"] { width: 78px; padding: 3px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; }
+#link-options .lo-check { justify-content: flex-start; }
+#link-options-note { font-size: 11px; color: var(--dim); }
+#link-options-buttons { display: flex; gap: 4px; }
+#link-options-buttons .console-btn { text-align: center !important; border: 1px solid var(--border) !important; border-radius: 3px !important; padding: 4px 8px !important; }
+.link-line-impaired { stroke: #e3a33a; stroke-dasharray: 8 4; }
+.link-line-suspended { stroke: var(--bad); stroke-dasharray: 3 5; }

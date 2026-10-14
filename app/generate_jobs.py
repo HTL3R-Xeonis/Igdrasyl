@@ -32,7 +32,7 @@ from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.settings import Settings
 from src.topology_file_validation import TopologyFileValidation
 
-from app import design, design_store, template_health
+from app import design, design_history, design_store, template_health
 
 
 @dataclass
@@ -104,9 +104,9 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
             tmp_path.write_text(result["yaml"])
             validator = TopologyFileValidation(str(tmp_path))
             validator.validate_file()
-            app.state.design = _load_generated_topology(
-                validator.nodes, validator.edges
-            )
+            generated = _load_generated_topology(validator.nodes, validator.edges)
+            with design_history.step(app):
+                app.state.design = generated
             app.state.design_project_id = None
             design_store.save(app.state.design)
             job.status = "done"

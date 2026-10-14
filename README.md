@@ -249,6 +249,35 @@ address is known for the selected host.
 open consoles disconnect. The active settings file is included even when it
 lives outside the uploaded profiles directory.
 
+## Working on the canvas
+
+Modelled on GNS3's own GUI. Everything below works in the offline design canvas;
+the live canvas gets the same except where a change would touch real VMs.
+
+- **Selection**: click a node; Ctrl/Cmd/Shift-click adds or removes one;
+  Shift-drag on empty canvas draws a rubber band (Ctrl adds); Ctrl+A selects all.
+  Several selected nodes open a selection popup (Start/Stop/Reload live, Copy in
+  design mode, Delete) and move together when you drag one. The status bar shows
+  running / capturing / selected counts.
+- **Undo / redo** (Edit menu, Ctrl+Z / Ctrl+Y). In the design canvas every change
+  is a step (up to 100, kept by the server in `app/design_history.py`, so it also
+  covers delete, paste, reset, a generated topology and an opened project, and works
+  during a template outage). In a live project only node moves and drawings are
+  undoable (client-side) - adding or removing nodes/links changes real VMs, so those
+  keep their confirmation dialogs instead.
+- **Copy / paste / duplicate** (design only): copies nodes with the links between
+  them and pastes them under new names (`R1` -> `R2`) as one undo step.
+- **Delete** key deletes the selection (or the selected drawing).
+- **Find node** (Ctrl+F): type part of a name, role or image, Enter centres the view
+  on it and selects it.
+- **Nodes menu** (live): Start All / Stop All / Reload All.
+- **Link conditions** (live, link popup): delay + jitter, packet loss, corruption and
+  suspend, applied to the running GNS3 link (its "filters"); an impaired link is drawn
+  dashed orange, a suspended one dashed red. Filters set elsewhere (bpf,
+  frequency drop) are kept, never wiped.
+- **Keyboard**: arrows move the selection (Shift = 5x), + / - / 0 zoom and fit,
+  `?` lists every shortcut (also Edit > Keyboard Shortcuts).
+
 ## Selecting a project independently
 
 A host profile does not need a topology file. Use **Project** on its tile to
@@ -301,6 +330,10 @@ same restart flow as host changes. Import and live edits require a selected proj
   a readable 404/405/5xx page (`app/error_pages.py`); requests that don't ask for
   HTML (fetch, curl) keep getting the JSON `{"detail": ...}` body. There is no
   separate 403 page - nothing here is access-controlled.
+- Design canvas editing: `GET /design/history`, `POST /design/undo|redo`,
+  `POST /design/layout/batch` (group move), `POST /design/delete` (selection),
+  `POST /design/paste`; live: `POST /layout/batch`, `PUT /links/{a}/{b}/options`
+  (delay/jitter/loss/corruption/suspend; `GET /links` reports them back).
 - `DELETE /logs`: permanently clears the log (both rotation files); the first
   new line records that it happened.
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
@@ -352,7 +385,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-387 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+413 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

@@ -32,12 +32,14 @@ from app import (
     connection_settings,
     console,
     design,
+    design_history,
     design_store,
     error_pages,
     generate_jobs,
     gns3_vm_deploy_jobs,
     import_jobs,
     lifecycle,
+    link_options,
     log_store,
     logging_setup,
     logs,
@@ -61,7 +63,7 @@ from app.gns3_state import (
     reload_project,
     resolve_project_id,
 )
-from app.layout import load_layout, save_position
+from app.layout import load_layout, save_position, save_positions
 from app.logging_setup import configure_logging
 from app.request_logging import RequestLoggingMiddleware
 from app.topology import load_graph, resolve_project_name
@@ -450,6 +452,11 @@ class LayoutUpdate(BaseModel):
     y: float
 
 
+class LayoutPosition(BaseModel):
+    x: float
+    y: float
+
+
 @app.post("/layout")
 def update_layout(update: LayoutUpdate) -> dict[str, str]:
     if app.state.graph is None:
@@ -457,6 +464,22 @@ def update_layout(update: LayoutUpdate) -> dict[str, str]:
     if update.name not in app.state.graph.nodes:
         raise HTTPException(404, f"no node named {update.name!r}")
     save_position(update.name, update.x, update.y)
+    return {"status": "ok"}
+
+
+class PositionsUpdate(BaseModel):
+    positions: dict[str, LayoutPosition]
+
+
+@app.post("/layout/batch")
+def update_layout_batch(update: PositionsUpdate) -> dict[str, str]:
+    """Moves several nodes at once (a group drag, or an undo of one) in a single write."""
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+    unknown = [n for n in update.positions if n not in app.state.graph.nodes]
+    if unknown:
+        raise HTTPException(404, f"no node named {unknown[0]!r}")
+    save_positions({n: {"x": p.x, "y": p.y} for n, p in update.positions.items()})
     return {"status": "ok"}
 
 
@@ -549,6 +572,34 @@ def live_links() -> list[dict[str, Any]]:
         return capture.list_live_links(app)
     except NoLiveProject:
         return []
+
+
+class LinkOptions(BaseModel):
+    delay_ms: int = 0
+    jitter_ms: int = 0
+    loss_percent: int = 0
+    corrupt_percent: int = 0
+    suspended: bool = False
+
+
+@app.put("/links/{node1}/{node2}/options")
+def set_link_options(node1: str, node2: str, options: LinkOptions) -> dict[str, Any]:
+    """Latency/jitter, packet loss, corruption and suspend on a live link - see app/link_options.py."""
+    try:
+        link_options.filters_from_options(
+            options.delay_ms,
+            options.jitter_ms,
+            options.loss_percent,
+            options.corrupt_percent,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    try:
+        return link_options.set_options(app, node1, node2, **options.model_dump())
+    except (NoLiveProject, ValueError) as exc:
+        raise HTTPException(404, str(exc))
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc))
 
 
 @app.post("/links/{node1}/{node2}/capture/start")
@@ -688,7 +739,8 @@ def design_topology() -> list[dict[str, Any]]:
 @app.post("/design/nodes")
 def design_add_node(request: AddNodeRequest) -> dict[str, str]:
     try:
-        design.add_node(app.state.design, request.name, request.role, request.image)
+        with design_history.step(app):
+            design.add_node(app.state.design, request.name, request.role, request.image)
     except ValueError as exc:
         raise HTTPException(400, template_health.explain(str(exc)))
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
@@ -704,7 +756,8 @@ def design_add_node(request: AddNodeRequest) -> dict[str, str]:
 @app.delete("/design/nodes/{name}")
 def design_remove_node(name: str) -> dict[str, str]:
     try:
-        design.remove_node(app.state.design, name)
+        with design_history.step(app):
+            design.remove_node(app.state.design, name)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     design_store.save(app.state.design)
@@ -714,9 +767,14 @@ def design_remove_node(name: str) -> dict[str, str]:
 @app.post("/design/links")
 def design_add_link(request: AddLinkRequest) -> dict[str, str]:
     try:
-        design.add_link(
-            app.state.design, request.node1, request.if1, request.node2, request.if2
-        )
+        with design_history.step(app):
+            design.add_link(
+                app.state.design,
+                request.node1,
+                request.if1,
+                request.node2,
+                request.if2,
+            )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     design_store.save(app.state.design)
@@ -726,7 +784,8 @@ def design_add_link(request: AddLinkRequest) -> dict[str, str]:
 @app.delete("/design/links/{node1}/{node2}")
 def design_remove_link(node1: str, node2: str) -> dict[str, str]:
     try:
-        design.remove_link(app.state.design, node1, node2)
+        with design_history.step(app):
+            design.remove_link(app.state.design, node1, node2)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     design_store.save(app.state.design)
@@ -742,9 +801,90 @@ def design_layout() -> dict[str, dict[str, float]]:
 def design_update_layout(update: LayoutUpdate) -> dict[str, str]:
     if update.name not in app.state.design.nodes:
         raise HTTPException(404, f"no node named {update.name!r}")
-    app.state.design.layout[update.name] = {"x": update.x, "y": update.y}
+    with design_history.step(app):
+        app.state.design.layout[update.name] = {"x": update.x, "y": update.y}
     design_store.save(app.state.design)
     return {"status": "ok"}
+
+
+@app.post("/design/layout/batch")
+def design_update_layout_batch(update: PositionsUpdate) -> dict[str, str]:
+    """Moves several nodes at once - one undo step for the whole group move."""
+    unknown = [n for n in update.positions if n not in app.state.design.nodes]
+    if unknown:
+        raise HTTPException(404, f"no node named {unknown[0]!r}")
+    with design_history.step(app):
+        for name, pos in update.positions.items():
+            app.state.design.layout[name] = {"x": pos.x, "y": pos.y}
+    design_store.save(app.state.design)
+    return {"status": "ok"}
+
+
+class DesignDelete(BaseModel):
+    nodes: list[str] = []
+    links: list[tuple[str, str]] = []
+
+
+@app.post("/design/delete")
+def design_delete(request: DesignDelete) -> dict[str, str]:
+    """Deletes a selection (nodes and/or links) as one undo step; unknown names change nothing."""
+    try:
+        with design_history.step(app):
+            design.remove_many(app.state.design, request.nodes, request.links)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    design_store.save(app.state.design)
+    return {"status": "ok"}
+
+
+class PastedNode(BaseModel):
+    name: str
+    role: str
+    image: str
+    x: float
+    y: float
+
+
+class DesignPaste(BaseModel):
+    nodes: list[PastedNode]
+    links: list[AddLinkRequest] = []
+
+
+@app.post("/design/paste")
+def design_paste(request: DesignPaste) -> dict[str, str]:
+    """Adds copied nodes and the links between them as one undo step; all or nothing."""
+    try:
+        with design_history.step(app):
+            design.paste(
+                app.state.design,
+                [node.model_dump() for node in request.nodes],
+                [(l.node1, l.if1, l.node2, l.if2) for l in request.links],
+            )
+    except ValueError as exc:
+        raise HTTPException(400, template_health.explain(str(exc)))
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(503, str(exc))
+    design_store.save(app.state.design)
+    return {"status": "ok"}
+
+
+@app.get("/design/history")
+def design_history_status() -> dict[str, bool]:
+    return design_history.status(app)
+
+
+@app.post("/design/undo")
+def design_undo() -> dict[str, bool]:
+    if not design_history.undo(app):
+        raise HTTPException(409, "nothing to undo")
+    return design_history.status(app)
+
+
+@app.post("/design/redo")
+def design_redo() -> dict[str, bool]:
+    if not design_history.redo(app):
+        raise HTTPException(409, "nothing to redo")
+    return design_history.status(app)
 
 
 @app.get("/design/drawings")
@@ -754,7 +894,8 @@ def design_get_drawings() -> list[dict[str, Any]]:
 
 @app.post("/design/drawings")
 def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
-    app.state.design.drawings = request.drawings
+    with design_history.step(app):
+        app.state.design.drawings = request.drawings
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -762,7 +903,8 @@ def design_set_drawings(request: DrawingsRequest) -> dict[str, str]:
 @app.post("/design/reset")
 def design_reset() -> dict[str, str]:
     """Clears the sketch and starts a fresh, empty one."""
-    app.state.design = design.new_state()
+    with design_history.step(app):
+        app.state.design = design.new_state()
     app.state.design_project_id = None
     design_store.save(app.state.design)
     return {"status": "ok"}
@@ -784,7 +926,8 @@ def open_library_project(project_id: str) -> dict[str, Any]:
         state = project_library.load_design(project_id)
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
         raise HTTPException(503, f"Template service unavailable: {exc}") from exc
-    app.state.design = state
+    with design_history.step(app):
+        app.state.design = state
     app.state.design_project_id = project_id
     design_store.save(state)
     return {"project": _settings_call(project_library.get, project_id)}
