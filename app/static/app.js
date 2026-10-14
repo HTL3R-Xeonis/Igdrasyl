@@ -342,7 +342,11 @@ function setWarningBanner(text, opts = {}) {
   document.getElementById("warning-banner-text").textContent = text;
   banner.hidden = !text;
   retryBtn.hidden = !text || !opts.retryable;
+  // Offered when the selected library project isn't deployed to GNS3 yet.
+  warningDeployProject = text && opts.deployable ? opts.deployable : null;
+  document.getElementById("warning-deploy-btn").hidden = !warningDeployProject;
 }
+let warningDeployProject = null; // {id, name, filename}
 
 document.getElementById("warning-retry-btn").addEventListener("click", async () => {
   const btn = document.getElementById("warning-retry-btn");
@@ -529,7 +533,7 @@ async function loadCanvas() {
       ? (typeof currentDesignProject !== "undefined" && currentDesignProject
         ? currentDesignProject.name : "Unsaved design")
       : `${health.gns3_project_name} @ ${health.esxi_ip}`;
-    setWarningBanner(health.warning || "", { retryable: !designMode });
+    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project });
     incrementalDeploy = health.incremental_deploy !== false;
 
     const gns3Link = document.getElementById("gns3-webui-link");

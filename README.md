@@ -278,6 +278,14 @@ the live canvas gets the same except where a change would touch real VMs.
 - **Keyboard**: arrows move the selection (Shift = 5x), + / - / 0 zoom and fit,
   `?` lists every shortcut (also Edit > Keyboard Shortcuts).
 
+**Deploy from the warning banner**: when the project selected for the active host
+does not exist in GNS3 yet ("No GNS3 project named ... has this topology actually been
+deployed?"), the banner shows a **Deploy project...** button next to Retry. It asks
+for confirmation (node/link counts and whether the host deploys incrementally or
+rebuilds everything - a full deployment can remove devices that are not in the project)
+and then runs the same job as File > Deploy to Host. `GET /health` reports it as
+`deployable_project`.
+
 ## Selecting a project independently
 
 A host profile does not need a topology file. Use **Project** on its tile to
@@ -385,7 +393,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-413 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+415 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

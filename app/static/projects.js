@@ -267,3 +267,34 @@ async function resumePendingLibraryDeployment() {
   }
 }
 resumePendingLibraryDeployment();
+
+// Warning banner > "Deploy project…": deploys the library project that is
+// selected for the active host but missing in GNS3 - the same job as
+// File > Deploy to Host, minus the host picker (the host is the active one).
+document.getElementById("warning-deploy-btn").addEventListener("click", async () => {
+  const target = warningDeployProject;
+  if (!target) return;
+  const button = document.getElementById("warning-deploy-btn");
+  button.disabled = true;
+  try {
+    const preview = await settingsRequest(`/projects/${encodeURIComponent(target.id)}/deploy-preview/${encodeURIComponent(target.filename)}`);
+    const impact = preview.mode === "full"
+      ? "Full deployment: rebuilds the topology and may remove managed devices that are not in this project."
+      : "Incremental deployment: reuses matching devices and removes nothing.";
+    const confirmed = await showConfirm(
+      `Deploy “${preview.project.name}” to GNS3 on ${preview.host.esxi_ip || preview.host.filename}?\n\n` +
+      `${preview.node_count} nodes, ${preview.edge_count} links.\n${impact}`,
+      { title: "Deploy project", confirmLabel: "Deploy", danger: preview.mode === "full" }
+    );
+    if (!confirmed) return;
+    const body = await settingsRequest(`/projects/${encodeURIComponent(target.id)}/deploy/${encodeURIComponent(target.filename)}`, { method: "POST" });
+    await monitorLibraryDeployment(preview.project, body.job_id);
+    // The server resolved "no such GNS3 project" at startup - look again now that it exists.
+    await fetch("/reload", { method: "POST" });
+    await loadCanvas();
+  } catch (error) {
+    await showAlert(`Deployment failed: ${error.message}`, { title: "Deploy project" });
+  } finally {
+    button.disabled = false;
+  }
+});

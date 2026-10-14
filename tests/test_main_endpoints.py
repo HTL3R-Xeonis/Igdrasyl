@@ -842,3 +842,37 @@ def test_generate_design_status_reports_error(client, app_state):
     body = resp.json()
     assert body["status"] == "error"
     assert body["error"] == "no valid topology"
+
+
+def test_health_offers_the_selected_project_when_gns3_has_none(
+    client, app_state, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS", str(tmp_path / "host.yml"))
+    (tmp_path / "host.yml").write_text("esxi:\n  ip: 192.0.2.1\n")
+    app_state.project_name = "Office"
+    app_state.project_id = None
+    app_state.gns3_vm_ip = "10.0.0.5"
+    selection = {"project_id": "abc", "project_name": "Office"}
+    with patch("app.main.project_selection.get_selection", return_value=selection):
+        offered = client.get("/health").json()["deployable_project"]
+        assert offered == {"id": "abc", "name": "Office", "filename": "host.yml"}
+
+        app_state.project_id = "gns3-uuid"  # already deployed: nothing to offer
+        assert client.get("/health").json()["deployable_project"] is None
+
+        app_state.project_id = None
+        app_state.gns3_vm_ip = None  # GNS3 VM unreachable: deploying can't work
+        assert client.get("/health").json()["deployable_project"] is None
+
+
+def test_health_offers_nothing_without_a_selected_project(
+    client, app_state, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS", str(tmp_path / "host.yml"))
+    (tmp_path / "host.yml").write_text("esxi:\n  ip: 192.0.2.1\n")
+    app_state.project_name = "Office"
+    app_state.project_id = None
+    app_state.gns3_vm_ip = "10.0.0.5"
+    selection = {"project_id": None, "project_name": None}
+    with patch("app.main.project_selection.get_selection", return_value=selection):
+        assert client.get("/health").json()["deployable_project"] is None

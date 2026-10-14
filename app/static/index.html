@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=canvas-select-4">
+<link rel="stylesheet" href="/styles.css?v=deploy-banner-1">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -119,7 +119,7 @@
   <input type="file" id="draw-image-input" accept="image/*" hidden>
   <div id="menubar-status"></div>
 </header>
-<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button></div>
+<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button></div>
 <main>
   <div id="device-palette">
     <div id="palette-header"><span>Template List</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
@@ -378,7 +378,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=canvas-select-4"></script>
-<script src="/projects.js?v=project-empty-state-1"></script>
+<script src="/app.js?v=deploy-banner-1"></script>
+<script src="/projects.js?v=deploy-banner-1"></script>
 </body>
 </html>

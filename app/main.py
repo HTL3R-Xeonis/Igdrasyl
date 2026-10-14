@@ -250,9 +250,39 @@ async def unexpected_error(request: Request, _exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
+def _deployable_project() -> dict[str, str] | None:
+    """
+    The library project selected for the active host when it has not been
+    deployed to GNS3 yet (the GNS3 VM answers, but has no project of that
+    name) - what the warning banner's Deploy button offers to deploy. None
+    in every other state.
+    """
+    settings_path = os.getenv(_SETTINGS_ENV_VAR)
+    if (
+        not settings_path
+        or not app.state.project_name
+        or app.state.project_id is not None
+        or not app.state.gns3_vm_ip
+    ):
+        return None
+    filename = Path(settings_path).name
+    try:
+        selection = project_selection.get_selection(filename)
+    except (FileNotFoundError, ValueError, settings_profiles.InvalidProfileName):
+        return None
+    if not selection.get("project_id"):
+        return None
+    return {
+        "id": selection["project_id"],
+        "name": selection.get("project_name") or app.state.project_name,
+        "filename": filename,
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
+        "deployable_project": _deployable_project(),
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
         "gns3_port": Settings.GNS3.PORT,
