@@ -943,7 +943,6 @@
     cursor: pointer;
     transition: border-color 0.15s, transform 0.1s;
   }
-  .landing-host-tile:hover { border-color: var(--accent); transform: translateY(-2px); }
   /* Source SVG fill is a dark slate grey, meant for a light background
      - brightness(0) flattens it to solid black first (ignoring that
      original shade), then invert makes it a soft off-white matching
@@ -979,9 +978,7 @@
     padding: 3px 6px;
     border-radius: 4px;
   }
-  .landing-host-delete-btn:hover { color: var(--bad); background: rgba(255, 255, 255, 0.06); }
   .landing-host-tile.add-tile { border-style: dashed; color: var(--dim); }
-  .landing-host-tile.add-tile:hover { color: var(--accent); }
   .landing-host-tile.add-tile .landing-host-icon {
     display: flex;
     align-items: center;
@@ -1266,7 +1263,6 @@ header#menubar { height: 30px; padding: 0 6px; background: #353535; }
   border-radius: 2px; padding: 12px; gap: 10px; background: #353535;
   color: var(--text); transition: background .1s; border: 1px solid #555;
 }
-.landing-host-tile:hover { transform: none; border-color: #747a81; background: #3e4349; }
 #landing-host-grid .landing-host-tile { flex-direction: row; min-height: 58px; padding-left: 30px; }
 #landing-host-grid .landing-host-icon { order: 0; width: 30px; height: 30px; }
 #landing-host-grid .landing-host-name { order: 1; text-align: left; margin-right: auto; font-size: 13px; }
@@ -1274,7 +1270,6 @@ header#menubar { height: 30px; padding: 0 6px; background: #353535; }
 .landing-host-delete-btn { top: 50%; transform: translateY(-50%); left: 3px; border-radius: 2px; }
 .landing-host-active-dot { top: 5px; right: 5px; width: 6px; height: 6px; }
 .landing-host-tile.add-tile { border-style: solid; color: var(--text); font: inherit; }
-.landing-host-tile.add-tile:hover { color: #fff; }
 #landing-actions-grid .landing-host-icon { width: 26px; height: 26px; font-size: 23px; }
 #landing-license-link { align-self: flex-start; margin-top: 24px; }
 @media (max-width: 600px) {
@@ -1520,11 +1515,6 @@ button.toolbar-btn.primary:hover:not(:disabled) {
   background: linear-gradient(180deg, #353535, #303030);
   box-shadow: 0 2px 7px #0003, inset 0 1px #ffffff08;
 }
-.landing-host-tile:hover {
-  border-color: #737980;
-  background: linear-gradient(180deg, #3d3d3d, #353535);
-  box-shadow: 0 4px 12px #0004, inset 3px 0 #858b92;
-}
 #landing-host-grid .landing-host-tile { min-height: 64px; padding-left: 34px; }
 #landing-host-grid .landing-host-icon {
   width: 34px;
@@ -1554,12 +1544,12 @@ button.toolbar-btn.primary:hover:not(:disabled) {
   font-size: 12px;
   line-height: 1.2;
 }
-.landing-host-delete-btn:hover {
-  border-color: #8a6060;
-  background: #463333;
-  color: #f0d4d4;
-}
 #open-project-library { align-self: flex-start; margin-top: 12px; }
+#landing-view button.toolbar-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #444, #363636);
+  border-color: #15191e;
+  border-top-color: #59616b;
+}
 .landing-section-label {
   color: #aab5c0;
   font-weight: 600;
