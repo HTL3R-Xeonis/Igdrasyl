@@ -3082,7 +3082,6 @@ function buildDesignTile() {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "landing-host-tile add-tile";
-  tile.title = "Sketch a topology on the canvas without deploying it, then export it as a .topoproj bundle you can import against a real host later.";
   const name = document.createElement("div");
   name.className = "landing-host-name";
   name.textContent = "Design a Topology";
@@ -3095,7 +3094,6 @@ function buildGenerateTile() {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "landing-host-tile add-tile";
-  tile.title = "Describe a topology in plain language and have an LLM generate it - opens into the design canvas for review, editing, and export, same as a hand-built sketch.";
   const name = document.createElement("div");
   name.className = "landing-host-name";
   name.textContent = "Generate via LLM";
@@ -3107,17 +3105,13 @@ function buildGenerateTile() {
 function buildHostTile(profile) {
   const tile = document.createElement("div");
   tile.className = "landing-host-tile";
-  // The filename/GNS3 VM name are no longer shown on the tile itself
-  // (just the ESXi IP) - still surfaced on hover for anyone who needs
-  // to tell apart two hosts with similar IPs.
-  tile.title = profile.error
-    ? `${profile.filename}: ${profile.error}`
-    : `${profile.filename} · ${[profile.esxi_ip, profile.gns3_vm_name].filter(Boolean).join(" · ")}`;
+  // Only a broken settings file gets a tooltip - its error text isn't
+  // shown anywhere else on the tile.
+  if (profile.error) tile.title = `${profile.filename}: ${profile.error}`;
 
   const deleteBtn = document.createElement("button");
   deleteBtn.className = "landing-host-delete-btn";
   deleteBtn.textContent = "Delete";
-  deleteBtn.title = "Delete this settings file";
   deleteBtn.addEventListener("click", (evt) => {
     evt.stopPropagation();
     deleteHostProfile(profile.filename);
