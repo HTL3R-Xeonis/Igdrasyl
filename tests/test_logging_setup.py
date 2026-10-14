@@ -144,3 +144,17 @@ def test_configuring_twice_replaces_the_sink_instead_of_doubling_every_line(
     logger.info("only once please")
 
     assert _text(log_path).count("only once please") == 1
+
+
+def test_a_standard_library_record_keeps_the_callers_real_location(log_path):
+    logging_setup.configure_logging()
+
+    logging.getLogger("some.library").warning("where am I")
+
+    entry = next(
+        e
+        for e in log_store.parse_entries(log_store.read_lines(log_path))
+        if e["message"] == "where am I"
+    )
+    # not the logging module's own frames (__init__.py:callHandlers:...)
+    assert entry["location"].startswith("test_logging_setup.py:")

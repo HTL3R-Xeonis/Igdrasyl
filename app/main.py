@@ -274,9 +274,12 @@ def get_log_entries(
     """
     lines = max(1, min(lines, log_store.MAX_TOTAL_LINES))
     return {
-        "entries": public_text.redact_paths(
-            log_store.read_entries(Settings.LOG_FILE_PATH, lines, level, search)
-        ),
+        "entries": [
+            {**entry, "message": public_text.redact_log_text(entry["message"])}
+            for entry in log_store.read_entries(
+                Settings.LOG_FILE_PATH, lines, level, search
+            )
+        ],
         "info": log_store.info(Settings.LOG_FILE_PATH),
     }
 
@@ -286,7 +289,7 @@ def download_logs() -> StreamingResponse:
     """The whole retained log (at most 100 000 lines) as plain text, paths redacted."""
     return StreamingResponse(
         (
-            public_text.redact_paths(line) + "\n"
+            public_text.redact_log_text(line) + "\n"
             for line in log_store.iter_lines(Settings.LOG_FILE_PATH)
         ),
         media_type="text/plain; charset=utf-8",

@@ -24,6 +24,7 @@ any) is already in effect before the sink is created.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import platform
@@ -63,8 +64,11 @@ class _InterceptHandler(logging.Handler):
             level: str | int = logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
-        frame, depth = logging.currentframe(), 2
-        while frame is not None and frame.f_code.co_filename == logging.__file__:
+        # Walk out of the logging module's own frames to the real caller.
+        frame, depth = inspect.currentframe(), 0
+        while frame is not None and (
+            depth == 0 or frame.f_code.co_filename == logging.__file__
+        ):
             frame = frame.f_back
             depth += 1
         logger.opt(depth=depth, exception=record.exc_info).log(

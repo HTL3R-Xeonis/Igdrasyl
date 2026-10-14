@@ -327,7 +327,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-236 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+360 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 
