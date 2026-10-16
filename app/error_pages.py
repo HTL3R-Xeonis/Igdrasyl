@@ -53,7 +53,7 @@ def render(status_code: int, detail: str | None = None) -> Response:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{status_code} - {escape(title)}</title>
-<link rel="stylesheet" href="/styles.css?v=deploy-banner-1">
+<link rel="stylesheet" href="/styles.css?v=uplink-1">
 <style>
   /* styles.css lays <body> out as the single-page app - this is its own page. */
   body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}

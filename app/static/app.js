@@ -377,7 +377,16 @@ const ROLE_ICON_FILES = {
   PC: "/vendor/gns3-icons/computer.svg",
   FW: "/vendor/gns3-icons/firewall.svg",
   VM: "/vendor/gns3-icons/server.svg",
+  UPLINK: "/vendor/gns3-icons/cloud.svg",
 };
+
+// GNS3's built-in "NAT" node is this app's Internet uplink: one port (nat0),
+// DHCP + NAT through the GNS3 VM's own network. It is stored like any other
+// node (image NAT, role FW - TopologyBuilder only knows five roles), shown
+// with a cloud icon.
+function isUplinkImage(image) {
+  return String(image || "").trim().toLowerCase() === "nat";
+}
 
 let nodesData = {};      // name -> {name, role, environment, interfaces, live, x, y}
 let selectedName = null;   // the one selected node while exactly one is selected (drives the single-node popup)
@@ -450,6 +459,7 @@ const ROLE_KEYWORDS = [
 
 function classifyTemplateRole(name, group) {
   if (group === "esxi") return "VM";
+  if (isUplinkImage(name)) return "FW";
   const category = availableTemplates && availableTemplates.gns3_categories && availableTemplates.gns3_categories[name];
   const mappedFromCategory = category && GNS3_CATEGORY_TO_ROLE[category];
   if (mappedFromCategory) return mappedFromCategory;
@@ -479,7 +489,8 @@ function statusClassFor(node) {
 }
 
 function roleForIcon(node) {
-  return node.environment === "ON_ESXI" ? "VM" : node.role;
+  if (node.environment === "ON_ESXI") return "VM";
+  return isUplinkImage(node.image) ? "UPLINK" : node.role;
 }
 
 // A single <image> referencing the real vendored GNS3 icon file for
@@ -2447,6 +2458,14 @@ function computeGns3PortNames(spec) {
 }
 
 async function promptForInterface(nodeName, anchor) {
+  // The Internet uplink has exactly one port - nothing to choose.
+  if (nodesData[nodeName] && isUplinkImage(nodesData[nodeName].image)) {
+    if (Object.keys(nodesData[nodeName].interfaces || {}).length) {
+      await showAlert(`${nodeName} is an Internet uplink with a single port, and it is already connected.`, { title: "Interface" });
+      return null;
+    }
+    return "nat0";
+  }
   let ports = null;
   try {
     const resp = await fetch(apiPath(`/nodes/${encodeURIComponent(nodeName)}/ports`));
@@ -3176,9 +3195,9 @@ function renderPaletteList() {
     if (placementImage === entry.name) row.classList.add("armed");
     const iconWrap = document.createElement("span");
     iconWrap.className = "palette-icon";
-    iconWrap.appendChild(buildRoleIconStandalone(entry.role, 20));
+    iconWrap.appendChild(buildRoleIconStandalone(isUplinkImage(entry.name) ? "UPLINK" : entry.role, 20));
     const label = document.createElement("span");
-    label.textContent = entry.name;
+    label.textContent = isUplinkImage(entry.name) ? "NAT (Internet uplink)" : entry.name;
     row.appendChild(iconWrap);
     row.appendChild(label);
     row.addEventListener("click", () => armPlacement(entry.name, entry.role, row));
@@ -3216,7 +3235,13 @@ function clearPlacementMode() {
 }
 
 const ROLE_NAME_PREFIX = { ROUTER: "R", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" };
-function suggestNodeName(role) {
+function suggestNodeName(role, image) {
+  if (isUplinkImage(image)) {
+    if (!nodesData.Internet) return "Internet";
+    let n = 2;
+    while (nodesData[`Internet${n}`]) n++;
+    return `Internet${n}`;
+  }
   const prefix = ROLE_NAME_PREFIX[role] || "Node";
   let i = 1;
   while (nodesData[`${prefix}${i}`]) i++;
@@ -3232,7 +3257,7 @@ async function placeNodeAt(point) {
   }
   const name = await showTextPrompt(`Name for the new ${image} node:`, {
     title: "Add Node",
-    defaultValue: suggestNodeName(role),
+    defaultValue: suggestNodeName(role, image),
   });
   if (!name) return;
   if (!await confirmDisruption(
@@ -3403,6 +3428,7 @@ document.getElementById("take-screenshot-btn").addEventListener("click", () => {
 // an import or add-node deploy is running in the background.
 function setMenubarBusy(text) {
   const el = document.getElementById("menubar-status");
+  el.classList.remove("menubar-error");
   el.innerHTML = "";
   const spinner = document.createElement("span");
   spinner.className = "menubar-spinner";
@@ -3417,6 +3443,7 @@ function setMenubarBusy(text) {
 // before climbing (a non-incremental deploy resets everything first).
 function setMenubarProgress(text, completed, total) {
   const el = document.getElementById("menubar-status");
+  el.classList.remove("menubar-error");
   el.innerHTML = "";
   const track = document.createElement("span");
   track.className = "menubar-progress-track";
@@ -3430,11 +3457,18 @@ function setMenubarProgress(text, completed, total) {
   el.appendChild(track);
   el.appendChild(label);
 }
-function setMenubarMessage(text) {
-  document.getElementById("menubar-status").textContent = text;
+// Wording that marks a message as a failure - shown in red. Pass
+// {error: true/false} to override the guess for an odd phrasing.
+const MENUBAR_ERROR_PATTERN = /\b(failed|failure|error|couldn't|can't|cannot|unavailable|refused|add a valid host|save this design)\b/i;
+function setMenubarMessage(text, opts = {}) {
+  const el = document.getElementById("menubar-status");
+  el.textContent = text;
+  el.classList.toggle("menubar-error", opts.error ?? MENUBAR_ERROR_PATTERN.test(text));
 }
 function clearMenubarStatus() {
-  document.getElementById("menubar-status").textContent = "";
+  const el = document.getElementById("menubar-status");
+  el.textContent = "";
+  el.classList.remove("menubar-error");
 }
 
 const IMPORT_POLL_INTERVAL_MS = 1200;
@@ -4206,7 +4240,7 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fix: false }),
     });
-    setMenubarMessage(`Health check: ${first.passed}/${first.total} checks passed.`);
+    setMenubarMessage(`Health check: ${first.passed}/${first.total} checks passed.`, { error: first.passed !== first.total });
     if (first.passed === first.total) {
       await showAlert(formatVerifyReport(first), { title: "Health Check" });
       return;
@@ -4229,7 +4263,7 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
     const applied = second.actions.length
       ? `Applied:\n${second.actions.map((a) => `- ${a}`).join("\n")}\n\n`
       : "No automatic fix was applicable.\n\n";
-    setMenubarMessage(`Health check after fixes: ${second.passed}/${second.total} checks passed.`);
+    setMenubarMessage(`Health check after fixes: ${second.passed}/${second.total} checks passed.`, { error: second.passed !== second.total });
     await showAlert(applied + formatVerifyReport(second), { title: "Health Check" });
     await loadCanvas();
   } catch (err) {

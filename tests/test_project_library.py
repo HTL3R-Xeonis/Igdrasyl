@@ -181,3 +181,41 @@ def test_deploy_requires_active_selected_host(client, tmp_path, monkeypatch):
     response = client.post(f"/projects/{project['id']}/deploy/host.yml")
     assert response.status_code == 409
     assert "Activate" in response.json()["detail"]
+
+
+def test_a_design_can_be_saved_as_a_new_named_project(client, app_state):
+    from unittest.mock import patch
+
+    from src.graph.environment import Environment
+
+    Environment._get_templates.cache_clear()
+    with (
+        patch(
+            "src.graph.environment.APIHandler.get_gns3_template_names",
+            return_value={"VPCS"},
+        ),
+        patch(
+            "src.graph.environment.APIHandler.get_esxi_template_names",
+            return_value=set(),
+        ),
+    ):
+        client.post(
+            "/design/nodes", json={"name": "PC1", "role": "PC", "image": "VPCS"}
+        )
+        client.post("/design/layout", json={"name": "PC1", "x": 11, "y": 22})
+        response = client.post("/design/project", json={"name": "My sketch"})
+        assert response.status_code == 201
+        project = response.json()["project"]
+        assert project["name"] == "My sketch"
+        assert client.get("/design/project").json()["project"]["id"] == project["id"]
+        topology = client.get(f"/projects/{project['id']}/download").text
+        assert "PC1" in topology
+        # layout travels with it (design.json), so reopening restores the picture
+        client.post("/design/reset")
+        client.post(f"/design/project/{project['id']}/open")
+        assert client.get("/design/layout").json()["PC1"] == {"x": 11, "y": 22}
+    Environment._get_templates.cache_clear()
+
+
+def test_saving_a_design_with_a_bad_name_is_rejected(client):
+    assert client.post("/design/project", json={"name": "   "}).status_code == 400

@@ -128,17 +128,31 @@ document.getElementById("project-library-open").addEventListener("click", async 
   finally { projectBusy(false); }
 });
 
+// Saves the current design to the project library: into its project when it
+// has one, otherwise under a name asked for right here - no detour through
+// the project dialog.
+async function saveDesignProject(name) {
+  const body = currentDesignProject && (!name || name === currentDesignProject.name)
+    ? await settingsRequest(`/design/project/${encodeURIComponent(currentDesignProject.id)}`, { method: "PUT" })
+    : await settingsRequest("/design/project", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+    });
+  currentDesignProject = body.project;
+  await refreshCurrentDesignProject();
+  return currentDesignProject;
+}
+
 document.getElementById("save-library-project-btn").addEventListener("click", async () => {
+  let name = null;
   if (!currentDesignProject) {
-    await openProjectSelection();
-    projectSelectionStatus.textContent = "Create a project, then open it in the designer before saving.";
-    return;
+    name = await showTextPrompt("Name for this design:", { title: "Save project", defaultValue: "" });
+    if (!name || !name.trim()) return;
+    name = name.trim();
   }
-  setMenubarBusy(`Saving “${currentDesignProject.name}”…`);
+  setMenubarBusy(`Saving “${name || currentDesignProject.name}”…`);
   try {
-    const body = await settingsRequest(`/design/project/${encodeURIComponent(currentDesignProject.id)}`, { method:"PUT" });
-    currentDesignProject = body.project;
-    setMenubarMessage(`Saved “${currentDesignProject.name}” to the project library.`);
+    const project = await saveDesignProject(name);
+    setMenubarMessage(`Saved “${project.name}” to the project library.`);
   } catch (error) { setMenubarMessage(`Save failed: ${error.message}`); }
 });
 
@@ -147,6 +161,8 @@ const deploymentHostPicker = document.getElementById("deployment-host-picker");
 const deploymentContent = document.getElementById("deployment-preview-content");
 const deploymentStatus = document.getElementById("deployment-preview-status");
 const deploymentConfirm = document.getElementById("deployment-confirm");
+const deploymentName = document.getElementById("deployment-project-name");
+const deploymentNameHint = document.getElementById("deployment-name-hint");
 let deploymentPreview = null;
 
 function renderDeploymentPreview(preview) {
@@ -180,7 +196,31 @@ function renderDeploymentPreview(preview) {
   deploymentConfirm.disabled = false;
 }
 
+// What the dialog is about to do with the name: deploy the saved project, save
+// the edits to it first, or save the design as a new project.
+function deploymentNameMode() {
+  const typed = deploymentName.value.trim();
+  if (!currentDesignProject) return "new";
+  return typed && typed !== currentDesignProject.name ? "new" : "existing";
+}
+
+function renderUnsavedDeployment() {
+  deploymentPreview = null;
+  const nodes = Object.keys(nodesData).length;
+  deploymentContent.replaceChildren();
+  deploymentNameHint.textContent = deploymentNameMode() === "new"
+    ? "The design is saved to the project library under this name, then deployed."
+    : `Your latest edits are saved to “${currentDesignProject.name}”, then it is deployed.`;
+  deploymentStatus.textContent = `${nodes} node${nodes === 1 ? "" : "s"} in this design. You can review the deployment mode after choosing Save and deploy.`;
+  deploymentStatus.className = "";
+  deploymentConfirm.textContent = "Save and deploy";
+  deploymentConfirm.disabled = false;
+}
+
 async function loadDeploymentPreview() {
+  // Unsaved, or about to be saved under a new name: nothing to preview yet.
+  if (deploymentNameMode() === "new") { renderUnsavedDeployment(); return; }
+  deploymentNameHint.textContent = `Your latest edits are saved to “${currentDesignProject.name}” first.`;
   deploymentConfirm.disabled = true;
   deploymentStatus.textContent = "Loading preview…";
   try {
@@ -191,10 +231,7 @@ async function loadDeploymentPreview() {
 
 async function openDeploymentPreview() {
   await refreshCurrentDesignProject();
-  if (!currentDesignProject) {
-    setMenubarMessage("Save this design to the project library before deploying it.");
-    return;
-  }
+  deploymentName.value = currentDesignProject ? currentDesignProject.name : "";
   const profiles = await settingsRequest("/settings-profiles");
   deploymentHostPicker.replaceChildren();
   profiles.filter(profile => !profile.error).forEach(profile => {
@@ -226,11 +263,30 @@ async function startLibraryDeployment(project, filename) {
 
 document.getElementById("deploy-library-project-btn").addEventListener("click", openDeploymentPreview);
 deploymentHostPicker.addEventListener("change", loadDeploymentPreview);
+deploymentName.addEventListener("input", loadDeploymentPreview);
 document.getElementById("deployment-preview-close").addEventListener("click", () => deploymentDialog.close());
 deploymentConfirm.addEventListener("click", async () => {
-  if (!deploymentPreview || deploymentConfirm.disabled) return;
+  if (deploymentConfirm.disabled) return;
+  const name = deploymentName.value.trim();
+  if (!currentDesignProject && !name) {
+    deploymentStatus.textContent = "Enter a name for this design first.";
+    deploymentName.focus();
+    return;
+  }
   deploymentConfirm.disabled = true;
   try {
+    // Always deploy what is on the canvas now: save it first (named, or into its project).
+    deploymentStatus.textContent = "Saving the design…";
+    await saveDesignProject(deploymentNameMode() === "new" ? name : null);
+    deploymentPreview = await settingsRequest(`/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(deploymentHostPicker.value)}`);
+    renderDeploymentPreview(deploymentPreview);
+    if (deploymentPreview.mode === "full" && !await showConfirm(
+      `“${deploymentPreview.project.name}” will be deployed in FULL mode: the topology is rebuilt and managed devices that are not in it may be removed from ${deploymentPreview.host.esxi_ip || deploymentPreview.host.filename}. Continue?`,
+      { title: "Full deployment", confirmLabel: "Deploy", danger: true }
+    )) {
+      deploymentConfirm.disabled = false;
+      return;
+    }
     if (deploymentPreview.requires_restart) {
       await settingsRequest(`/settings-profiles/${encodeURIComponent(deploymentPreview.host.filename)}/project`, {
         method:"PUT", headers:{"Content-Type":"application/json"},

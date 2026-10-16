@@ -278,6 +278,10 @@ the live canvas gets the same except where a change would touch real VMs.
 - **Keyboard**: arrows move the selection (Shift = 5x), + / - / 0 zoom and fit,
   `?` lists every shortcut (also Edit > Keyboard Shortcuts).
 
+**Name it and deploy**: File > Deploy to Host asks for a project name when the design was never
+saved - it saves the design to the library under that name and deploys it in one step (a different
+name than the open project's saves a new project). Save Project also just asks for a name.
+
 **Deploy from the warning banner**: when the project selected for the active host
 does not exist in GNS3 yet ("No GNS3 project named ... has this topology actually been
 deployed?"), the banner shows a **Deploy project...** button next to Retry. It asks
@@ -285,6 +289,18 @@ for confirmation (node/link counts and whether the host deploys incrementally or
 rebuilds everything - a full deployment can remove devices that are not in the project)
 and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 `deployable_project`.
+
+## Internet uplink
+
+Add GNS3's built-in **NAT** node (palette entry "NAT (Internet uplink)", cloud icon, auto-named
+`Internet`) and link it to a router or switch. It has one port (`nat0`, chosen automatically) and
+gives everything behind it DHCP, DNS and NAT out through the GNS3 VM's own network - verified live:
+a VPCS behind it got `192.168.42.x`, resolved names and pinged 8.8.8.8. Requirements: the GNS3 VM
+itself must reach the internet, and an ESXi VM only gets it when it is linked (through GNS3 switches)
+to the NAT node and runs a DHCP client. One uplink per topology is the sensible limit (all NAT nodes
+share the same network); to the topology file it is a normal node (`image: NAT`, `role: FW` -
+TopologyBuilder only knows five roles), deployed through its built-in-node path. The LLM generator
+knows it too: ask for "internet access".
 
 ## Selecting a project independently
 
@@ -342,6 +358,8 @@ same restart flow as host changes. Import and live edits require a selected proj
   `POST /design/layout/batch` (group move), `POST /design/delete` (selection),
   `POST /design/paste`; live: `POST /layout/batch`, `PUT /links/{a}/{b}/options`
   (delay/jitter/loss/corruption/suspend; `GET /links` reports them back).
+- `POST /design/project` `{name}`: saves the current design as a new library project (the deploy
+  dialog names and saves it itself, then deploys it).
 - `DELETE /logs`: permanently clears the log (both rotation files); the first
   new line records that it happened.
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
@@ -393,7 +411,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-415 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+417 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

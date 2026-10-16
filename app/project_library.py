@@ -83,6 +83,21 @@ def create(name, topology_yaml=None):
             shutil.rmtree(temporary)
 
 
+def create_from_design(name, state: "DesignState"):
+    """
+    A new library project holding the current design sketch (topology,
+    layout and drawings) - what "name it and deploy" needs, without a
+    separate create-then-open-then-save round trip.
+    :raises ValueError: a bad name, or a design TopologyBuilder won't accept
+    """
+    text = yaml.safe_dump(
+        design.to_topology_yaml_dict(state), sort_keys=False, allow_unicode=True
+    )
+    project = create(name, text)
+    save_design(project["id"], state)
+    return project
+
+
 def topology_path(project_id):
     return project_path(project_id) / "topology.yaml"
 

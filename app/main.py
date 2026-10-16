@@ -963,6 +963,20 @@ def open_library_project(project_id: str) -> dict[str, Any]:
     return {"project": _settings_call(project_library.get, project_id)}
 
 
+class SaveDesignAs(BaseModel):
+    name: str
+
+
+@app.post("/design/project", status_code=201)
+def create_library_project_from_design(request: SaveDesignAs) -> dict[str, Any]:
+    """Saves the current sketch as a NEW library project under the given name."""
+    project = _settings_call(
+        project_library.create_from_design, request.name, app.state.design
+    )
+    app.state.design_project_id = project["id"]
+    return {"project": project}
+
+
 @app.put("/design/project/{project_id}")
 def save_library_project(project_id: str) -> dict[str, Any]:
     project = _settings_call(project_library.save_design, project_id, app.state.design)
