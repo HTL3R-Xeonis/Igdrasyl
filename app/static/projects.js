@@ -217,7 +217,9 @@ function renderUnsavedDeployment() {
   deploymentConfirm.disabled = false;
 }
 
+let deploymentPreviewRequest = 0; // only the newest request may draw: typing a name fires one per keystroke
 async function loadDeploymentPreview() {
+  const request = ++deploymentPreviewRequest;
   // Unsaved, or about to be saved under a new name: nothing to preview yet.
   if (deploymentNameMode() === "new") { renderUnsavedDeployment(); return; }
   deploymentNameHint.textContent = `Your latest edits are saved to “${currentDesignProject.name}” first.`;
@@ -225,8 +227,10 @@ async function loadDeploymentPreview() {
   deploymentStatus.textContent = "Loading preview…";
   try {
     const preview = await settingsRequest(`/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(deploymentHostPicker.value)}`);
-    renderDeploymentPreview(preview);
-  } catch (error) { deploymentStatus.textContent = error.message; }
+    if (request === deploymentPreviewRequest) renderDeploymentPreview(preview);
+  } catch (error) {
+    if (request === deploymentPreviewRequest) deploymentStatus.textContent = error.message;
+  }
 }
 
 async function openDeploymentPreview() {
