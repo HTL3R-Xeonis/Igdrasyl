@@ -3240,17 +3240,25 @@ function clearPlacementMode() {
   document.getElementById("canvas").classList.remove("placing");
 }
 
+// Names of nodes whose "Add" is still deploying: not in nodesData yet, but taken.
+const pendingNodeNames = new Set();
+function nodeNameTaken(name) {
+  const key = name.trim().toLowerCase();
+  return Object.keys(nodesData).some((n) => n.toLowerCase() === key) ||
+    [...pendingNodeNames].some((n) => n.toLowerCase() === key);
+}
+
 const ROLE_NAME_PREFIX = { ROUTER: "R", SWITCH: "SW", PC: "PC", FW: "FW", VM: "VM" };
 function suggestNodeName(role, image) {
   if (isUplinkImage(image)) {
-    if (!nodesData.Internet) return "Internet";
+    if (!nodeNameTaken("Internet")) return "Internet";
     let n = 2;
-    while (nodesData[`Internet${n}`]) n++;
+    while (nodeNameTaken(`Internet${n}`)) n++;
     return `Internet${n}`;
   }
   const prefix = ROLE_NAME_PREFIX[role] || "Node";
   let i = 1;
-  while (nodesData[`${prefix}${i}`]) i++;
+  while (nodeNameTaken(`${prefix}${i}`)) i++;
   return `${prefix}${i}`;
 }
 
@@ -3266,6 +3274,13 @@ async function placeNodeAt(point) {
     defaultValue: suggestNodeName(role, image),
   });
   if (!name) return;
+  if (nodeNameTaken(name)) {
+    await showAlert(
+      `A node named "${name}" already exists or is just being added. Names must be unique (upper/lower case does not count).`,
+      { title: "Add node" }
+    );
+    return;
+  }
   if (!await confirmDisruption(
     `Add node "${name}" (${role}, ${image})?\n\nThis briefly disrupts every ` +
     `already-running ESXi-bridged Cloud connection, even for just this one node, ` +
@@ -3275,6 +3290,7 @@ async function placeNodeAt(point) {
     return;
   }
   setMenubarBusy(designMode ? `Adding "${name}"…` : `Adding "${name}" (deploying live, may take a while)…`);
+  pendingNodeNames.add(name);
   try {
     const resp = await fetch(apiPath("/nodes"), {
       method: "POST",
@@ -3297,6 +3313,8 @@ async function placeNodeAt(point) {
   } catch (err) {
     clearMenubarStatus();
     await showAlert(`Failed to add node: ${err}`);
+  } finally {
+    pendingNodeNames.delete(name);
   }
 }
 

@@ -298,6 +298,12 @@ for another change to the lab to finish") instead of overlapping - three quick "
 three deploys at once, one of which left a VM half imported. Start/stop, reads and the design canvas are not
 affected.
 
+Node names are unique (case-insensitive) even across requests still in flight: the server reserves a name
+the moment an "Add node" request arrives - before it may have to wait for the lock - and refuses a second one
+("just being deployed"); the GUI does the same check and never suggests a name that is being added. A failed
+live add restores the topology file as it was, so the half-added node does not make every later deploy fail
+on it; what the failed deploy half created on ESXi/GNS3 shows up under File > Find Orphans.
+
 ## Deleting and holding projects
 
 **Delete**: select a project in the project library dialog and choose **Delete project...**. Only the
@@ -441,7 +447,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-441 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+445 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

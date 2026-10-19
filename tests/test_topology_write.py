@@ -339,3 +339,24 @@ def test_gns3_template_port_specs_excludes_templates_with_no_fixed_format(app_st
     ]
 
     assert topology_write._gns3_template_port_specs(templates) == {}
+
+
+def test_a_failed_add_node_restores_the_topology_file(app_state, temp_topology_file):
+    import pytest
+
+    import app.main as main_module
+    from app import topology_write
+
+    before = temp_topology_file.read_text()
+
+    def failing_add(file, name, role, image):
+        temp_topology_file.write_text(before + "\n# half written\n")
+        raise RuntimeError("OVA deploy request failed")
+
+    backend = MagicMock()
+    backend.add_node.side_effect = failing_add
+    with patch("app.topology_write.get_or_create_backend", return_value=backend):
+        with pytest.raises(RuntimeError, match="OVA deploy"):
+            topology_write.add_node(main_module.app, "VM9", "VM", "debian")
+
+    assert temp_topology_file.read_text() == before

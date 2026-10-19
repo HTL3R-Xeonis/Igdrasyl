@@ -15,6 +15,10 @@ fail to start.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -153,13 +157,74 @@ def list_templates() -> dict[str, Any]:
     }
 
 
+_PENDING_NAMES: set[str] = set()  # lower-cased names of nodes being added right now
+_PENDING_LOCK = threading.Lock()
+
+
+@contextmanager
+def _reserved_name(app: FastAPI, name: str) -> Iterator[None]:
+    """
+    Claims a node name the moment the request arrives - before it may have to
+    wait for the live lock - so a second "Add node" with the same name is turned
+    down at once, even while the first is still deploying and not yet in the
+    topology. Case-insensitive, like ESXi VM names effectively are.
+    :raises ValueError: the name is empty, in the topology, or being added
+    """
+    key = name.strip().lower()
+    if not key:
+        raise ValueError("name must not be empty")
+    with _PENDING_LOCK:
+        existing = (
+            {n.lower() for n in app.state.graph.nodes}
+            if getattr(app.state, "graph", None) is not None
+            else set()
+        )
+        if key in existing:
+            raise ValueError(f"a node named {name!r} already exists")
+        if key in _PENDING_NAMES:
+            raise ValueError(
+                f"a node named {name!r} is just being deployed - pick another name"
+            )
+        _PENDING_NAMES.add(key)
+    try:
+        yield
+    finally:
+        with _PENDING_LOCK:
+            _PENDING_NAMES.discard(key)
+
+
+@contextmanager
+def _restore_on_failure(app: FastAPI, what: str) -> Iterator[None]:
+    """
+    TopologyBackend writes the topology file first and deploys afterwards, so a
+    failed deploy (e.g. the OVA service timing out) used to leave the new node
+    in the file: every later deploy then tried to create it again and failed on
+    it too, blocking unrelated changes. Put the file back exactly as it was and
+    re-read the graph. Whatever the failed deploy half created on ESXi/GNS3 is
+    not touched here - Find Orphans lists and removes it.
+    """
+    path = Path(Settings.TOPOLOGY_FILE)
+    before = path.read_text(encoding="utf-8")
+    try:
+        yield
+    except Exception:
+        logger.warning(f"Failed {what}: restoring the topology file as it was")
+        path.write_text(before, encoding="utf-8")
+        try:
+            app.state.graph = load_graph()
+        except Exception as exc:
+            logger.warning(f"Could not reload the topology after the rollback: {exc}")
+        raise
+
+
 def add_node(app: FastAPI, name: str, role: str, image: str) -> None:
-    with exclusive("Add node"):
+    with _reserved_name(app, name), exclusive("Add node"):
         if not Settings.TOPOLOGY_FILE:
             raise RuntimeError("Select a project before editing a live topology")
         logger.info(f"Adding node {name!r} (role {role}, image {image!r}) live")
         backend = get_or_create_backend(app)
-        backend.add_node(Settings.TOPOLOGY_FILE, name, role, image)
+        with _restore_on_failure(app, f"adding node {name!r}"):
+            backend.add_node(Settings.TOPOLOGY_FILE, name, role, image)
         app.state.graph = load_graph()
         logger.info(f"Node {name!r} added")
 
@@ -183,7 +248,8 @@ def add_link(app: FastAPI, node1: str, if1: str, node2: str, if2: str) -> None:
             raise RuntimeError("Select a project before editing a live topology")
         logger.info(f"Adding link {node1}:{if1} <-> {node2}:{if2} live")
         backend = get_or_create_backend(app)
-        backend.add_link(Settings.TOPOLOGY_FILE, node1, if1, node2, if2)
+        with _restore_on_failure(app, f"adding link {node1}-{node2}"):
+            backend.add_link(Settings.TOPOLOGY_FILE, node1, if1, node2, if2)
         app.state.graph = load_graph()
         logger.info(f"Link {node1}:{if1} <-> {node2}:{if2} added")
 
