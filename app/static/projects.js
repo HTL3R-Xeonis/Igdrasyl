@@ -21,6 +21,11 @@ function updateProjectDownload() {
   link.hidden = !id || id === "external";
   if (!link.hidden) link.href = `/projects/${encodeURIComponent(id)}/download`;
   document.getElementById("project-library-open").hidden = !id || id === "external";
+  const deleteBtn = document.getElementById("project-library-delete");
+  deleteBtn.hidden = !id || id === "external";
+  const held = projectPicker.selectedOptions[0]?.dataset.held === "1";
+  deleteBtn.disabled = held;
+  deleteBtn.title = held ? "On hold - resume it first" : "";
 }
 
 async function refreshCurrentDesignProject() {
@@ -39,8 +44,10 @@ async function refreshProjectLibrary(selected = "") {
   const counts = new Map();
   body.projects.forEach(project => counts.set(project.name, (counts.get(project.name) || 0) + 1));
   body.projects.forEach(project => {
-    const label = counts.get(project.name) > 1 ? `${project.name} (${project.id.slice(0, 8)})` : project.name;
-    projectPicker.add(new Option(label, project.id));
+    const base = counts.get(project.name) > 1 ? `${project.name} (${project.id.slice(0, 8)})` : project.name;
+    const option = new Option(project.held ? `${base} — on hold` : base, project.id);
+    option.dataset.held = project.held ? "1" : "";
+    projectPicker.add(option);
   });
   projectPicker.value = selected;
   projectSelectionForm.hidden = body.projects.length === 0;
@@ -190,9 +197,14 @@ function renderDeploymentPreview(preview) {
   const impact = preview.mode === "full"
     ? " Full deployment rebuilds every device and may remove managed devices absent from this project."
     : " Incremental deployment reuses matching devices and does not remove devices absent from this project.";
-  deploymentStatus.textContent = activation + impact;
+  deploymentStatus.textContent = preview.held
+    ? "This project is on hold: its VMs and GNS3 project are kept. It is resumed, not deployed again."
+      + (preview.requires_restart ? " The app first selects it for the host and restarts." : "")
+    : activation + impact;
   deploymentStatus.className = preview.mode === "full" ? "deployment-warning" : "";
-  deploymentConfirm.textContent = preview.requires_restart ? "Prepare and deploy" : "Deploy now";
+  deploymentConfirm.textContent = preview.held
+    ? (preview.requires_restart ? "Prepare and resume" : "Resume now")
+    : (preview.requires_restart ? "Prepare and deploy" : "Deploy now");
   deploymentConfirm.disabled = false;
 }
 
@@ -280,11 +292,17 @@ deploymentConfirm.addEventListener("click", async () => {
   deploymentConfirm.disabled = true;
   try {
     // Always deploy what is on the canvas now: save it first (named, or into its project).
-    deploymentStatus.textContent = "Saving the design…";
-    await saveDesignProject(deploymentNameMode() === "new" ? name : null);
-    deploymentPreview = await settingsRequest(`/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(deploymentHostPicker.value)}`);
+    const previewUrl = () => `/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(deploymentHostPicker.value)}`;
+    // A project on hold is resumed exactly as it was deployed - the canvas must not overwrite it.
+    let heldAlready = false;
+    if (deploymentNameMode() === "existing") heldAlready = (await settingsRequest(previewUrl())).held;
+    if (!heldAlready) {
+      deploymentStatus.textContent = "Saving the design…";
+      await saveDesignProject(deploymentNameMode() === "new" ? name : null);
+    }
+    deploymentPreview = await settingsRequest(previewUrl());
     renderDeploymentPreview(deploymentPreview);
-    if (deploymentPreview.mode === "full" && !await showConfirm(
+    if (deploymentPreview.mode === "full" && !deploymentPreview.held && !await showConfirm(
       `“${deploymentPreview.project.name}” will be deployed in FULL mode: the topology is rebuilt and managed devices that are not in it may be removed from ${deploymentPreview.host.esxi_ip || deploymentPreview.host.filename}. Continue?`,
       { title: "Full deployment", confirmLabel: "Deploy", danger: true }
     )) {
@@ -296,7 +314,7 @@ deploymentConfirm.addEventListener("click", async () => {
         method:"PUT", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({project_id: currentDesignProject.id})
       });
-      sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:deploymentPreview.host.filename}));
+      sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:deploymentPreview.host.filename, resume: !!deploymentPreview.held}));
       deploymentStatus.textContent = "Restarting with the selected host and project…";
       try { await fetch(`/settings-profiles/${encodeURIComponent(deploymentPreview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
       const deadline = Date.now() + 30000;
@@ -305,6 +323,12 @@ deploymentConfirm.addEventListener("click", async () => {
         try { if ((await fetch("/health")).ok) { window.location.reload(); return; } } catch (error) {}
       }
       throw new Error("Server did not return after restart");
+    }
+    if (deploymentPreview.held) {
+      deploymentDialog.close();
+      await enterHost(deploymentPreview.host.filename, true);
+      await resumeHeldProject(currentDesignProject);
+      return;
     }
     await startLibraryDeployment(currentDesignProject, deploymentPreview.host.filename);
   } catch (error) {
@@ -319,6 +343,11 @@ async function resumePendingLibraryDeployment() {
   sessionStorage.removeItem("pendingLibraryDeployment");
   try {
     const pending = JSON.parse(raw);
+    if (pending.resume) {
+      await enterHost(pending.filename, true);
+      await resumeHeldProject(pending.project);
+      return;
+    }
     await settingsRequest(`/design/project/${encodeURIComponent(pending.project.id)}/open`, {method:"POST"});
     await enterDesignMode();
     await startLibraryDeployment(pending.project, pending.filename);
@@ -357,4 +386,68 @@ document.getElementById("warning-deploy-btn").addEventListener("click", async ()
   } finally {
     button.disabled = false;
   }
+});
+
+
+// Delete a project from the library. Only the library entry goes - a
+// deployment of it in GNS3/ESXi stays untouched (the server also refuses while
+// a host has it selected or it is on hold).
+document.getElementById("project-library-delete").addEventListener("click", async () => {
+  const id = projectPicker.value;
+  if (!id || id === "external" || projectLibraryBusy) return;
+  const name = projectPicker.selectedOptions[0].textContent;
+  if (!await showConfirm(
+    `Delete “${name}” from the project library?\n\nThis removes its topology and design from the library only. ` +
+    `Whatever is already deployed in GNS3 or on ESXi stays as it is. It cannot be undone.`,
+    { title: "Delete project", confirmLabel: "Delete", danger: true }
+  )) return;
+  projectBusy(true);
+  try {
+    await settingsRequest(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (currentDesignProject && currentDesignProject.id === id) currentDesignProject = null;
+    await refreshProjectLibrary("");
+    projectSelectionStatus.textContent = `Deleted “${name}”.`;
+  } catch (error) { projectSelectionStatus.textContent = error.message; }
+  finally { projectBusy(false); }
+});
+
+// --- Hold / resume (see app/holds.py) ---
+
+document.getElementById("hold-project-btn").addEventListener("click", async () => {
+  if (!await showConfirm(
+    "Put this project on hold?\n\nIts ESXi VMs are powered off and its GNS3 project is closed (which stops every node). " +
+    "Both are kept and protected from later deployments - nothing is deleted. Resume it any time from the banner or the project dialog.",
+    { title: "Hold project", confirmLabel: "Hold" }
+  )) return;
+  setMenubarBusy("Putting the project on hold…");
+  try {
+    await settingsRequest("/project/hold", { method: "POST" });
+    await fetch("/reload", { method: "POST" });
+    await loadCanvas();
+    setMenubarMessage("Project is on hold. Use Resume project to start it again.");
+  } catch (error) {
+    clearMenubarStatus();
+    await showAlert(`Couldn't put the project on hold: ${error.message}`, { title: "Hold project" });
+  }
+});
+
+async function resumeHeldProject(project) {
+  setMenubarBusy(`Resuming “${project.name}”… (starting nodes and VMs, this can take a few minutes)`);
+  try {
+    const body = await settingsRequest(`/projects/${encodeURIComponent(project.id)}/resume`, { method: "POST" });
+    await loadCanvas();
+    const report = body.report || {};
+    setMenubarMessage(`Resumed “${project.name}”. Health check: ${report.passed}/${report.total} checks passed.`, { error: report.passed !== report.total });
+  } catch (error) {
+    clearMenubarStatus();
+    await showAlert(`Couldn't resume: ${error.message}`, { title: "Resume project" });
+  }
+}
+
+document.getElementById("warning-resume-btn").addEventListener("click", async () => {
+  const target = warningHeldProject;
+  if (!target) return;
+  const button = document.getElementById("warning-resume-btn");
+  button.disabled = true;
+  try { await resumeHeldProject(target); } finally { button.disabled = false; }
 });

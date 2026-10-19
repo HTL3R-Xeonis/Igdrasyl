@@ -89,16 +89,17 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     datastore_name = Settings.ESXI.DATASTORE
     if datastore_name is None:
         datastore_name = app.state.esxi_connection.find_biggest_datastore().name
-    with ova_templates.downloaded(template_id) as ova_path:
-        deploy_fresh_gns3_vm(
-            app.state.esxi_connection,
-            Settings.ESXI.GNS3_VM_NAME,
-            ova_path,
-            datastore_name,
-            Settings.ESXI.GNS3_VM_MGMT_NETWORK,
-            Settings.ESXI.TRUNK_PORT_GROUP,
-            mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
-        )
+    # The OVA deploy service imports it straight from the template share.
+    deploy_fresh_gns3_vm(
+        app.state.esxi_connection,
+        Settings.ESXI.GNS3_VM_NAME,
+        "",
+        datastore_name,
+        Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+        Settings.ESXI.TRUNK_PORT_GROUP,
+        mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
+        ova_filename=ova_templates.filename_for(template_id),
+    )
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
 
@@ -113,19 +114,22 @@ def run_deploy_job(
         if datastore_name is None:
             datastore_name = app.state.esxi_connection.find_biggest_datastore().name
 
-        job.stage = "downloading GNS3 VM template"
-        with ova_templates.downloaded(template_id) as ova_path:
-            ip_address = deploy_fresh_gns3_vm(
-                app.state.esxi_connection,
-                Settings.ESXI.GNS3_VM_NAME,
-                ova_path,
-                datastore_name,
-                Settings.ESXI.GNS3_VM_MGMT_NETWORK,
-                Settings.ESXI.TRUNK_PORT_GROUP,
-                on_stage=lambda stage: setattr(job, "stage", stage),
-                delete_old_vm=delete_old_vm,
-                mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
-            )
+        job.stage = "looking up the GNS3 VM template"
+        ova_filename = ova_templates.filename_for(template_id)
+        # Imported by the OVA deploy service straight from the template share
+        # onto the ESXi host: nothing multi-GB passes through this machine.
+        ip_address = deploy_fresh_gns3_vm(
+            app.state.esxi_connection,
+            Settings.ESXI.GNS3_VM_NAME,
+            "",
+            datastore_name,
+            Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+            Settings.ESXI.TRUNK_PORT_GROUP,
+            on_stage=lambda stage: setattr(job, "stage", stage),
+            delete_old_vm=delete_old_vm,
+            mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
+            ova_filename=ova_filename,
+        )
         job.ip_address = ip_address
         app.state.gns3_vm_ip = ip_address
 
@@ -145,10 +149,14 @@ def run_deploy_job(
 
         job.status = "done"
         logger.info(f"GNS3 VM deploy job {job.id} finished: {ip_address}")
-    except (RuntimeError, ConnectionError, TimeoutError, ValueError) as exc:
+    except Exception as exc:
+        # Everything, not just the expected failures: this runs in a background
+        # thread, and an exception nobody catches (a full disk, a bug) would end
+        # the thread silently and leave the job "running" forever - which also
+        # blocks every further deploy until the app restarts.
         job.status = "error"
-        job.error = str(exc)
-        logger.warning(f"GNS3 VM deploy job {job.id} failed: {exc}")
+        job.error = str(exc) or type(exc).__name__
+        logger.opt(exception=exc).error(f"GNS3 VM deploy job {job.id} failed: {exc}")
 
 
 def start_job(app: FastAPI, delete_old_vm: bool = False) -> GNS3VMDeployJob:

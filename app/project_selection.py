@@ -77,3 +77,12 @@ def initialise(settings_path):
         str(project_library.topology_path(project_id)) if project_id else None
     )
     Settings.GNS3.PROJECT_NAME = selection.get("project_name")
+
+
+def hosts_using(project_id):
+    """Host profile filenames that have this library project selected."""
+    return sorted(
+        filename
+        for filename, selection in _read().items()
+        if isinstance(selection, dict) and selection.get("project_id") == project_id
+    )

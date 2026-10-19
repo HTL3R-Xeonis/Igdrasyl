@@ -1,5 +1,4 @@
 import time
-from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,11 +24,7 @@ def _reset_gns3_vm_settings(monkeypatch):
     )
     ova_templates._selected_template_id = None
 
-    @contextmanager
-    def fake_downloaded(template_id):
-        yield template_id
-
-    monkeypatch.setattr(ova_templates, "downloaded", fake_downloaded)
+    monkeypatch.setattr(ova_templates, "filename_for", lambda template_id: template_id)
     yield
     (
         Settings.ESXI.GNS3_VM_OVA_PATH,
@@ -93,7 +88,7 @@ def test_run_deploy_job_marks_done_and_updates_app_state(app_state):
     assert app_state.gns3_vm_ip == "10.20.20.233"
     fake_deploy.assert_called_once()
     args, kwargs = fake_deploy.call_args
-    assert args[2] == "/mnt/nfs/gns3.ova"
+    assert kwargs["ova_filename"] == "/mnt/nfs/gns3.ova"
     assert args[3] == "datastore1"
     assert args[4] == "PG-MGMT"
     assert "on_stage" in kwargs
@@ -282,9 +277,9 @@ def test_auto_deploy_if_missing_deploys_when_configured_and_truly_absent(app_sta
         gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
 
     fake_deploy.assert_called_once()
-    args, _ = fake_deploy.call_args
+    args, kwargs = fake_deploy.call_args
     assert args[1] == Settings.ESXI.GNS3_VM_NAME
-    assert args[2] == "/mnt/nfs/gns3.ova"
+    assert kwargs["ova_filename"] == "/mnt/nfs/gns3.ova"
     assert args[3] == "datastore1"
     assert args[4] == "PG-MGMT"
     assert args[5] == Settings.ESXI.TRUNK_PORT_GROUP
@@ -324,3 +319,26 @@ def test_auto_deploy_if_missing_propagates_deploy_failures(app_state):
         pytest.raises(TimeoutError),
     ):
         gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
+
+
+def test_an_unexpected_error_ends_the_job_instead_of_leaving_it_running(app_state):
+    from unittest.mock import patch
+
+    from app import gns3_vm_deploy_jobs
+
+    app = app_state
+    job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="j")
+    with (
+        patch(
+            "app.gns3_vm_deploy_jobs.ova_templates.selected_template_id",
+            return_value="tpl",
+        ),
+        patch(
+            "app.gns3_vm_deploy_jobs.ova_templates.filename_for",
+            side_effect=OSError(28, "No space left on device"),
+        ),
+        patch.object(gns3_vm_deploy_jobs.Settings.ESXI, "DATASTORE", "ds", create=True),
+    ):
+        gns3_vm_deploy_jobs.run_deploy_job(app, job)
+    assert job.status == "error"
+    assert "No space left" in job.error

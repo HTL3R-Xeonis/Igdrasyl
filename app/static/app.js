@@ -347,8 +347,12 @@ function setWarningBanner(text, opts = {}) {
   // Offered when the selected library project isn't deployed to GNS3 yet.
   warningDeployProject = text && opts.deployable ? opts.deployable : null;
   document.getElementById("warning-deploy-btn").hidden = !warningDeployProject;
+  // Offered while the selected project is parked (see app/holds.py).
+  warningHeldProject = opts.held ? opts.held : null;
+  document.getElementById("warning-resume-btn").hidden = !warningHeldProject;
 }
 let warningDeployProject = null; // {id, name, filename}
+let warningHeldProject = null;   // {id, name, host, held_at, ...}
 
 document.getElementById("warning-retry-btn").addEventListener("click", async () => {
   const btn = document.getElementById("warning-retry-btn");
@@ -546,7 +550,7 @@ async function loadCanvas() {
       ? (typeof currentDesignProject !== "undefined" && currentDesignProject
         ? currentDesignProject.name : "Unsaved design")
       : `${health.gns3_project_name} @ ${health.esxi_ip}`;
-    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project });
+    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project });
     incrementalDeploy = health.incremental_deploy !== false;
 
     const gns3Link = document.getElementById("gns3-webui-link");
@@ -3676,6 +3680,7 @@ function applyDesignModeUI() {
   document.getElementById("reload-gns3-btn").hidden = designMode;
   document.getElementById("deploy-gns3-vm-btn").hidden = designMode;
   document.getElementById("health-check-btn").hidden = designMode;
+  document.getElementById("hold-project-btn").hidden = designMode;
   document.getElementById("find-orphans-btn").hidden = designMode;
   document.getElementById("tab-push").hidden = designMode;
   document.getElementById("nodes-menu").hidden = designMode;

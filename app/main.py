@@ -37,6 +37,7 @@ from app import (
     error_pages,
     generate_jobs,
     gns3_vm_deploy_jobs,
+    holds,
     import_jobs,
     lifecycle,
     link_options,
@@ -138,6 +139,13 @@ def _refresh_startup_state(app: FastAPI) -> None:
             )
         app.state.gns3_vm_ip = gns3_vm_ip
 
+        if holds.active_hold(app.state.project_name, _active_host_filename()):
+            # Parked on purpose (see app/holds.py): its GNS3 project is closed
+            # and nothing is wrong - the banner offers Resume.
+            raise RuntimeError(
+                f"Project '{app.state.project_name}' is on hold - resume it to "
+                f"start it again."
+            )
         project_id = (
             resolve_project_id(gns3_vm_ip, app.state.project_name)
             if app.state.project_name
@@ -250,6 +258,19 @@ async def unexpected_error(request: Request, _exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
+def _active_host_filename() -> str | None:
+    settings_path = os.getenv(_SETTINGS_ENV_VAR)
+    return Path(settings_path).name if settings_path else None
+
+
+def _held_project() -> dict[str, Any] | None:
+    """The finished hold of the active host's selected project, for the banner's Resume button."""
+    try:
+        return holds.active_hold(app.state.project_name, _active_host_filename())
+    except holds.HoldError:
+        return None
+
+
 def _deployable_project() -> dict[str, str] | None:
     """
     The library project selected for the active host when it has not been
@@ -265,6 +286,8 @@ def _deployable_project() -> dict[str, str] | None:
         or not app.state.gns3_vm_ip
     ):
         return None
+    if _held_project() is not None:
+        return None  # parked, not missing - the banner offers Resume instead
     filename = Path(settings_path).name
     try:
         selection = project_selection.get_selection(filename)
@@ -283,6 +306,7 @@ def _deployable_project() -> dict[str, str] | None:
 def health() -> dict[str, Any]:
     return {
         "deployable_project": _deployable_project(),
+        "held_project": _held_project(),
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
         "gns3_port": Settings.GNS3.PORT,
@@ -1305,7 +1329,74 @@ class CreateLibraryProject(BaseModel):
 
 @app.get("/projects")
 def list_library_projects():
-    return {"projects": _settings_call(project_library.list_projects)}
+    projects = _settings_call(project_library.list_projects)
+    try:
+        held = holds.all_entries()
+    except holds.HoldError:
+        held = {}
+    return {
+        "projects": [{**project, "held": project["id"] in held} for project in projects]
+    }
+
+
+@app.delete("/projects/{project_id}")
+def delete_library_project(project_id: str) -> dict[str, str]:
+    """
+    Removes a project from the library. Refused while a host has it selected or
+    it is on hold; never touches GNS3 or ESXi - whatever was deployed stays.
+    """
+    _settings_call(project_library.get, project_id)  # 404/400 first
+    if holds.entry(project_id) is not None:
+        raise HTTPException(
+            409, "This project is on hold - resume it first, then delete it."
+        )
+    hosts = project_selection.hosts_using(project_id)
+    if hosts:
+        raise HTTPException(
+            409,
+            "This project is selected for host(s) "
+            + ", ".join(hosts)
+            + " - select another project there first.",
+        )
+    _settings_call(project_library.delete, project_id)
+    if getattr(app.state, "design_project_id", None) == project_id:
+        app.state.design_project_id = None
+    logger.info(f"Deleted library project {project_id}")
+    return {"status": "deleted"}
+
+
+def _hold_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, holds.HoldError):
+        return HTTPException(409, str(exc))
+    return HTTPException(502, public_text.redact_paths(str(exc)))
+
+
+@app.post("/project/hold")
+def hold_active_project() -> dict[str, Any]:
+    """
+    Parks the active host's live project (see app/holds.py): VMs off and
+    protected, GNS3 project closed, everything kept for a later resume.
+    """
+    filename = _active_host_filename()
+    selection = (project_selection.get_selection(filename) if filename else {}) or {}
+    project_id = selection.get("project_id")
+    if not filename or not project_id:
+        raise HTTPException(
+            409, "Only a library project selected for the active host can be held."
+        )
+    try:
+        return {"hold": holds.hold_project(app, project_id, filename)}
+    except (holds.HoldError, *_LIVE_WRITE_ERRORS) as exc:
+        raise _hold_error(exc) from exc
+
+
+@app.post("/projects/{project_id}/resume")
+def resume_held_project(project_id: str) -> dict[str, Any]:
+    try:
+        report = holds.resume_project(app, project_id)
+    except (holds.HoldError, *_LIVE_WRITE_ERRORS) as exc:
+        raise _hold_error(exc) from exc
+    return {"status": "resumed", "report": report}
 
 
 @app.post("/projects", status_code=201)
@@ -1325,7 +1416,8 @@ def download_library_project(project_id: str):
 
 @app.get("/projects/{project_id}/deploy-preview/{filename}")
 def preview_library_deployment(project_id: str, filename: str):
-    return _settings_call(project_library.deployment_preview, project_id, filename)
+    preview = _settings_call(project_library.deployment_preview, project_id, filename)
+    return {**preview, "held": holds.entry(project_id) is not None}
 
 
 @app.post("/projects/{project_id}/deploy/{filename}")
@@ -1336,6 +1428,21 @@ def deploy_library_project(project_id: str, filename: str):
     if not preview["selected"]:
         raise HTTPException(
             409, "Select this project for the active host and restart before deploying"
+        )
+    if holds.entry(project_id) is not None:
+        raise HTTPException(
+            409,
+            "This project is on hold - resume it instead of deploying it again "
+            "(its VMs and GNS3 project are kept).",
+        )
+    clash = holds.held_gns3_names(exclude_project_id=project_id).get(
+        app.state.project_name
+    )
+    if clash is not None:
+        raise HTTPException(
+            409,
+            "A project on hold already uses this GNS3 project name - rename one "
+            "of them, or resume the held one.",
         )
     try:
         state = project_library.load_design(project_id)

@@ -70,3 +70,58 @@ def test_ova_template_endpoint_returns_only_sanitized_metadata(client):
 
     assert response.status_code == 200
     assert response.json() == {"templates": [{"id": "template-1", "name": "GNS3 VM"}]}
+
+
+def _response(length=None, chunks=(b"data",)):
+    response = MagicMock()
+    response.status_code = 200
+    response.headers = {"content-length": str(length)} if length is not None else {}
+    response.iter_content.return_value = list(chunks)
+    response.__enter__.return_value = response
+    return response
+
+
+def test_download_goes_to_the_configured_directory(tmp_path, monkeypatch):
+    target = tmp_path / "big-disk"
+    monkeypatch.setenv("TOPOLOGYOPERATOR_DOWNLOAD_DIR", str(target))
+    with patch("app.ova_templates.requests.get", return_value=_response(4)):
+        with ova_templates.downloaded("template-1") as filename:
+            assert ova_templates.Path(filename).parent == target
+
+
+def test_download_refuses_up_front_when_the_disk_is_too_small(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.setenv("TOPOLOGYOPERATOR_DOWNLOAD_DIR", str(tmp_path))
+    huge = 10**15
+    with patch("app.ova_templates.requests.get", return_value=_response(huge)):
+        with pytest.raises(RuntimeError, match="Not enough free space") as error:
+            with ova_templates.downloaded("template-1"):
+                raise AssertionError("must not get here")
+    assert "TOPOLOGYOPERATOR_DOWNLOAD_DIR" in str(error.value)
+    assert not list(tmp_path.glob("topologyoperator-ova-*"))
+
+
+def test_a_write_error_becomes_a_runtime_error_and_leaves_no_file(
+    tmp_path, monkeypatch
+):
+    import pytest
+
+    monkeypatch.setenv("TOPOLOGYOPERATOR_DOWNLOAD_DIR", str(tmp_path))
+    response = _response(4)
+    response.iter_content.side_effect = OSError(28, "No space left on device")
+    with patch("app.ova_templates.requests.get", return_value=response):
+        with pytest.raises(RuntimeError, match="Could not store"):
+            with ova_templates.downloaded("template-1"):
+                raise AssertionError("must not get here")
+    assert not list(tmp_path.glob("topologyoperator-ova-*"))
+
+
+def test_filename_for_returns_the_catalog_file_and_rejects_unknown_ids():
+    import pytest
+
+    catalog = [{"id": "ABC-1", "name": "gns3-vm", "file": "GNS3_VM_ABC-1.ova"}]
+    with patch("app.ova_templates._catalog", return_value=catalog):
+        assert ova_templates.filename_for("ABC-1") == "GNS3_VM_ABC-1.ova"
+        with pytest.raises(RuntimeError, match="not in the template catalog"):
+            ova_templates.filename_for("OTHER")

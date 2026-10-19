@@ -98,6 +98,20 @@ def create_from_design(name, state: "DesignState"):
     return project
 
 
+def delete(project_id):
+    """
+    Removes a project from the library (its topology, design and metadata).
+    Only the library entry goes: a deployment of it in GNS3/ESXi is untouched.
+    :raises ValueError/FileNotFoundError: bad id / no such project
+    """
+    directory = project_path(project_id)
+    # Rename first: if removing the tree gets interrupted, no half-deleted
+    # project is left listed.
+    doomed = directory.with_name(f".deleting-{directory.name}")
+    directory.rename(doomed)
+    shutil.rmtree(doomed, ignore_errors=True)
+
+
 def topology_path(project_id):
     return project_path(project_id) / "topology.yaml"
 

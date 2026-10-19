@@ -290,6 +290,28 @@ rebuilds everything - a full deployment can remove devices that are not in the p
 and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 `deployable_project`.
 
+## Deleting and holding projects
+
+**Delete**: select a project in the project library dialog and choose **Delete project...**. Only the
+library entry (topology and design) goes; whatever is deployed in GNS3/ESXi stays. The server refuses while
+a host has the project selected or while it is on hold, and names the hosts.
+
+**Hold** (File > Hold Project...) parks the live project of the active host instead of deleting it: its ESXi
+VMs are powered off, its GNS3 project is closed (GNS3 stops every node when closing) and everything is kept.
+A later deployment - even a full one - leaves the parked VMs alone: they are renamed `<name> [hold <id8>]`
+and their annotation gets the prefix `topologyoperator-hold:<project id>`, which TopologyBuilder's cleanup
+(it only touches annotations starting with `topologybuilder-image:`, and finds VMs by node name) never
+matches. The record of what is parked lives in `holds.json` (gitignored; `TOPOLOGYOPERATOR_HOLDS_FILE`).
+While a project is on hold the banner shows **Resume project** (and no Deploy button), the library marks it
+"on hold", and deploying it is refused - **Resume** it instead: the app renames the VMs back, opens the GNS3
+project and runs the same fix pass as the health check (starts nodes and VMs, recreates missing port
+groups). To resume from the library/deploy dialog the project must be the host's selected one - the dialog
+selects it and restarts the app for you. Limits: run one project at a time (two projects can use the same VLAN
+ids on the shared trunk); a full deployment of another project resets the vSwitch, so a parked project's port
+groups are recreated on resume; two projects may not share a GNS3 project name while one is on hold.
+Endpoints: `POST /project/hold`, `POST /projects/{id}/resume`, `DELETE /projects/{id}`; `GET /health` reports
+`held_project`, `GET /projects` flags `held`.
+
 ## Internet uplink
 
 Add GNS3's built-in **NAT** node (palette entry "NAT (Internet uplink)", cloud icon, auto-named
@@ -411,7 +433,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-417 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+438 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

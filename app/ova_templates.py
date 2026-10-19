@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -79,6 +80,20 @@ def list_public() -> list[dict]:
     return public
 
 
+def filename_for(template_id: str) -> str:
+    """
+    The exact OVA filename on the template share for a catalog id - what the
+    OVA deploy service takes (it imports straight from that share).
+    :raises ValueError: an invalid id
+    :raises RuntimeError: the catalog is unavailable, or has no such template
+    """
+    _validate_id(template_id)
+    for item in _catalog():
+        if item.get("id") == template_id and isinstance(item.get("file"), str):
+            return item["file"]
+    raise RuntimeError(f"OVA template {template_id!r} is not in the template catalog")
+
+
 def display_name(template_id: str) -> str:
     _validate_id(template_id)
     for item in _catalog():
@@ -87,14 +102,40 @@ def display_name(template_id: str) -> str:
     raise FileNotFoundError("OVA template not found")
 
 
+_DOWNLOAD_DIR_ENV_VAR = "TOPOLOGYOPERATOR_DOWNLOAD_DIR"
+
+
+def _download_dir() -> str:
+    """
+    Where an OVA is staged before the import. OVAs are several GB, so this must
+    be a real disk: the system temp dir is often a RAM-backed /tmp of a
+    gigabyte (testbox: 968 MB) - set TOPOLOGYOPERATOR_DOWNLOAD_DIR to a
+    directory on a big disk there.
+    """
+    directory = os.getenv(_DOWNLOAD_DIR_ENV_VAR) or tempfile.gettempdir()
+    Path(directory).mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _gigabytes(size: int) -> str:
+    return f"{size / 1024**3:.1f} GB"
+
+
 @contextmanager
 def downloaded(template_id: str):
-    """Stream a selected API resource to a private temporary file for import."""
+    """
+    Stream a selected API resource to a private temporary file for import.
+    :raises RuntimeError: the download failed, or the staging directory has
+        less free space than the file needs (checked before writing a byte)
+    """
     if os.path.isabs(template_id):
         yield template_id
         return
     _validate_id(template_id)
-    fd, filename = tempfile.mkstemp(prefix="topologyoperator-ova-", suffix=".ova")
+    directory = _download_dir()
+    fd, filename = tempfile.mkstemp(
+        prefix="topologyoperator-ova-", suffix=".ova", dir=directory
+    )
     os.close(fd)
     path = Path(filename)
     try:
@@ -107,14 +148,26 @@ def downloaded(template_id: str):
                 if response.status_code == 404:
                     raise FileNotFoundError("OVA template not found")
                 response.raise_for_status()
+                needed = int(response.headers.get("content-length") or 0)
+                free = shutil.disk_usage(directory).free
+                if needed and needed > free:
+                    raise RuntimeError(
+                        f"Not enough free space to download the OVA: it needs "
+                        f"{_gigabytes(needed)} but {directory} has {_gigabytes(free)} free "
+                        f"- set {_DOWNLOAD_DIR_ENV_VAR} to a directory on a bigger disk"
+                    )
                 with path.open("wb") as stream:
                     for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
                         if chunk:
                             stream.write(chunk)
-        except FileNotFoundError:
+        except (FileNotFoundError, RuntimeError):
             raise
         except requests.RequestException as exc:
             raise RuntimeError("Could not download the selected OVA template") from exc
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not store the downloaded OVA in {directory}: {exc}"
+            ) from exc
         yield str(path)
     finally:
         path.unlink(missing_ok=True)

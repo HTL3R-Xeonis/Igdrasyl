@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=uplink-3">
+<link rel="stylesheet" href="/styles.css?v=hold-1">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -24,6 +24,7 @@
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
+        <button class="menu-item" id="hold-project-btn" title="Parks the live project: powers off its VMs, closes its GNS3 project and protects everything from later deployments. Resume it later - nothing is deleted.">Hold Project…</button>
         <button class="menu-item" id="health-check-btn" title="Checks the live lab against the topology file (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups, links) and offers low-risk automatic repairs - never redeploys anything">Health Check…</button>
         <button class="menu-item" id="find-orphans-btn" title="Lists live GNS3 nodes and ESXi VMs that no node in the topology file describes anymore (what a partially failed delete leaves behind) and can delete them">Find Orphans…</button>
         <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup, with an option to permanently delete it once the new VM is confirmed working">Deploy Fresh GNS3 VM…</button>
@@ -119,7 +120,7 @@
   <input type="file" id="draw-image-input" accept="image/*" hidden>
   <div id="menubar-status"></div>
 </header>
-<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button></div>
+<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button><button id="warning-resume-btn" hidden>Resume project</button></div>
 <main>
   <div id="device-palette">
     <div id="palette-header"><span>Template List</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
@@ -278,6 +279,7 @@
   <form id="project-selection-form">
     <label>Project<select id="project-library-picker"></select></label>
     <a class="toolbar-btn" id="project-library-download" hidden>Download YAML</a>
+    <button class="toolbar-btn" id="project-library-delete" type="button" hidden>Delete project…</button>
     <button class="toolbar-btn primary" id="project-library-open" type="button" hidden>Open in designer</button>
     <label id="project-name-label">GNS3 project name (optional)<input id="project-selection-name" placeholder="Defaults to the library project name"></label>
     <p id="project-selection-help">Selection changes take effect when the host is activated or restarted.</p>
@@ -380,7 +382,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=uplink-3"></script>
-<script src="/projects.js?v=uplink-3"></script>
+<script src="/app.js?v=hold-1"></script>
+<script src="/projects.js?v=hold-1"></script>
 </body>
 </html>
