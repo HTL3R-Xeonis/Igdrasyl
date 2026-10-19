@@ -136,6 +136,7 @@ function openModal(config) {
     textareaEl.hidden = true;
     fieldWrap.hidden = !isText && !isTextarea;
     cancelBtn.hidden = isAlert;
+    cancelBtn.textContent = config.cancelLabel || "Cancel";
     confirmBtn.textContent = config.confirmLabel || (isConfirm ? "Confirm" : "OK");
     confirmBtn.classList.toggle("danger", !!config.danger);
     confirmBtn.classList.toggle("primary", !config.danger);
@@ -203,6 +204,7 @@ function showConfirm(message, opts = {}) {
     message,
     danger: opts.danger,
     confirmLabel: opts.confirmLabel,
+    cancelLabel: opts.cancelLabel,
   });
 }
 function showTextPrompt(message, opts = {}) {
@@ -3518,11 +3520,11 @@ document.getElementById("deploy-gns3-vm-btn").addEventListener("click", async ()
   // proceeds with the deploy, just without deleting the backup - same
   // as before this option existed.
   const deleteOldVm = await showConfirm(
-    `Also permanently delete the old VM once the new one is confirmed ` +
-    `working, instead of leaving it as a powered-off backup?\n\n` +
-    `This cannot be undone. If declined, the old VM is kept as a ` +
-    `timestamped backup as usual.`,
-    { title: "Delete old VM?", confirmLabel: "Delete old VM", danger: true }
+    `The deploy starts now. What should happen to the old VM once the new ` +
+    `one is confirmed working?\n\n` +
+    `"Keep as backup" leaves it powered off under a timestamped name. ` +
+    `"Delete old VM" removes it permanently - that cannot be undone.`,
+    { title: "Old VM", confirmLabel: "Delete old VM", cancelLabel: "Keep as backup", danger: true }
   );
 
   setMenubarBusy("Starting GNS3 VM deploy…");
