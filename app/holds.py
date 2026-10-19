@@ -46,6 +46,7 @@ from src.settings import Settings
 
 from app import maintenance
 from app.gns3_state import resolve_project_id
+from app.live_lock import exclusive
 
 _HOLDS_FILE_ENV_VAR = "TOPOLOGYOPERATOR_HOLDS_FILE"
 _DEFAULT_HOLDS_FILE = "holds.json"
@@ -143,6 +144,11 @@ def _gns3_base(app: FastAPI) -> str:
 
 
 def hold_project(app: FastAPI, project_id: str, host: str) -> dict[str, Any]:
+    with exclusive("Hold project"):
+        return _hold_project(app, project_id, host)
+
+
+def _hold_project(app: FastAPI, project_id: str, host: str) -> dict[str, Any]:
     """
     Parks the live project of the active host (see the module docstring).
     A hold that stopped half way (state "holding") can simply be started again.
@@ -217,6 +223,11 @@ def hold_project(app: FastAPI, project_id: str, host: str) -> dict[str, Any]:
 
 
 def resume_project(app: FastAPI, project_id: str) -> dict[str, Any]:
+    with exclusive("Resume project"):
+        return _resume_project(app, project_id)
+
+
+def _resume_project(app: FastAPI, project_id: str) -> dict[str, Any]:
     """
     Brings a held project back (see the module docstring) and returns the
     health-check report of the fix pass.

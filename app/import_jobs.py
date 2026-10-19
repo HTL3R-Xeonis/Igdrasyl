@@ -35,6 +35,7 @@ from src.settings import Settings
 
 from app import template_health
 from app.gns3_state import resolve_project_id
+from app.live_lock import exclusive
 
 
 @dataclass
@@ -96,7 +97,8 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
         f"Import job {job.id} started: {job.total} node(s) in a {len(zip_bytes):,} byte bundle"
     )
     try:
-        result = project_bundle.apply_import(app, zip_bytes)
+        with exclusive("Project import"):
+            result = project_bundle.apply_import(app, zip_bytes)
         if result["auto_config_push"] and result["configs"]:
             app.state.last_config_push = result["configs"]
             result["push_results"] = push_all(result["configs"], app)

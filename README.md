@@ -290,6 +290,14 @@ rebuilds everything - a full deployment can remove devices that are not in the p
 and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 `deployable_project`.
 
+## One structural change at a time
+
+Adding/removing a node or link edits the topology file and then deploys the whole graph; hold/resume and a
+project import also rewrite the lab. They now queue behind one lock (`app/live_lock.py`; the log says "waiting
+for another change to the lab to finish") instead of overlapping - three quick "Add node" clicks used to start
+three deploys at once, one of which left a VM half imported. Start/stop, reads and the design canvas are not
+affected.
+
 ## Deleting and holding projects
 
 **Delete**: select a project in the project library dialog and choose **Delete project...**. Only the
@@ -433,7 +441,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-438 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+441 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

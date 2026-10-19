@@ -24,6 +24,7 @@ from src.backend import TopologyBackend
 from src.connections.api_handler import APIHandler
 from src.settings import Settings
 
+from app.live_lock import exclusive
 from app.topology import load_graph
 
 
@@ -153,40 +154,46 @@ def list_templates() -> dict[str, Any]:
 
 
 def add_node(app: FastAPI, name: str, role: str, image: str) -> None:
-    if not Settings.TOPOLOGY_FILE:
-        raise RuntimeError("Select a project before editing a live topology")
-    logger.info(f"Adding node {name!r} (role {role}, image {image!r}) live")
-    backend = get_or_create_backend(app)
-    backend.add_node(Settings.TOPOLOGY_FILE, name, role, image)
-    app.state.graph = load_graph()
-    logger.info(f"Node {name!r} added")
+    with exclusive("Add node"):
+        if not Settings.TOPOLOGY_FILE:
+            raise RuntimeError("Select a project before editing a live topology")
+        logger.info(f"Adding node {name!r} (role {role}, image {image!r}) live")
+        backend = get_or_create_backend(app)
+        backend.add_node(Settings.TOPOLOGY_FILE, name, role, image)
+        app.state.graph = load_graph()
+        logger.info(f"Node {name!r} added")
 
 
 def remove_node(app: FastAPI, name: str) -> None:
-    if not Settings.TOPOLOGY_FILE:
-        raise RuntimeError("Select a project before editing a live topology")
-    logger.warning(f"Removing node {name!r} live (GNS3 node and ESXi VM are deleted)")
-    backend = get_or_create_backend(app)
-    backend.remove_node(Settings.TOPOLOGY_FILE, name)
-    app.state.graph = load_graph()
-    logger.info(f"Node {name!r} removed")
+    with exclusive("Remove node"):
+        if not Settings.TOPOLOGY_FILE:
+            raise RuntimeError("Select a project before editing a live topology")
+        logger.warning(
+            f"Removing node {name!r} live (GNS3 node and ESXi VM are deleted)"
+        )
+        backend = get_or_create_backend(app)
+        backend.remove_node(Settings.TOPOLOGY_FILE, name)
+        app.state.graph = load_graph()
+        logger.info(f"Node {name!r} removed")
 
 
 def add_link(app: FastAPI, node1: str, if1: str, node2: str, if2: str) -> None:
-    if not Settings.TOPOLOGY_FILE:
-        raise RuntimeError("Select a project before editing a live topology")
-    logger.info(f"Adding link {node1}:{if1} <-> {node2}:{if2} live")
-    backend = get_or_create_backend(app)
-    backend.add_link(Settings.TOPOLOGY_FILE, node1, if1, node2, if2)
-    app.state.graph = load_graph()
-    logger.info(f"Link {node1}:{if1} <-> {node2}:{if2} added")
+    with exclusive("Add link"):
+        if not Settings.TOPOLOGY_FILE:
+            raise RuntimeError("Select a project before editing a live topology")
+        logger.info(f"Adding link {node1}:{if1} <-> {node2}:{if2} live")
+        backend = get_or_create_backend(app)
+        backend.add_link(Settings.TOPOLOGY_FILE, node1, if1, node2, if2)
+        app.state.graph = load_graph()
+        logger.info(f"Link {node1}:{if1} <-> {node2}:{if2} added")
 
 
 def remove_link(app: FastAPI, node1: str, node2: str) -> None:
-    if not Settings.TOPOLOGY_FILE:
-        raise RuntimeError("Select a project before editing a live topology")
-    logger.warning(f"Removing link {node1} <-> {node2} live")
-    backend = get_or_create_backend(app)
-    backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2)
-    app.state.graph = load_graph()
-    logger.info(f"Link {node1} <-> {node2} removed")
+    with exclusive("Remove link"):
+        if not Settings.TOPOLOGY_FILE:
+            raise RuntimeError("Select a project before editing a live topology")
+        logger.warning(f"Removing link {node1} <-> {node2} live")
+        backend = get_or_create_backend(app)
+        backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2)
+        app.state.graph = load_graph()
+        logger.info(f"Link {node1} <-> {node2} removed")
