@@ -301,8 +301,9 @@ affected.
 Node names are unique (case-insensitive) even across requests still in flight: the server reserves a name
 the moment an "Add node" request arrives - before it may have to wait for the lock - and refuses a second one
 ("just being deployed"); the GUI does the same check and never suggests a name that is being added. A failed
-live add restores the topology file as it was, so the half-added node does not make every later deploy fail
-on it; what the failed deploy half created on ESXi/GNS3 shows up under File > Find Orphans.
+live add also puts the topology file back exactly as it was (TopologyBackend already writes the file only after a
+successful deploy, so this is a safety net against a partly written file, not a fix for a known failure); what a failed
+deploy half created on ESXi/GNS3 shows up under File > Find Orphans.
 
 ## Deleting and holding projects
 

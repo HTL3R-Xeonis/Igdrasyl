@@ -196,12 +196,11 @@ def _reserved_name(app: FastAPI, name: str) -> Iterator[None]:
 @contextmanager
 def _restore_on_failure(app: FastAPI, what: str) -> Iterator[None]:
     """
-    TopologyBackend writes the topology file first and deploys afterwards, so a
-    failed deploy (e.g. the OVA service timing out) used to leave the new node
-    in the file: every later deploy then tried to create it again and failed on
-    it too, blocking unrelated changes. Put the file back exactly as it was and
-    re-read the graph. Whatever the failed deploy half created on ESXi/GNS3 is
-    not touched here - Find Orphans lists and removes it.
+    Safety net: TopologyBackend deploys first and writes the topology file only
+    after that succeeded, so a failed deploy normally leaves the file alone. If
+    the file was touched anyway (a partial write, a future change there), put it
+    back exactly as it was and re-read the graph. Whatever a failed deploy half
+    created on ESXi/GNS3 is not touched here - Find Orphans lists and removes it.
     """
     path = Path(Settings.TOPOLOGY_FILE)
     before = path.read_text(encoding="utf-8")
