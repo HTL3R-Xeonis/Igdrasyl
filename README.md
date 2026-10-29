@@ -326,7 +326,7 @@ Windows is not supported. A device stops at its first failing command, the other
   appliances have to bring their own serial console: MikroTik has it out of the box (verified live); a stock OPNsense
   image stayed completely silent on its serial line - pfSense/OPNsense need the serial console switched on in their own
   settings first (the agent then reports "the serial console stayed completely silent"). The `bsd_menu` profile is covered by
-  tests only; pfSense's OVA could not be imported at all during testing (see HANDOFF).
+  tests only (pfSense's OVA now imports, but it was not run through the agent yet).
 - **Choosing the way in**: a device can be a plain command list (`"auto"`: guest operations while VMware Tools runs,
   otherwise the serial console if the VM has one) or an object
   `{"commands": [...], "via": "serial", "profile": "routeros", "username": "...", "password": "..."}` - `via` is `auto`,
