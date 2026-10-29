@@ -498,6 +498,7 @@ def test_import_project_auto_pushes_when_the_bundle_enables_it(
             "ok": True,
             "commands": [],
             "error": None,
+            "not_ready": False,
         }
     ]
     assert app_state.last_config_push == {"R1": ["show version"]}

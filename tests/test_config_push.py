@@ -146,3 +146,93 @@ def test_push_all_dispatches_by_environment_and_reports_unknown_device(
     assert by_device["VM1"].transport == "guest_ops"
     assert by_device["GHOST"].ok is False
     assert by_device["GHOST"].error == "not found in topology"
+
+
+def _result(name, ok=False, not_ready=False):
+    return cp.DeviceResult(
+        device=name, transport="x", ok=ok, not_ready=not_ready, error=None
+    )
+
+
+def test_push_all_waiting_retries_only_devices_that_were_not_reachable():
+    calls: list[list[str]] = []
+    scripted = {
+        1: [_result("R1", not_ready=True), _result("VM1", ok=True)],
+        2: [_result("R1", not_ready=True)],
+        3: [_result("R1", ok=True)],
+    }
+
+    def fake_push_all(devices, app):
+        calls.append(sorted(devices))
+        return scripted[len(calls)]
+
+    sleeps: list[int] = []
+    with patch.object(cp, "push_all", side_effect=fake_push_all):
+        results = cp.push_all_waiting(
+            {"R1": ["a"], "VM1": ["b"]},
+            MagicMock(),
+            wait_seconds=600,
+            interval_seconds=15,
+            sleep=sleeps.append,
+        )
+
+    assert calls == [["R1", "VM1"], ["R1"], ["R1"]]
+    assert sleeps == [15, 15]
+    assert [(r.device, r.ok) for r in results] == [("R1", True), ("VM1", True)]
+
+
+def test_push_all_waiting_never_repeats_a_device_that_ran_a_command():
+    calls = []
+
+    def fake_push_all(devices, app):
+        calls.append(sorted(devices))
+        return [_result("R1", ok=False, not_ready=False)]
+
+    with patch.object(cp, "push_all", side_effect=fake_push_all):
+        results = cp.push_all_waiting({"R1": ["a"]}, MagicMock(), sleep=lambda s: None)
+    assert len(calls) == 1 and not results[0].ok
+
+
+def test_push_all_waiting_gives_up_after_the_wait_time():
+    with (
+        patch.object(
+            cp, "push_all", return_value=[_result("R1", not_ready=True)]
+        ) as push,
+        patch.object(cp.time, "monotonic", side_effect=[0, 0, 20, 20, 400, 400]),
+    ):
+        results = cp.push_all_waiting(
+            {"R1": ["a"]},
+            MagicMock(),
+            wait_seconds=30,
+            interval_seconds=15,
+            sleep=lambda s: None,
+        )
+    assert push.call_count >= 1
+    assert results[0].not_ready is True
+
+
+def test_guest_ops_first_command_that_cannot_start_is_not_ready(graph):
+    node = graph.nodes["VM1"]
+    fake_esxi = MagicMock()
+    with (
+        patch.object(cp, "guest_credentials_for_image", return_value=("root", "pw")),
+        patch.object(
+            cp, "run_command_in_guest", return_value=(None, "tools not running")
+        ),
+    ):
+        result = cp._push_via_guest_ops(node, ["a", "b"], fake_esxi)
+    assert result.not_ready is True and not result.ok
+
+
+def test_guest_ops_failure_after_a_command_ran_is_not_retryable(graph):
+    node = graph.nodes["VM1"]
+    fake_esxi = MagicMock()
+    outputs = iter([(0, "ok"), (None, "lost the guest")])
+    with (
+        patch.object(cp, "guest_credentials_for_image", return_value=("root", "pw")),
+        patch.object(
+            cp, "run_command_in_guest", side_effect=lambda *a, **k: next(outputs)
+        ),
+    ):
+        result = cp._push_via_guest_ops(node, ["a", "b"], fake_esxi)
+    assert result.not_ready is False and not result.ok

@@ -97,7 +97,12 @@ def build_export(app: FastAPI) -> bytes:
     )
 
 
-def build_design_export(state, project_name: str) -> bytes:
+def build_design_export(
+    state,
+    project_name: str,
+    configs: dict[str, list[str]] | None = None,
+    auto_config_push: bool = False,
+) -> bytes:
     """
     Same bundle format as build_export, for a design.DesignState that
     was never deployed anywhere - settings.yml carries no ESXi target at
@@ -114,14 +119,14 @@ def build_design_export(state, project_name: str) -> bytes:
         "format_version": _FORMAT_VERSION,
         "project_name": project_name,
         "exported_at": datetime.now(UTC).isoformat(),
-        "auto_config_push": False,
+        "auto_config_push": bool(auto_config_push and configs),
         "origin": "design",
     }
     return _write_bundle(
         manifest,
         topology_yaml,
         settings_snapshot={},
-        configs={},
+        configs=configs or {},
         drawings=state.drawings,
         layout=state.layout,
     )

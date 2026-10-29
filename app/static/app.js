@@ -4589,6 +4589,7 @@ function showTab(name) {
   document.getElementById("tab-console").classList.toggle("active", name === "console");
   document.getElementById("tab-push").classList.toggle("active", name === "push");
   document.getElementById("tab-logs").classList.toggle("active", name === "logs");
+  if (name === "push" && !designMode) loadProjectConfigs(true);
   if (name === "logs") startLogsAutoRefresh(); else stopLogsAutoRefresh();
 }
 
@@ -4689,13 +4690,21 @@ document.getElementById("logs-auto-refresh").addEventListener("change", () => st
 
 function renderPushResults(deviceResults) {
   const resultsEl = document.getElementById("push-results");
-  resultsEl.innerHTML = "";
+  resultsEl.replaceChildren();
   for (const result of deviceResults) {
     const box = document.createElement("div");
     box.className = "device-result";
     const header = document.createElement("div");
     header.className = `device-result-header ${result.ok ? "ok" : "fail"}`;
-    header.innerHTML = `<span>${result.device} <span class="env-tag">${result.transport}</span></span><span>${result.ok ? "ok" : "failed"}</span>`;
+    const title = document.createElement("span");
+    title.textContent = `${result.device} `;
+    const tag = document.createElement("span");
+    tag.className = "env-tag";
+    tag.textContent = result.transport;
+    title.appendChild(tag);
+    const state = document.createElement("span");
+    state.textContent = result.ok ? "ok" : "failed";
+    header.append(title, state);
     box.appendChild(header);
 
     if (result.error) {
@@ -4705,20 +4714,82 @@ function renderPushResults(deviceResults) {
       err.textContent = result.error;
       box.appendChild(err);
     }
-    if (result.commands && result.commands.length) {
-      const table = document.createElement("table");
-      table.innerHTML = result.commands.map(c => `
-        <tr>
-          <td class="${c.ok ? "cmd-ok" : "cmd-fail"}">${c.ok ? "✓" : "✗"}</td>
-          <td>${c.command}</td>
-          <td style="color: var(--dim)">${(c.output || "").slice(0, 200)}</td>
-        </tr>
-      `).join("");
-      box.appendChild(table);
+    for (const c of result.commands || []) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;padding:3px 10px;align-items:baseline";
+      const mark = document.createElement("span");
+      mark.className = c.ok ? "cmd-ok" : "cmd-fail";
+      mark.textContent = c.ok ? "✓" : "✗";
+      const cmd = document.createElement("code");
+      cmd.textContent = c.command;
+      row.append(mark, cmd);
+      box.appendChild(row);
+      const output = (c.output || "").trim();
+      if (output) {
+        // Real command output (guest operations capture it too): shown in full,
+        // folded open for a failure, always as text.
+        const details = document.createElement("details");
+        details.open = !c.ok;
+        const summary = document.createElement("summary");
+        summary.textContent = `output (${output.split("\n").length} line${output.includes("\n") ? "s" : ""})`;
+        const pre = document.createElement("pre");
+        pre.className = "cmd-output";
+        pre.textContent = output;
+        details.append(summary, pre);
+        box.appendChild(details);
+      }
     }
     resultsEl.appendChild(box);
   }
 }
+
+// --- Device configs saved with the project (library project of the active host) ---
+
+function setPushNote(text, isError = false) {
+  const note = document.getElementById("push-project-note");
+  note.textContent = text;
+  note.classList.toggle("push-note-error", isError);
+}
+
+async function loadProjectConfigs(silent = false) {
+  try {
+    const resp = await fetch("/project/configs");
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.detail || resp.status);
+    const count = Object.keys(body.devices).length;
+    if (count) document.getElementById("push-input").value = JSON.stringify(body.devices, null, 2);
+    document.getElementById("push-auto-checkbox").checked = !!body.auto_push;
+    setPushNote(count
+      ? `Loaded the configs of ${count} device${count === 1 ? "" : "s"} saved with this project.`
+      : "This project has no saved configs yet - write them above and press Save to project.");
+  } catch (err) {
+    if (!silent) setPushNote(`Couldn't load: ${err.message || err}`, true);
+  }
+}
+
+document.getElementById("push-load-project-btn").addEventListener("click", () => loadProjectConfigs());
+document.getElementById("push-save-project-btn").addEventListener("click", async () => {
+  let devices;
+  try {
+    devices = JSON.parse(document.getElementById("push-input").value);
+  } catch (err) {
+    setPushNote(`Invalid JSON: ${err}`, true);
+    return;
+  }
+  try {
+    const resp = await fetch("/project/configs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ devices, auto_push: document.getElementById("push-auto-checkbox").checked }),
+    });
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(typeof body.detail === "string" ? body.detail : "invalid configs");
+    const count = Object.keys(body.devices).length;
+    setPushNote(`Saved with the project: ${count} device${count === 1 ? "" : "s"}${body.auto_push ? ", pushed automatically after deploy and resume" : ""}.`);
+  } catch (err) {
+    setPushNote(`Couldn't save: ${err.message || err}`, true);
+  }
+});
 
 document.getElementById("push-btn").addEventListener("click", async () => {
   const resultsEl = document.getElementById("push-results");

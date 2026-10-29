@@ -268,7 +268,22 @@ async function monitorLibraryDeployment(project, jobId) {
     setMenubarMessage(`Deployment failed: ${result.error}`); return;
   }
   await loadCanvas();
-  setMenubarMessage(`Deployed “${project.name}” successfully.`);
+  setMenubarMessage(`Deployed “${project.name}” successfully.${describePush(result.push_results)}`, { error: pushHadFailures(result.push_results) });
+  showPushResults(result.push_results);
+}
+
+// The project's saved device configs are pushed automatically after a deploy
+// or resume when its "push automatically" switch is on (server side).
+function pushHadFailures(results) {
+  return Array.isArray(results) && results.some((r) => !r.ok);
+}
+function describePush(results) {
+  if (!Array.isArray(results)) return "";
+  const failed = results.filter((r) => !r.ok).length;
+  return ` Configs pushed to ${results.length} device${results.length === 1 ? "" : "s"}${failed ? `, ${failed} failed (see Config Push)` : ""}.`;
+}
+function showPushResults(results) {
+  if (Array.isArray(results)) renderPushResults(results);
 }
 
 async function startLibraryDeployment(project, filename) {
@@ -437,7 +452,11 @@ async function resumeHeldProject(project) {
     const body = await settingsRequest(`/projects/${encodeURIComponent(project.id)}/resume`, { method: "POST" });
     await loadCanvas();
     const report = body.report || {};
-    setMenubarMessage(`Resumed “${project.name}”. Health check: ${report.passed}/${report.total} checks passed.`, { error: report.passed !== report.total });
+    setMenubarMessage(
+      `Resumed “${project.name}”. Health check: ${report.passed}/${report.total} checks passed.${describePush(body.push_results)}`,
+      { error: report.passed !== report.total || pushHadFailures(body.push_results) }
+    );
+    showPushResults(body.push_results);
   } catch (error) {
     clearMenubarStatus();
     await showAlert(`Couldn't resume: ${error.message}`, { title: "Resume project" });

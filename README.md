@@ -290,6 +290,25 @@ rebuilds everything - a full deployment can remove devices that are not in the p
 and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 `deployable_project`.
 
+## Device configs saved with the project
+
+The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim). With
+**Save to project** the lists are stored with the library project (`configs.json` next to its topology; **Load from
+project** brings them back, and they are loaded when the tab opens). The switch **Push automatically after deploy and
+resume** makes the app push them by itself - right after the deploy of that project (they travel in the deployment
+bundle) and after a **Resume** from hold. Endpoints: `GET/PUT /project/configs` (the active host's project) and
+`GET/PUT /projects/{id}/configs`; limits: 200 devices, 2000 commands per device, 4000 characters per command, 1 MB.
+
+How a device is reached: GNS3 consoles (routers, VPCS) over Telnet via Netmiko - no login is attempted, a console that
+asks for one fails; ESXi VMs through VMware guest operations, which log in by themselves with the account from the
+template catalog (the `root` entry, else the first) and need VMware Tools in the VM. Guest operations only report an
+exit code, so the app redirects each command's output into a temporary file in the guest, fetches it through ESXi and
+deletes it - the result list shows the real output per command (failed commands expanded). Commands are passed to
+bash single-quoted, so quotes, `$variables` and pipes arrive unchanged. A device stops at its first failing command;
+the other devices continue. Automatic pushes wait for devices that are still booting (`not_ready`: unreachable, no
+command ran) and retry them every 15 s for up to 5 minutes; a device where a command already ran is never repeated.
+Not supported: appliances without VMware Tools (pfSense, OPNsense, MikroTik) - they would need their serial console.
+
 ## One structural change at a time
 
 Adding/removing a node or link edits the topology file and then deploys the whole graph; hold/resume and a
@@ -448,7 +467,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-445 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+461 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

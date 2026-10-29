@@ -219,3 +219,36 @@ def test_a_design_can_be_saved_as_a_new_named_project(client, app_state):
 
 def test_saving_a_design_with_a_bad_name_is_rejected(client):
     assert client.post("/design/project", json={"name": "   "}).status_code == 400
+
+
+def test_configs_are_saved_with_the_project_and_validated(client):
+    project = client.post("/projects", json={"name": "Lab"}).json()
+    url = f"/projects/{project['id']}/configs"
+    assert client.get(url).json() == {"devices": {}, "auto_push": False}
+
+    saved = client.put(
+        url, json={"devices": {"R1": ["conf t", "hostname X"]}, "auto_push": True}
+    )
+    assert saved.status_code == 200
+    assert client.get(url).json() == {
+        "devices": {"R1": ["conf t", "hostname X"]},
+        "auto_push": True,
+    }
+
+    assert client.put(url, json={"devices": {"R1": "not a list"}}).status_code == 422
+    too_long = {"R1": ["x" * 5000]}
+    assert client.put(url, json={"devices": too_long}).status_code == 400
+    assert client.put(url, json={"devices": {"": ["x"]}}).status_code == 400
+    # a rejected save leaves the stored configs alone
+    assert client.get(url).json()["devices"] == {"R1": ["conf t", "hostname X"]}
+
+
+def test_deleting_a_project_removes_its_configs_too(client):
+    project = client.post("/projects", json={"name": "Gone"}).json()
+    client.put(f"/projects/{project['id']}/configs", json={"devices": {"R1": ["a"]}})
+    assert client.delete(f"/projects/{project['id']}").status_code == 200
+    assert client.get(f"/projects/{project['id']}/configs").status_code == 404
+
+
+def test_the_active_hosts_project_configs_endpoint_needs_a_selected_project(client):
+    assert client.get("/project/configs").status_code == 409

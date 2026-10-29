@@ -90,7 +90,7 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
     request's lifetime.
     """
     from app import project_bundle
-    from app.config_push import push_all
+    from app.config_push import push_all_waiting
 
     started = time.monotonic()
     logger.info(
@@ -101,7 +101,7 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
             result = project_bundle.apply_import(app, zip_bytes)
         if result["auto_config_push"] and result["configs"]:
             app.state.last_config_push = result["configs"]
-            result["push_results"] = push_all(result["configs"], app)
+            result["push_results"] = push_all_waiting(result["configs"], app)
         job.result = result
         job.completed = job.total
         job.status = "done"

@@ -112,6 +112,78 @@ def delete(project_id):
     shutil.rmtree(doomed, ignore_errors=True)
 
 
+_MAX_CONFIG_BYTES = 1024 * 1024
+_MAX_DEVICES = 200
+_MAX_COMMANDS_PER_DEVICE = 2000
+_MAX_COMMAND_CHARS = 4000
+
+
+def _configs_file(project_id):
+    return project_path(project_id) / "configs.json"
+
+
+def validate_configs(devices) -> dict[str, list[str]]:
+    """
+    The device -> raw command list shape POST /config-push takes, checked
+    before anything is stored or ever sent to a device.
+    :raises ValueError: wrong shape, or beyond the size limits
+    """
+    if not isinstance(devices, dict):
+        raise TypeError("configs must map device names to lists of commands")
+    if len(devices) > _MAX_DEVICES:
+        raise ValueError(f"at most {_MAX_DEVICES} devices per project")
+    clean: dict[str, list[str]] = {}
+    for name, commands in devices.items():
+        if not isinstance(name, str) or not name.strip() or len(name) > 120:
+            raise ValueError("device names must be 1-120 characters")
+        if not isinstance(commands, list) or not all(
+            isinstance(c, str) for c in commands
+        ):
+            raise ValueError(f"{name}: commands must be a list of text lines")
+        if len(commands) > _MAX_COMMANDS_PER_DEVICE:
+            raise ValueError(
+                f"{name}: at most {_MAX_COMMANDS_PER_DEVICE} commands per device"
+            )
+        if any(len(c) > _MAX_COMMAND_CHARS or "\x00" in c for c in commands):
+            raise ValueError(
+                f"{name}: a command is longer than {_MAX_COMMAND_CHARS} characters "
+                f"or contains a NUL byte"
+            )
+        clean[name] = commands
+    return clean
+
+
+def get_configs(project_id) -> dict:
+    """{"devices": {name: [command, ...]}, "auto_push": bool} - empty when none was saved."""
+    path = _configs_file(project_id)  # raises FileNotFoundError for an unknown project
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"devices": {}, "auto_push": False}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"The saved device configs are unreadable: {exc}") from exc
+    return {
+        "devices": validate_configs(data.get("devices", {})),
+        "auto_push": bool(data.get("auto_push", False)),
+    }
+
+
+def save_configs(project_id, devices, auto_push: bool) -> dict:
+    """
+    Stores the device command lists with the project (they travel with it:
+    into every deployment bundle and back out on resume) plus the
+    "push after deploy / resume" switch.
+    :raises ValueError: see validate_configs
+    """
+    clean = validate_configs(devices)
+    text = json.dumps({"devices": clean, "auto_push": bool(auto_push)}, indent=2)
+    if len(text.encode("utf-8")) > _MAX_CONFIG_BYTES:
+        raise ValueError("The configs are larger than 1 MB")
+    path = _configs_file(project_id)
+    _atomic_text(path, text)
+    return {"devices": clean, "auto_push": bool(auto_push)}
+
+
 def topology_path(project_id):
     return project_path(project_id) / "topology.yaml"
 

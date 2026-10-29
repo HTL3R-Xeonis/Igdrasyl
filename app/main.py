@@ -56,7 +56,7 @@ from app import (
     topology_write,
     vm_screen,
 )
-from app.config_push import DeviceResult, push_all
+from app.config_push import DeviceResult, push_all, push_all_waiting
 from app.gns3_state import (
     NoLiveProject,
     list_live_nodes,
@@ -1396,12 +1396,62 @@ def resume_held_project(project_id: str) -> dict[str, Any]:
         report = holds.resume_project(app, project_id)
     except (holds.HoldError, *_LIVE_WRITE_ERRORS) as exc:
         raise _hold_error(exc) from exc
-    return {"status": "resumed", "report": report}
+    response: dict[str, Any] = {"status": "resumed", "report": report}
+    # A project that wants its configs pushed after a deploy wants them after a
+    # resume too (the VMs/nodes were off, and a router may have lost its running config).
+    try:
+        saved = project_library.get_configs(project_id)
+    except (ValueError, FileNotFoundError):
+        saved = {"devices": {}, "auto_push": False}
+    if saved["auto_push"] and saved["devices"]:
+        response["push_results"] = [
+            r.model_dump() for r in push_all_waiting(saved["devices"], app)
+        ]
+    return response
 
 
 @app.post("/projects", status_code=201)
 def create_library_project(body: CreateLibraryProject):
     return _settings_call(project_library.create, body.name, body.topology_yaml)
+
+
+class ProjectConfigs(BaseModel):
+    devices: dict[str, list[str]] = {}
+    auto_push: bool = False
+
+
+@app.get("/projects/{project_id}/configs")
+def get_library_project_configs(project_id: str) -> dict[str, Any]:
+    """The device command lists saved with a library project (see project_library.save_configs)."""
+    return _settings_call(project_library.get_configs, project_id)
+
+
+@app.put("/projects/{project_id}/configs")
+def put_library_project_configs(
+    project_id: str, body: ProjectConfigs
+) -> dict[str, Any]:
+    return _settings_call(
+        project_library.save_configs, project_id, body.devices, body.auto_push
+    )
+
+
+def _active_project_id() -> str:
+    filename = _active_host_filename()
+    selection = (project_selection.get_selection(filename) if filename else {}) or {}
+    if not selection.get("project_id"):
+        raise HTTPException(409, "Select a library project for the active host first.")
+    return selection["project_id"]
+
+
+@app.get("/project/configs")
+def get_active_project_configs() -> dict[str, Any]:
+    """Same as GET /projects/{id}/configs, for the project the active host has selected."""
+    return get_library_project_configs(_active_project_id())
+
+
+@app.put("/project/configs")
+def put_active_project_configs(body: ProjectConfigs) -> dict[str, Any]:
+    return put_library_project_configs(_active_project_id(), body)
 
 
 @app.get("/projects/{project_id}/download")
@@ -1448,7 +1498,13 @@ def deploy_library_project(project_id: str, filename: str):
         state = project_library.load_design(project_id)
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
         raise HTTPException(503, f"Template service unavailable: {exc}") from exc
-    bundle = project_bundle.build_design_export(state, preview["project"]["name"])
+    saved = _settings_call(project_library.get_configs, project_id)
+    bundle = project_bundle.build_design_export(
+        state,
+        preview["project"]["name"],
+        configs=saved["devices"],
+        auto_config_push=saved["auto_push"],
+    )
     job = import_jobs.start_job(app, bundle)
     return {"job_id": job.id, "total": job.total}
 

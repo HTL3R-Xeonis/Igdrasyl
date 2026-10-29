@@ -337,3 +337,31 @@ def test_apply_import_propagates_deploy_failure_and_leaves_file_untouched(
         project_bundle.apply_import(_app(), bundle)
 
     assert temp_topology_file.read_text() == original_content
+
+
+def test_design_export_carries_configs_and_the_auto_push_switch():
+    import io
+    import json
+    import zipfile
+
+    from app import design, project_bundle
+
+    state = design.new_state()
+    plain = project_bundle.build_design_export(state, "Lab")
+    with zipfile.ZipFile(io.BytesIO(plain)) as zf:
+        assert json.loads(zf.read("manifest.json"))["auto_config_push"] is False
+        assert json.loads(zf.read("configs.json")) == {"devices": {}}
+
+    pushed = project_bundle.build_design_export(
+        state, "Lab", configs={"R1": ["show version"]}, auto_config_push=True
+    )
+    with zipfile.ZipFile(io.BytesIO(pushed)) as zf:
+        assert json.loads(zf.read("manifest.json"))["auto_config_push"] is True
+        assert json.loads(zf.read("configs.json")) == {
+            "devices": {"R1": ["show version"]}
+        }
+
+    # the switch without any configs would push nothing - it stays off
+    empty = project_bundle.build_design_export(state, "Lab", {}, auto_config_push=True)
+    with zipfile.ZipFile(io.BytesIO(empty)) as zf:
+        assert json.loads(zf.read("manifest.json"))["auto_config_push"] is False

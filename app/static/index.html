@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=hold-2">
+<link rel="stylesheet" href="/styles.css?v=configs-1">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -230,6 +230,12 @@
     <textarea id="push-input">{
   "R1": ["show version"]
 }</textarea>
+    <div id="push-project-row">
+      <button class="toolbar-btn" id="push-load-project-btn" type="button">Load from project</button>
+      <button class="toolbar-btn" id="push-save-project-btn" type="button">Save to project</button>
+      <label id="push-auto-label"><input type="checkbox" id="push-auto-checkbox"> Push automatically after deploy and resume</label>
+    </div>
+    <p id="push-project-note"></p>
     <button class="push-btn" id="push-btn">Push</button>
     <div id="push-results"></div>
   </div>
@@ -382,7 +388,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=hold-2"></script>
-<script src="/projects.js?v=hold-2"></script>
+<script src="/app.js?v=configs-1"></script>
+<script src="/projects.js?v=configs-1"></script>
 </body>
 </html>

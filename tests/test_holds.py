@@ -233,3 +233,53 @@ def test_listing_marks_held_projects(client, app_state):
 
 def test_delete_of_an_unknown_project_is_404(client):
     assert client.delete(f"/projects/{'c' * 32}").status_code == 404
+
+
+def test_resume_pushes_the_saved_configs_when_the_project_wants_that(client, app_state):
+    project = project_library.create("Pushy")
+    project_library.save_configs(project["id"], {"R1": ["show version"]}, True)
+    _live(app_state)
+    with patch("app.holds.GNS3Connection.post"):
+        holds.hold_project(main_module.app, project["id"], "host.yml")
+    app_state.esxi_connection.get_vm.side_effect = lambda n: (
+        MagicMock() if "[hold" in n else None
+    )
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"device": "R1", "ok": True}
+    with (
+        patch("app.holds.resolve_project_id", return_value="gns3-1"),
+        patch("app.holds.GNS3Connection.ensure_project_open"),
+        patch(
+            "app.holds.maintenance.run_verify", return_value={"passed": 1, "total": 1}
+        ),
+        patch("app.main.push_all_waiting", return_value=[fake_result]) as push,
+    ):
+        response = client.post(f"/projects/{project['id']}/resume")
+
+    assert response.status_code == 200
+    push.assert_called_once()
+    assert push.call_args.args[0] == {"R1": ["show version"]}
+    assert response.json()["push_results"] == [{"device": "R1", "ok": True}]
+
+
+def test_resume_pushes_nothing_without_the_switch(client, app_state):
+    project = project_library.create("Quiet")
+    project_library.save_configs(project["id"], {"R1": ["show version"]}, False)
+    _live(app_state)
+    with patch("app.holds.GNS3Connection.post"):
+        holds.hold_project(main_module.app, project["id"], "host.yml")
+    app_state.esxi_connection.get_vm.side_effect = lambda n: (
+        MagicMock() if "[hold" in n else None
+    )
+    with (
+        patch("app.holds.resolve_project_id", return_value="gns3-1"),
+        patch("app.holds.GNS3Connection.ensure_project_open"),
+        patch(
+            "app.holds.maintenance.run_verify", return_value={"passed": 1, "total": 1}
+        ),
+        patch("app.main.push_all_waiting") as push,
+    ):
+        response = client.post(f"/projects/{project['id']}/resume")
+    assert response.status_code == 200
+    push.assert_not_called()
+    assert "push_results" not in response.json()

@@ -63,25 +63,87 @@ def wait_for_guest_process(process_manager, vm, auth, pid: int) -> int | None:
     return None
 
 
+_MAX_OUTPUT_CHARS = 20_000
+_GUEST_FILE_TRANSFER_TIMEOUT_SECONDS = 20
+
+
+def _quote_for_bash(command: str) -> str:
+    """Single-quotes the command for `bash -c`, so quotes/$/spaces in it reach bash untouched."""
+    return "'" + command.replace("'", "'\\''") + "'"
+
+
+def _read_and_delete_guest_file(
+    file_manager: Any, vm: Any, auth: Any, guest_path: str, esxi_host: str
+) -> str | None:
+    """
+    Downloads a text file out of the guest through ESXi's guest file transfer
+    (an HTTPS URL it hands out) and deletes it in the guest afterwards.
+    Best effort: None if anything fails - the caller then just reports the
+    exit code, which is all guest operations offer by themselves.
+    """
+    import requests
+
+    try:
+        info = file_manager.InitiateFileTransferFromGuest(vm, auth, guest_path)
+        # ESXi writes "*" where its own hostname belongs.
+        url = info.url.replace("*", esxi_host, 1)
+        response = requests.get(
+            url, verify=False, timeout=_GUEST_FILE_TRANSFER_TIMEOUT_SECONDS
+        )
+        response.raise_for_status()
+        text = response.content.decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    finally:
+        try:
+            file_manager.DeleteFileInGuest(vm, auth, guest_path)
+        except Exception:
+            pass
+    return text[:_MAX_OUTPUT_CHARS]
+
+
 def run_command_in_guest(
-    process_manager: Any, vm: Any, auth: Any, command: str, is_windows: bool
+    process_manager: Any,
+    vm: Any,
+    auth: Any,
+    command: str,
+    is_windows: bool,
+    file_manager: Any = None,
+    esxi_host: str | None = None,
 ) -> tuple[int | None, str]:
     """
     Runs one command to completion via guest-ops, waiting for its exit
     code. Returns (exit_code, output) - exit_code is None if the
     process couldn't even start (bad credentials, guest ops unavailable,
     or a timeout), with output describing which.
+
+    Guest operations only ever report an exit code. With a `file_manager`
+    (and the ESXi host's address) the command's own stdout/stderr is
+    redirected to a temporary file in the guest, fetched through ESXi's guest
+    file transfer and deleted again, so the output is the command's real text
+    (at most 20 000 characters); if that fails the output is just
+    "exit code N". The command is passed to the guest quoted, so it may
+    contain quotes, $variables and pipes.
     """
+    import uuid
+
     from pyVmomi import vim, vmodl
 
+    capture = file_manager is not None and esxi_host is not None
+    token = uuid.uuid4().hex[:12]
     if is_windows:
+        guest_file = f"C:\\Windows\\Temp\\topo-push-{token}.out"
+        arguments = (
+            f'/c ({command}) > "{guest_file}" 2>&1' if capture else f"/c {command}"
+        )
         spec = vim.vm.guest.ProcessManager.ProgramSpec(
-            programPath="C:\\Windows\\System32\\cmd.exe",
-            arguments=f"/c {command}",
+            programPath="C:\\Windows\\System32\\cmd.exe", arguments=arguments
         )
     else:
+        guest_file = f"/tmp/topo-push-{token}.out"
+        script = f"{{ {command}\n}} > {guest_file} 2>&1" if capture else command
         spec = vim.vm.guest.ProcessManager.ProgramSpec(
-            programPath="/bin/bash", arguments=f'-c "{command}"'
+            programPath="/bin/bash", arguments=f"-c {_quote_for_bash(script)}"
         )
 
     try:
@@ -108,7 +170,12 @@ def run_command_in_guest(
         return None, f"{type(exc).__name__}: {exc}"
 
     exit_code = wait_for_guest_process(process_manager, vm, auth, pid)
-    output = (
-        "timed out waiting for exit" if exit_code is None else f"exit code {exit_code}"
-    )
-    return exit_code, output
+    if exit_code is None:
+        return None, "timed out waiting for exit"
+    if capture:
+        text = _read_and_delete_guest_file(
+            file_manager, vm, auth, guest_file, esxi_host
+        )
+        if text is not None:
+            return exit_code, text if text.strip() else f"exit code {exit_code}"
+    return exit_code, f"exit code {exit_code}"

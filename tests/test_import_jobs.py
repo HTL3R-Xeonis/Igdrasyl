@@ -5,6 +5,7 @@ import zipfile
 from unittest.mock import MagicMock, patch
 
 from app import import_jobs
+from app.config_push import DeviceResult
 
 
 def _bundle_with_topology(topology_yaml_text: str) -> bytes:
@@ -151,12 +152,15 @@ def test_run_import_job_auto_pushes_when_result_says_so(app_state):
     }
     with (
         patch("app.project_bundle.apply_import", return_value=fake_result),
-        patch("app.config_push.push_all", return_value=["ok"]) as fake_push_all,
+        patch(
+            "app.config_push.push_all",
+            return_value=[DeviceResult(device="R1", transport="netmiko", ok=True)],
+        ) as fake_push_all,
     ):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
     fake_push_all.assert_called_once_with({"R1": ["show version"]}, app)
-    assert job.result["push_results"] == ["ok"]
+    assert [r.device for r in job.result["push_results"]] == ["R1"]
     assert app_state.last_config_push == {"R1": ["show version"]}
 
 
