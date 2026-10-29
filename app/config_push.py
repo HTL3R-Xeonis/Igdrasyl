@@ -32,7 +32,7 @@ from src.graph.blocks.generic_node import GenericNode
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import serial_agent
+from app import esxi_serial, serial_agent
 from app.esxi_serial import serial_port_of
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.guest_ops import guest_credentials_for_image, run_command_in_guest
@@ -435,7 +435,37 @@ def _esxi_transport(node: GenericNode, spec: DeviceSpec, esxi_connection: Any) -
             return "guest_ops"
         if serial_port_of(vm) is not None:
             return "serial"
+        if _is_serial_appliance(node):
+            return "serial"  # the console gets set up by _ensure_serial, there is no other way in
     return "guest_ops"
+
+
+def _is_serial_appliance(node: GenericNode) -> bool:
+    """MikroTik/pfSense/OPNsense: appliances that never run VMware Tools, so serial is their only way in."""
+    profile = serial_agent.profile_for_image(node.image)
+    return profile is not None and profile.name != "linux"
+
+
+def _ensure_serial(node: GenericNode, app: Any) -> str | None:
+    """
+    Gives the VM a serial console if it has none (this briefly powers it off and on again,
+    see app/esxi_serial.py). Returns an error text, None when the console exists afterwards.
+    A Linux guest only gets here when serial was asked for explicitly or it is an appliance
+    without VMware Tools - a VM that merely has not booted its Tools yet is never power-cycled.
+    """
+    vm = app.state.esxi_connection.get_vm(node.name)
+    if vm is None:
+        return f"VM '{node.name}' not found on ESXi"
+    if serial_port_of(vm) is not None:
+        return None
+    logger.warning(
+        f"Config push: VM '{node.name}' has no serial console yet, setting it up"
+    )
+    try:
+        esxi_serial.enable(app, node.name)
+    except esxi_serial.SerialSetupError as exc:
+        return f"the serial console of '{node.name}' could not be set up automatically: {exc}"
+    return None
 
 
 def push_all(
@@ -514,9 +544,23 @@ def push_all(
             )
         elif node.env == Environment.ON_ESXI:
             if _esxi_transport(node, spec, app.state.esxi_connection) == "serial":
-                results.append(
-                    _push_via_serial(node, spec, app.state.esxi_connection, progress)
-                )
+                setup_error = _ensure_serial(node, app)
+                if setup_error is not None:
+                    results.append(
+                        DeviceResult(
+                            device=device_name,
+                            transport="serial",
+                            ok=False,
+                            error=setup_error,
+                            total_commands=len(commands),
+                        )
+                    )
+                else:
+                    results.append(
+                        _push_via_serial(
+                            node, spec, app.state.esxi_connection, progress
+                        )
+                    )
             else:
                 results.append(
                     _push_via_guest_ops(

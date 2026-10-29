@@ -46,6 +46,7 @@ DEFAULT_COMMAND_TIMEOUT_SECONDS = 60
 LOGIN_TIMEOUT_SECONDS = 90
 _QUIET_RETRY_SECONDS = 3.0
 _FIRST_QUIET_SECONDS = 1.5
+_POST_LOGIN_QUIET_SECONDS = 0.6
 _MAX_OUTPUT_CHARS = 20_000
 _MAX_BUFFER_CHARS = 200_000
 
@@ -384,6 +385,10 @@ class SerialAgent:
         # Flush whatever the setup produced (prompts) and make sure we are ready.
         if self.profile.style == "marker":
             self.run("true", timeout=15)
+        else:
+            # A prompt console redraws its prompt a moment after the login; left in the
+            # buffer it would pass for the end of the first command and swallow its output.
+            self._drain(quiet=_POST_LOGIN_QUIET_SECONDS)
 
     # ---- commands ----
 

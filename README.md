@@ -319,7 +319,9 @@ each command, recognising where its output ends - on shells by an end marker car
 RouterOS by the returning prompt plus the CLI's error texts. Profiles: `linux` (any shell), `routeros` (MikroTik; logs in as
 `user+ct200w`), `bsd_menu` (pfSense/OPNsense: opens a shell through menu entry 8); the default is chosen by image name.
 Windows is not supported. A device stops at its first failing command, the others continue.
-- **Enable it per VM** first: click the VM, then **Enable serial console** (or `POST /nodes/{name}/serial/enable`,
+- **Enable it per VM**: **automatic** during a config push when it is needed - for a device with `via: serial`, and for `auto` on a
+  MikroTik/pfSense/OPNsense VM (appliances never run VMware Tools, serial is their only way in). A Linux/Windows VM whose Tools merely
+  are not up yet is never power-cycled; use `via: serial` on it on purpose. Or by hand: click the VM, then **Enable serial console** (or `POST /nodes/{name}/serial/enable`,
   `GET /nodes/{name}/serial` for the state). That adds a network serial port (`tcp://:2000-2010` on the ESXi host, the
   firewall ruleset `remoteSerialPort` is switched on) and **powers the VM off and on again** - ESXi only allows the change
   while it is off. For a Linux guest with VMware Tools the app also starts `serial-getty@ttyS0` so there is a login prompt;

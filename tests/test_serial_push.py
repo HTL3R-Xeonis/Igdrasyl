@@ -69,6 +69,57 @@ def test_transport_choice(via, tools, port, expected, graph):
     assert cp._esxi_transport(graph.nodes["VM1"], spec, esxi) == expected
 
 
+def _node(image):
+    node = MagicMock()
+    node.name = "A1"
+    node.image = image
+    return node
+
+
+@pytest.mark.parametrize(
+    ("image", "tools", "expected"),
+    [
+        ("MikroTik", "guestToolsNotRunning", "serial"),
+        ("pfSense", "guestToolsNotRunning", "serial"),
+        ("Rocky 9.2", "guestToolsNotRunning", "guest_ops"),  # Tools may just be booting
+        ("Windows 10 Pro Education", "guestToolsNotRunning", "guest_ops"),
+        ("MikroTik", "guestToolsRunning", "guest_ops"),
+    ],
+)
+def test_an_appliance_without_a_serial_port_still_goes_over_serial(
+    image, tools, expected
+):
+    esxi = MagicMock()
+    esxi.get_vm.return_value = _vm(None, tools)
+    spec = cp.DeviceSpec(commands=["x"], via="auto")
+    assert cp._esxi_transport(_node(image), spec, esxi) == expected
+
+
+def test_ensure_serial_enables_a_missing_console_and_leaves_an_existing_one_alone():
+    app = MagicMock()
+    app.state.esxi_connection.get_vm.return_value = _vm(None)
+    with patch.object(cp.esxi_serial, "enable") as enable:
+        assert cp._ensure_serial(_node("MikroTik"), app) is None
+    enable.assert_called_once_with(app, "A1")
+
+    app.state.esxi_connection.get_vm.return_value = _vm(2002)
+    with patch.object(cp.esxi_serial, "enable") as enable:
+        assert cp._ensure_serial(_node("MikroTik"), app) is None
+    enable.assert_not_called()
+
+
+def test_ensure_serial_reports_why_it_could_not_set_the_console_up():
+    app = MagicMock()
+    app.state.esxi_connection.get_vm.return_value = _vm(None)
+    with patch.object(
+        cp.esxi_serial,
+        "enable",
+        side_effect=esxi_serial.SerialSetupError("no free port"),
+    ):
+        error = cp._ensure_serial(_node("MikroTik"), app)
+    assert "could not be set up automatically" in error and "no free port" in error
+
+
 def _fake_agent_run(outcomes, login_error=None):
     class FakeAgent:
         def __init__(self, **kwargs):

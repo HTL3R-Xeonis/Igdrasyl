@@ -5,6 +5,7 @@ that behave like a Linux serial getty and a RouterOS CLI.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -143,7 +144,9 @@ def test_connection_refused_is_a_clear_error():
         ).connect()
 
 
-async def _routeros_console(reader, writer, *, password="secret"):
+async def _routeros_console(
+    reader, writer, *, password="secret", redraw=0.0, reply_delay=0.0
+):
     state = "login"
     buffer = b""
     seen_user = ""
@@ -165,6 +168,11 @@ async def _routeros_console(reader, writer, *, password="secret"):
                 if text == password:
                     state = "cli"
                     writer.write(b"\r\n[admin@MikroTik] > ")
+                    if redraw:
+                        # RouterOS paints the prompt again a moment after the login
+                        await writer.drain()
+                        await asyncio.sleep(redraw)
+                        writer.write(b"\r\n[admin@MikroTik] > ")
                 else:
                     state = "login"
                     writer.write(
@@ -177,6 +185,7 @@ async def _routeros_console(reader, writer, *, password="secret"):
                 elif text.startswith("/ip address add"):
                     writer.write(b"\r\n[admin@MikroTik] > ")
                 elif text == "/ip address print":
+                    await asyncio.sleep(reply_delay)
                     writer.write(b"\r\n 0 10.0.0.1/24 ether1\r\n[admin@MikroTik] > ")
                 else:
                     writer.write(
@@ -207,6 +216,19 @@ def test_routeros_login_uses_the_terminal_suffix_and_detects_cli_errors(
         code, output = agent.run("/nonsense")
         assert code == 1 and "bad command name" in output
     assert users == []
+
+
+def test_routeros_first_command_keeps_its_output_when_the_prompt_is_redrawn(
+    fake_tcp_server,
+):
+    async def handler(reader, writer):
+        await _routeros_console(reader, writer, redraw=0.3, reply_delay=0.5)
+
+    port = fake_tcp_server(handler)
+    with _agent(port, profile="routeros", password="secret") as agent:
+        agent.login()
+        code, output = agent.run("/ip address print")
+        assert code == 0 and "10.0.0.1/24" in output
 
 
 def test_routeros_wrong_password_fails_the_login(fake_tcp_server):
