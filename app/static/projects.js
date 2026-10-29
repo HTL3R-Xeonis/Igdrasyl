@@ -457,6 +457,15 @@ async function resumeHeldProject(project) {
       { error: report.passed !== report.total || pushHadFailures(body.push_results) }
     );
     showPushResults(body.push_results);
+    if (body.push_job_id) {
+      // The project pushes its configs by itself after a resume; it runs in the background.
+      showTab("push");
+      const results = await followPushJob(body.push_job_id);
+      if (results) {
+        const failed = results.filter((r) => !r.ok).length;
+        setMenubarMessage(`Resumed “${project.name}” and pushed configs to ${results.length} device${results.length === 1 ? "" : "s"}${failed ? `, ${failed} failed` : ""}.`, { error: failed > 0 });
+      }
+    }
   } catch (error) {
     clearMenubarStatus();
     await showAlert(`Couldn't resume: ${error.message}`, { title: "Resume project" });

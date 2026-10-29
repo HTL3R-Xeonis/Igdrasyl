@@ -5,7 +5,7 @@
 <title>TopologyOperator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=configs-1">
+<link rel="stylesheet" href="/styles.css?v=serial-1">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -183,6 +183,7 @@
         <button class="console-btn" id="selected-reload-btn">Reload</button>
         <button class="console-btn" id="selected-action-btn"></button>
         <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
+        <button class="console-btn" id="selected-serial-btn" hidden>Serial console</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="multi-actions" hidden>
@@ -223,9 +224,15 @@
   </div>
   <div id="push-area" hidden>
     <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
-      Paste a devices object (device name → list of raw commands, sent
-      verbatim - same shape as the project's config-push YAML file's
-      <code>devices:</code> key, as JSON here) and push.
+      Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device).
+      To choose how a VM is reached, use an object instead of the list:
+      <code>{"commands": [...], "via": "serial"}</code> - <code>via</code> is
+      <code>auto</code> (default: guest operations while VMware Tools runs, else the
+      serial console), <code>guest_ops</code> or <code>serial</code>; for serial you can add
+      <code>profile</code> (<code>linux</code>, <code>routeros</code>, <code>bsd_menu</code>)
+      and <code>username</code>/<code>password</code> (default: the template catalog's login).
+      The serial console must be enabled on the VM first (click the VM, then
+      "Enable serial console").
     </p>
     <textarea id="push-input">{
   "R1": ["show version"]
@@ -388,7 +395,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=configs-1"></script>
-<script src="/projects.js?v=configs-1"></script>
+<script src="/app.js?v=serial-1"></script>
+<script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

@@ -159,7 +159,7 @@ def test_run_import_job_auto_pushes_when_result_says_so(app_state):
     ):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
-    fake_push_all.assert_called_once_with({"R1": ["show version"]}, app)
+    fake_push_all.assert_called_once_with({"R1": ["show version"]}, app, None)
     assert [r.device for r in job.result["push_results"]] == ["R1"]
     assert app_state.last_config_push == {"R1": ["show version"]}
 

@@ -35,6 +35,7 @@ from app import (
     design_history,
     design_store,
     error_pages,
+    esxi_serial,
     generate_jobs,
     gns3_vm_deploy_jobs,
     holds,
@@ -51,12 +52,13 @@ from app import (
     project_library,
     project_selection,
     public_text,
+    push_jobs,
     settings_profiles,
     template_health,
     topology_write,
     vm_screen,
 )
-from app.config_push import DeviceResult, push_all, push_all_waiting
+from app.config_push import DeviceResult, DeviceSpec, push_all
 from app.gns3_state import (
     NoLiveProject,
     list_live_nodes,
@@ -698,6 +700,29 @@ def stream_link_capture(node1: str, node2: str) -> StreamingResponse:
     )
 
 
+@app.get("/nodes/{name}/serial")
+def serial_console_status(name: str) -> dict[str, Any]:
+    """Whether an ESXi VM has a network serial port (and which), for the config push via serial."""
+    try:
+        return esxi_serial.status(app, name)
+    except esxi_serial.SerialSetupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/nodes/{name}/serial/enable")
+def enable_serial_console(name: str) -> dict[str, Any]:
+    """
+    Adds a network serial port to an ESXi VM - powering it off and on again if it runs -
+    and, for a Linux guest with VMware Tools, a login prompt on it. See app/esxi_serial.py.
+    """
+    try:
+        return esxi_serial.enable(app, name)
+    except esxi_serial.SerialSetupError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except _LIVE_WRITE_ERRORS as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
 @app.post("/nodes/{name}/start")
 def start_node(name: str) -> dict[str, str]:
     try:
@@ -732,7 +757,35 @@ def reload_node(name: str) -> dict[str, str]:
 
 
 class PushRequest(BaseModel):
-    devices: dict[str, list[str]]
+    devices: dict[str, list[str] | DeviceSpec]
+
+
+@app.post("/config-push/jobs", status_code=202)
+def start_config_push_job(request: PushRequest) -> dict[str, Any]:
+    """
+    Starts a push in the background and returns at once - use this for anything long
+    (up to 10 000 commands per device; see app/push_jobs.py). Poll
+    GET /config-push/jobs/{job_id}.
+    """
+    try:
+        job = push_jobs.start_job(app, request.devices)
+    except push_jobs.AlreadyRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"job_id": job.id, "total_commands": job.total_commands}
+
+
+@app.get("/config-push/jobs/{job_id}")
+def config_push_job_status(job_id: str) -> dict[str, Any]:
+    """Progress per device while running; the per-device results once done."""
+    job = push_jobs.get_job(app, job_id)
+    if job is None:
+        raise HTTPException(404, f"no config push job {job_id!r}")
+    response = job.progress()
+    if job.status == "done" and job.results is not None:
+        response["results"] = [r.model_dump() for r in job.results]
+    if job.status == "error":
+        response["error"] = job.error
+    return response
 
 
 @app.post("/config-push")
@@ -1404,9 +1457,13 @@ def resume_held_project(project_id: str) -> dict[str, Any]:
     except (ValueError, FileNotFoundError):
         saved = {"devices": {}, "auto_push": False}
     if saved["auto_push"] and saved["devices"]:
-        response["push_results"] = [
-            r.model_dump() for r in push_all_waiting(saved["devices"], app)
-        ]
+        try:
+            # In the background (it can be long, and devices may still be booting):
+            # the client follows it through GET /config-push/jobs/{id}.
+            job = push_jobs.start_job(app, saved["devices"], wait=True)
+            response["push_job_id"] = job.id
+        except push_jobs.AlreadyRunning:
+            response["push_job_error"] = "another config push is still running"
     return response
 
 
@@ -1416,7 +1473,7 @@ def create_library_project(body: CreateLibraryProject):
 
 
 class ProjectConfigs(BaseModel):
-    devices: dict[str, list[str]] = {}
+    devices: dict[str, list[str] | DeviceSpec] = {}
     auto_push: bool = False
 
 
@@ -1430,8 +1487,14 @@ def get_library_project_configs(project_id: str) -> dict[str, Any]:
 def put_library_project_configs(
     project_id: str, body: ProjectConfigs
 ) -> dict[str, Any]:
+    devices = {
+        name: entry.model_dump(exclude_none=True)
+        if isinstance(entry, DeviceSpec)
+        else entry
+        for name, entry in body.devices.items()
+    }
     return _settings_call(
-        project_library.save_configs, project_id, body.devices, body.auto_push
+        project_library.save_configs, project_id, devices, body.auto_push
     )
 
 

@@ -162,7 +162,7 @@ def test_push_all_waiting_retries_only_devices_that_were_not_reachable():
         3: [_result("R1", ok=True)],
     }
 
-    def fake_push_all(devices, app):
+    def fake_push_all(devices, app, on_progress=None):
         calls.append(sorted(devices))
         return scripted[len(calls)]
 
@@ -184,7 +184,7 @@ def test_push_all_waiting_retries_only_devices_that_were_not_reachable():
 def test_push_all_waiting_never_repeats_a_device_that_ran_a_command():
     calls = []
 
-    def fake_push_all(devices, app):
+    def fake_push_all(devices, app, on_progress=None):
         calls.append(sorted(devices))
         return [_result("R1", ok=False, not_ready=False)]
 

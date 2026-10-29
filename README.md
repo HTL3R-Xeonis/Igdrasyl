@@ -292,22 +292,50 @@ and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 
 ## Device configs saved with the project
 
-The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim). With
-**Save to project** the lists are stored with the library project (`configs.json` next to its topology; **Load from
-project** brings them back, and they are loaded when the tab opens). The switch **Push automatically after deploy and
-resume** makes the app push them by itself - right after the deploy of that project (they travel in the deployment
-bundle) and after a **Resume** from hold. Endpoints: `GET/PUT /project/configs` (the active host's project) and
-`GET/PUT /projects/{id}/configs`; limits: 200 devices, 2000 commands per device, 4000 characters per command, 1 MB.
+The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim; **up to 10 000
+commands per device**). With **Save to project** the lists are stored with the library project (`configs.json` next to its
+topology; **Load from project** brings them back, and they are loaded when the tab opens). The switch **Push automatically
+after deploy and resume** makes the app push them by itself - right after the deploy of that project (they travel in the
+deployment bundle) and after a **Resume** from hold. Endpoints: `GET/PUT /project/configs` (the active host's project) and
+`GET/PUT /projects/{id}/configs`; limits: 200 devices, 10 000 commands per device, 4000 characters per command, 8 MB.
 
-How a device is reached: GNS3 consoles (routers, VPCS) over Telnet via Netmiko - no login is attempted, a console that
-asks for one fails; ESXi VMs through VMware guest operations, which log in by themselves with the account from the
-template catalog (the `root` entry, else the first) and need VMware Tools in the VM. Guest operations only report an
-exit code, so the app redirects each command's output into a temporary file in the guest, fetches it through ESXi and
-deletes it - the result list shows the real output per command (failed commands expanded). Commands are passed to
-bash single-quoted, so quotes, `$variables` and pipes arrive unchanged. A device stops at its first failing command;
-the other devices continue. Automatic pushes wait for devices that are still booting (`not_ready`: unreachable, no
-command ran) and retry them every 15 s for up to 5 minutes; a device where a command already ran is never repeated.
-Not supported: appliances without VMware Tools (pfSense, OPNsense, MikroTik) - they would need their serial console.
+A push runs as a **background job** (`POST /config-push/jobs`, then `GET /config-push/jobs/{id}`): the tab shows a progress
+bar per device and the per-device results at the end; only one push runs at a time. (`POST /config-push` still answers in
+one request, for short lists.) A very long result is shortened to the failed commands plus the last 50 (`truncated`).
+
+**How a device is reached**
+- GNS3 consoles (routers, VPCS): Telnet through Netmiko. No login is attempted - a console that asks for one fails.
+- ESXi VMs with VMware Tools: guest operations, which log in by themselves with the account from the template catalog
+  (the `root` entry, else the first). Guest operations only report an exit code, so each command's output is redirected
+  into a temporary file in the guest, fetched through ESXi and deleted - the result shows the real output (failed commands
+  expanded). Commands reach bash single-quoted, so quotes, `$variables` and pipes arrive unchanged. About one second per
+  command.
+- ESXi VMs **without** VMware Tools (MikroTik, pfSense, OPNsense, anything): the **serial console** (below). About 70 ms
+  per command.
+
+**Serial console agent.** `app/serial_agent.py` is a small expect engine that logs in on the VM's serial console and types
+the commands like an operator: it wakes the console, answers the login / password / console-menu screens, and then runs
+each command, recognising where its output ends - on shells by an end marker carrying the real exit status, on
+RouterOS by the returning prompt plus the CLI's error texts. Profiles: `linux` (any shell), `routeros` (MikroTik; logs in as
+`user+ct200w`), `bsd_menu` (pfSense/OPNsense: opens a shell through menu entry 8); the default is chosen by image name.
+Windows is not supported. A device stops at its first failing command, the others continue.
+- **Enable it per VM** first: click the VM, then **Enable serial console** (or `POST /nodes/{name}/serial/enable`,
+  `GET /nodes/{name}/serial` for the state). That adds a network serial port (`tcp://:2000-2010` on the ESXi host, the
+  firewall ruleset `remoteSerialPort` is switched on) and **powers the VM off and on again** - ESXi only allows the change
+  while it is off. For a Linux guest with VMware Tools the app also starts `serial-getty@ttyS0` so there is a login prompt;
+  appliances have to bring their own serial console: MikroTik has it out of the box (verified live); a stock OPNsense
+  image stayed completely silent on its serial line - pfSense/OPNsense need the serial console switched on in their own
+  settings first (the agent then reports "the serial console stayed completely silent"). The `bsd_menu` profile is covered by
+  tests only; pfSense's OVA could not be imported at all during testing (see HANDOFF).
+- **Choosing the way in**: a device can be a plain command list (`"auto"`: guest operations while VMware Tools runs,
+  otherwise the serial console if the VM has one) or an object
+  `{"commands": [...], "via": "serial", "profile": "routeros", "username": "...", "password": "..."}` - `via` is `auto`,
+  `guest_ops` or `serial`; the login defaults to the template catalog's account. (An explicit password in the object is
+  stored in the project's `configs.json` on the server - prefer the catalog.)
+
+Automatic pushes (after a deploy, and after a resume - as a job you can follow in the tab) wait for devices that are still
+booting (`not_ready`: unreachable, nothing ran) and retry them every 15 s for up to 5 minutes; a device where a command
+already ran is never repeated. Nothing in the app logs commands, output or passwords.
 
 ## One structural change at a time
 
@@ -467,7 +495,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-461 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+504 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

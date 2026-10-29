@@ -1906,6 +1906,7 @@ function showNodeActions(name, anchor) {
     screenBtn.title = running ? "Open this VM's graphical screen" : `VM status: ${status}`;
     screenBtn.onclick = () => openVmScreen(name);
   }
+  refreshSerialButton(name, isVM && !designMode);
   const stopped = status === "stopped" || status === "poweredOff";
   const hasLive = !!live;
 
@@ -1928,6 +1929,55 @@ function showNodeActions(name, anchor) {
 
   showTab("console");
   positionNear(popup, anchor);
+}
+
+// "Serial console" entry of a VM's popup: whether the VM has a network serial port (what the
+// config push can use for appliances without VMware Tools) and the action to add one.
+async function refreshSerialButton(name, applicable) {
+  const button = document.getElementById("selected-serial-btn");
+  button.hidden = !applicable;
+  if (!applicable) return;
+  button.disabled = true;
+  button.textContent = "Serial console…";
+  button.title = "";
+  try {
+    const resp = await fetch(`/nodes/${encodeURIComponent(name)}/serial`);
+    const state = await resp.json();
+    if (selectedName !== name) return;
+    if (!resp.ok) throw new Error(state.detail || resp.status);
+    if (state.enabled) {
+      button.textContent = `Serial console: port ${state.port}`;
+      button.title = "This VM has a network serial port - config push can use it (\"via\": \"serial\").";
+      return;
+    }
+    button.disabled = false;
+    button.textContent = "Enable serial console";
+    button.title = "Adds a network serial port - the VM is powered off and on again for that.";
+    button.onclick = async () => {
+      if (!await showConfirm(
+        `Add a serial console to "${name}"?\n\nThe VM is powered off and on again for that (a short interruption). ` +
+        `For Linux with VMware Tools a login prompt on the serial line is set up as well; appliances ` +
+        `(MikroTik, pfSense, OPNsense) must bring their own serial console.`,
+        { title: "Enable serial console", confirmLabel: "Enable", danger: true }
+      )) return;
+      button.disabled = true;
+      setMenubarBusy(`Adding a serial console to "${name}"…`);
+      try {
+        const done = await fetch(`/nodes/${encodeURIComponent(name)}/serial/enable`, { method: "POST" });
+        const body = await done.json();
+        if (!done.ok) throw new Error(typeof body.detail === "string" ? body.detail : "failed");
+        setMenubarMessage(`Serial console of "${name}" is on port ${body.port} (guest: ${body.guest}).`);
+        await loadCanvas();
+        if (selectedName === name) showNodeActions(name);
+      } catch (err) {
+        clearMenubarStatus();
+        await showAlert(`Couldn't enable the serial console: ${err.message || err}`, { title: "Serial console" });
+        button.disabled = false;
+      }
+    };
+  } catch (err) {
+    if (selectedName === name) button.textContent = "Serial console (unavailable)";
+  }
 }
 
 async function callLifecycle(action, name) {
@@ -4791,6 +4841,62 @@ document.getElementById("push-save-project-btn").addEventListener("click", async
   }
 });
 
+// Follows a config push job (POST /config-push/jobs) until it ends: per-device progress
+// while it runs, the full per-device results afterwards.
+async function followPushJob(jobId) {
+  const resultsEl = document.getElementById("push-results");
+  for (;;) {
+    let body;
+    try {
+      const resp = await fetch(`/config-push/jobs/${jobId}`);
+      body = await resp.json();
+      if (!resp.ok) throw new Error(body.detail || resp.status);
+    } catch (err) {
+      resultsEl.textContent = `Lost the push job: ${err.message || err}`;
+      return null;
+    }
+    if (body.status === "running") {
+      renderPushProgress(body);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      continue;
+    }
+    if (body.status === "error") {
+      resultsEl.textContent = `The push failed: ${body.error}`;
+      return null;
+    }
+    renderPushResults(body.results);
+    return body.results;
+  }
+}
+
+function renderPushProgress(job) {
+  const resultsEl = document.getElementById("push-results");
+  resultsEl.replaceChildren();
+  const heading = document.createElement("div");
+  heading.style.cssText = "margin:6px 0;color:var(--dim);font-size:12px";
+  heading.textContent = `Pushing… ${job.done_commands.toLocaleString()} of ${job.total_commands.toLocaleString()} commands, ${Math.round(job.elapsed_seconds)} s`;
+  resultsEl.appendChild(heading);
+  for (const device of job.devices) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px";
+    const name = document.createElement("span");
+    name.style.minWidth = "80px";
+    name.textContent = device.device;
+    const track = document.createElement("span");
+    track.className = "menubar-progress-track";
+    track.style.flex = "1";
+    const fill = document.createElement("span");
+    fill.className = "menubar-progress-fill";
+    fill.style.width = `${device.total ? Math.round((device.done / device.total) * 100) : 0}%`;
+    track.appendChild(fill);
+    const count = document.createElement("span");
+    count.style.color = "var(--dim)";
+    count.textContent = `${device.done.toLocaleString()} / ${device.total.toLocaleString()}`;
+    row.append(name, track, count);
+    resultsEl.appendChild(row);
+  }
+}
+
 document.getElementById("push-btn").addEventListener("click", async () => {
   const resultsEl = document.getElementById("push-results");
   let devices;
@@ -4800,26 +4906,26 @@ document.getElementById("push-btn").addEventListener("click", async () => {
     resultsEl.textContent = `Invalid JSON: ${err}`;
     return;
   }
-  resultsEl.textContent = "Pushing…";
-
-  let deviceResults;
+  const button = document.getElementById("push-btn");
+  button.disabled = true;
+  resultsEl.textContent = "Starting…";
   try {
-    const resp = await fetch("/config-push", {
+    const resp = await fetch("/config-push/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ devices }),
     });
+    const body = await resp.json();
     if (!resp.ok) {
-      resultsEl.textContent = `Request failed: HTTP ${resp.status}`;
+      resultsEl.textContent = `Couldn't start the push: ${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}`;
       return;
     }
-    deviceResults = await resp.json();
+    await followPushJob(body.job_id);
   } catch (err) {
     resultsEl.textContent = `Request failed: ${err}`;
-    return;
+  } finally {
+    button.disabled = false;
   }
-
-  renderPushResults(deviceResults);
 });
 
 // Drag #panel-resize-handle up/down to reallocate space between

@@ -112,9 +112,9 @@ def delete(project_id):
     shutil.rmtree(doomed, ignore_errors=True)
 
 
-_MAX_CONFIG_BYTES = 1024 * 1024
+_MAX_CONFIG_BYTES = 8 * 1024 * 1024
 _MAX_DEVICES = 200
-_MAX_COMMANDS_PER_DEVICE = 2000
+MAX_COMMANDS_PER_DEVICE = 10_000
 _MAX_COMMAND_CHARS = 4000
 
 
@@ -122,34 +122,51 @@ def _configs_file(project_id):
     return project_path(project_id) / "configs.json"
 
 
-def validate_configs(devices) -> dict[str, list[str]]:
+def validate_configs(devices) -> dict[str, list[str] | dict]:
     """
-    The device -> raw command list shape POST /config-push takes, checked
-    before anything is stored or ever sent to a device.
-    :raises ValueError: wrong shape, or beyond the size limits
+    The device -> commands shape POST /config-push takes, checked before anything
+    is stored or ever sent to a device. A device is a list of command lines or an
+    object {commands, via, profile, username, password} (see config_push.DeviceSpec).
+    :raises TypeError/ValueError: wrong shape, or beyond the size limits
     """
+    from pydantic import ValidationError
+
+    from app.config_push import DeviceSpec
+
     if not isinstance(devices, dict):
-        raise TypeError("configs must map device names to lists of commands")
+        raise TypeError("configs must map device names to commands")
     if len(devices) > _MAX_DEVICES:
         raise ValueError(f"at most {_MAX_DEVICES} devices per project")
-    clean: dict[str, list[str]] = {}
-    for name, commands in devices.items():
+    clean: dict[str, list[str] | dict] = {}
+    for name, entry in devices.items():
         if not isinstance(name, str) or not name.strip() or len(name) > 120:
             raise ValueError("device names must be 1-120 characters")
-        if not isinstance(commands, list) or not all(
-            isinstance(c, str) for c in commands
-        ):
+        if isinstance(entry, dict):
+            try:
+                spec = DeviceSpec(**entry)
+            except (ValidationError, TypeError) as exc:
+                raise ValueError(f"{name}: invalid device entry ({exc})") from exc
+            commands = spec.commands
+            stored: list[str] | dict = spec.model_dump(exclude_none=True)
+        elif isinstance(entry, list):
+            commands = entry
+            stored = entry
+        else:
+            raise TypeError(
+                f"{name}: commands must be a list of text lines or an object"
+            )
+        if not all(isinstance(c, str) for c in commands):
             raise ValueError(f"{name}: commands must be a list of text lines")
-        if len(commands) > _MAX_COMMANDS_PER_DEVICE:
+        if len(commands) > MAX_COMMANDS_PER_DEVICE:
             raise ValueError(
-                f"{name}: at most {_MAX_COMMANDS_PER_DEVICE} commands per device"
+                f"{name}: at most {MAX_COMMANDS_PER_DEVICE:,} commands per device"
             )
         if any(len(c) > _MAX_COMMAND_CHARS or "\x00" in c for c in commands):
             raise ValueError(
                 f"{name}: a command is longer than {_MAX_COMMAND_CHARS} characters "
                 f"or contains a NUL byte"
             )
-        clean[name] = commands
+        clean[name] = stored
     return clean
 
 
@@ -178,7 +195,7 @@ def save_configs(project_id, devices, auto_push: bool) -> dict:
     clean = validate_configs(devices)
     text = json.dumps({"devices": clean, "auto_push": bool(auto_push)}, indent=2)
     if len(text.encode("utf-8")) > _MAX_CONFIG_BYTES:
-        raise ValueError("The configs are larger than 1 MB")
+        raise ValueError("The configs are larger than 8 MB")
     path = _configs_file(project_id)
     _atomic_text(path, text)
     return {"devices": clean, "auto_push": bool(auto_push)}

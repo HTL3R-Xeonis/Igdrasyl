@@ -498,6 +498,9 @@ def test_import_project_auto_pushes_when_the_bundle_enables_it(
             "ok": True,
             "commands": [],
             "error": None,
+            "total_commands": 0,
+            "executed": 0,
+            "truncated": False,
             "not_ready": False,
         }
     ]
