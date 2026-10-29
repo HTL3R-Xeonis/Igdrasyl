@@ -89,6 +89,7 @@
     overflow: hidden;
   }
   .menubar-progress-fill {
+    display: block; /* a <span> ignores width/height, the bar would stay empty */
     height: 100%;
     background: var(--accent);
     border-radius: 3px;

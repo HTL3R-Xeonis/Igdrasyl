@@ -564,7 +564,7 @@ async function loadCanvas() {
       gns3Link.href = "#";
       gns3Link.classList.add("menu-item-disabled");
     }
-    esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/ui/` : "#";
+    esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/` : "#";
 
     const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
     nodesData = {};
