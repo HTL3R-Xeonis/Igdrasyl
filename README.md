@@ -149,7 +149,9 @@ against a real OVA import from the sister template API.
 
 Replaces the configured GNS3 VM with a freshly imported one from its own
 OVA (`src.gns3_vm_deploy.deploy_fresh_gns3_vm`, in TopologyBuilder) -
-available two ways:
+available two ways. The new VM always gets **4 vCPUs and 8 GB RAM** (set after the
+import, before it is powered on), whatever the OVA declares - the stock OVA's
+1 vCPU / 2 GB cannot boot a handful of IOSv nodes:
 
 - **On demand**, via File menu > "Deploy Fresh GNS3 VM…" - e.g. to
   recover from a corrupted GNS3 VM without restarting this whole
