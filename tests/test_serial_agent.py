@@ -145,7 +145,13 @@ def test_connection_refused_is_a_clear_error():
 
 
 async def _routeros_console(
-    reader, writer, *, password="secret", redraw=0.0, reply_delay=0.0
+    reader,
+    writer,
+    *,
+    password="secret",
+    redraw=0.0,
+    reply_delay=0.0,
+    reboot_seconds=0.3,
 ):
     state = "login"
     buffer = b""
@@ -178,8 +184,30 @@ async def _routeros_console(
                     writer.write(
                         b"\r\nLogin failed, incorrect username or password\r\nLogin: "
                     )
+            elif state == "confirm":
+                if text.lower() == "y":
+                    state = "booting"
+                    writer.write(b"\r\nsystem will reboot shortly\r\n")
+                    await writer.drain()
+                    await asyncio.sleep(reboot_seconds)
+                    state = "login"
+                    writer.write(b"\r\nMikroTik v7.21.3 (stable)\r\nMikroTik Login: ")
+                else:
+                    state = "cli"
+                    writer.write(b"\r\n[admin@MikroTik] > ")
             else:
-                if text == "/quit":
+                if text == "/system reboot":
+                    state = "confirm"
+                    writer.write(b"\r\nReboot, yes? [y/N]: ")
+                elif text == "/restart-itself":
+                    # a command that restarts the device on its own, like a domain promotion
+                    state = "booting"
+                    writer.write(b"\r\n[admin@MikroTik] > ")
+                    await writer.drain()
+                    await asyncio.sleep(reboot_seconds)
+                    state = "login"
+                    writer.write(b"\r\nMikroTik Login: ")
+                elif text == "/quit":
                     state = "login"
                     writer.write(b"\r\nLogin: ")
                 elif text.startswith("/ip address add"):
@@ -229,6 +257,51 @@ def test_routeros_first_command_keeps_its_output_when_the_prompt_is_redrawn(
         agent.login()
         code, output = agent.run("/ip address print")
         assert code == 0 and "10.0.0.1/24" in output
+
+
+def test_routeros_reboot_waits_for_the_login_and_goes_on(fake_tcp_server):
+    port = fake_tcp_server(_routeros_console)
+    with _agent(port, profile="routeros", password="secret") as agent:
+        agent.login()
+        outcomes = sa.run_commands(
+            agent, ["/ip address print", "@reboot 20", "/ip address print"]
+        )
+    assert [code for _, code, _ in outcomes] == [0, 0, 0]
+    assert "back after" in outcomes[1][2]
+    assert "10.0.0.1/24" in outcomes[2][2]
+
+
+def test_routeros_wait_reboot_follows_a_command_that_restarts_by_itself(
+    fake_tcp_server,
+):
+    port = fake_tcp_server(_routeros_console)
+    with _agent(port, profile="routeros", password="secret") as agent:
+        agent.login()
+        outcomes = sa.run_commands(
+            agent, ["/restart-itself", "@wait-reboot 20", "/ip address print"]
+        )
+    assert [code for _, code, _ in outcomes] == [0, 0, 0]
+    assert "back after" in outcomes[1][2]
+
+
+def test_a_device_that_does_not_come_back_fails_the_reboot_step(fake_tcp_server):
+    async def handler(reader, writer):
+        await _routeros_console(reader, writer, reboot_seconds=30)
+
+    port = fake_tcp_server(handler)
+    with _agent(port, profile="routeros", password="secret") as agent:
+        agent.login()
+        outcomes = sa.run_commands(agent, ["@reboot 2", "/ip address print"])
+    assert len(outcomes) == 1
+    assert outcomes[0][1] == 1 and "did not show a login again" in outcomes[0][2]
+
+
+def test_a_console_profile_without_a_restart_command_says_so(fake_tcp_server):
+    port = fake_tcp_server(_routeros_console)
+    with _agent(port, profile="bsd_menu") as agent:
+        agent.logged_in = True
+        code, output = sa._run_directive(agent, sa.push_directives.parse("@reboot"))
+    assert code == 1 and "cannot restart" in output
 
 
 def test_routeros_wrong_password_fails_the_login(fake_tcp_server):

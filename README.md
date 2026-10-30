@@ -335,6 +335,17 @@ Windows is not supported. A device stops at its first failing command, the other
   `guest_ops` or `serial`; the login defaults to the template catalog's account. (An explicit password in the object is
   stored in the project's `configs.json` on the server - prefer the catalog.)
 
+**Restarting a device in the middle of a push.** Two lines in a device's command list are not sent but steer the push:
+`@reboot [seconds]` restarts the device, waits until it is back and then carries on with the next commands;
+`@wait-reboot [seconds]` is for a command that restarts the device by itself (promoting a domain controller does) - it waits
+until the device went down and is back. `seconds` is the longest wait (default 900). Typical use: `Rename-Computer ...`,
+`@reboot`, then the commands that need the new name. How "back" is recognised: on a VM with VMware Tools when guest
+operations work again (Linux and Windows, verified live), on the serial console when the login prompt reappears (MikroTik
+verified live; Linux profile; not pfSense/OPNsense, whose profile has no restart command). GNS3 devices reject the lines
+before connecting (save with `write memory`, restart the node from the GUI). A device that does not go down, or is not back
+in time, fails at that line and the rest of its list is not run. Any other line - also one that merely starts with `@`, like
+`@echo off` - is an ordinary command.
+
 Automatic pushes (after a deploy, and after a resume - as a job you can follow in the tab) wait for devices that are still
 booting (`not_ready`: unreachable, nothing ran) and retry them every 15 s for up to 5 minutes; a device where a command
 already ran is never repeated. Nothing in the app logs commands, output or passwords.

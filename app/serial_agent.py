@@ -37,6 +37,8 @@ from typing import Self
 
 from loguru import logger
 
+from app import push_directives
+
 _ANSI = re.compile(
     r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][A-Za-z0-9]|\x1b[=>78MDEHc]|\x1b\][^\x07]*\x07"
 )
@@ -47,6 +49,8 @@ LOGIN_TIMEOUT_SECONDS = 90
 _QUIET_RETRY_SECONDS = 3.0
 _FIRST_QUIET_SECONDS = 1.5
 _POST_LOGIN_QUIET_SECONDS = 0.6
+# a device that just booted keeps printing (log lines, redrawn prompts) for a while
+_POST_REBOOT_QUIET_SECONDS = 2.0
 _MAX_OUTPUT_CHARS = 20_000
 _MAX_BUFFER_CHARS = 200_000
 
@@ -86,6 +90,10 @@ class Profile:
     # Typed once in the shell before the first command (turn echo off, ...).
     shell_setup: tuple[str, ...] = ()
     logout_command: str = "exit"
+    # What restarts the device from its prompt, and the answer to its "are you sure"
+    # question (RouterOS asks). None: the console cannot restart the device itself.
+    reboot_command: str | None = None
+    reboot_confirm: str | None = None
     login_failed: re.Pattern[str] = re.compile(
         r"login incorrect|authentication fail|invalid password|login failed",
         re.IGNORECASE,
@@ -108,6 +116,7 @@ PROFILES: dict[str, Profile] = {
                 "stty -echo 2>/dev/null; export PS1='' PS2='' PROMPT_COMMAND=''"
             ),
         ),
+        reboot_command="reboot",
     ),
     "bsd_menu": Profile(
         name="bsd_menu",
@@ -128,6 +137,8 @@ PROFILES: dict[str, Profile] = {
         style="prompt",
         login_suffix="+ct200w",
         logout_command="/quit",
+        reboot_command="/system reboot",
+        reboot_confirm="y",
         error_markers=(
             "failure:",
             "bad command name",
@@ -390,6 +401,43 @@ class SerialAgent:
             # buffer it would pass for the end of the first command and swallow its output.
             self._drain(quiet=_POST_LOGIN_QUIET_SECONDS)
 
+    # ---- restart ----
+
+    def reboot(self, timeout: float) -> None:
+        """
+        Restarts the device from its prompt and logs in again once the console shows a login.
+        :raises AgentError: the profile has no restart command, or the console did not come back
+        """
+        profile = self.profile
+        if profile.reboot_command is None:
+            raise AgentError(
+                f"the '{profile.name}' console profile cannot restart the device itself"
+            )
+        if not self.logged_in:
+            raise AgentError("not logged in")
+        self._buffer = ""
+        self._send(profile.reboot_command + "\r")
+        if profile.reboot_confirm is not None:
+            self.sleep(1.0)
+            self._send(profile.reboot_confirm + "\r")
+        self.wait_for_reboot(timeout)
+
+    def wait_for_reboot(self, timeout: float) -> None:
+        """
+        Waits for the login prompt that only appears once the device came up again, then logs in.
+        :raises AgentError: no login prompt within `timeout` seconds
+        """
+        self.logged_in = False
+        self._buffer = ""
+        try:
+            self._expect([self.profile.login_prompt], timeout)
+        except AgentTimeout as exc:
+            raise AgentTimeout(
+                f"the device did not show a login again within {timeout:.0f}s ({exc})"
+            ) from exc
+        self.login()
+        self._drain(quiet=_POST_REBOOT_QUIET_SECONDS)
+
     # ---- commands ----
 
     def run(
@@ -457,6 +505,21 @@ class SerialAgent:
         return "\n".join(line.rstrip() for line in lines)[:_MAX_OUTPUT_CHARS]
 
 
+def _run_directive(
+    agent: SerialAgent, directive: push_directives.Directive
+) -> tuple[int, str]:
+    """@reboot / @wait-reboot on the console: (0, text) once the device is back, (1, reason) if not."""
+    started = time.monotonic()
+    try:
+        if directive.kind == "reboot":
+            agent.reboot(directive.timeout)
+        else:
+            agent.wait_for_reboot(directive.timeout)
+    except AgentError as exc:
+        return 1, str(exc)
+    return 0, f"restarted, back after {time.monotonic() - started:.0f}s"
+
+
 def run_commands(
     agent: SerialAgent,
     commands: list[str],
@@ -472,7 +535,11 @@ def run_commands(
     results = results if results is not None else []
     total = len(commands)
     for number, command in enumerate(commands, 1):
-        code, output = agent.run(command)
+        directive = push_directives.parse(command)
+        if directive is None:
+            code, output = agent.run(command)
+        else:
+            code, output = _run_directive(agent, directive)
         results.append((command, code, output))
         if on_progress is not None:
             on_progress(number, total)

@@ -32,7 +32,7 @@ from src.graph.blocks.generic_node import GenericNode
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import esxi_serial, serial_agent
+from app import esxi_serial, push_directives, serial_agent
 from app.esxi_serial import serial_port_of
 from app.gns3_state import NoLiveProject, list_live_nodes
 from app.guest_ops import guest_credentials_for_image, run_command_in_guest
@@ -177,6 +177,18 @@ def _push_via_netmiko(
         NetmikoTimeoutException,
     )
 
+    if push_directives.has_directive(commands):
+        return DeviceResult(
+            device=node.name,
+            transport="netmiko",
+            ok=False,
+            error=(
+                "@reboot / @wait-reboot are not supported on GNS3 console devices "
+                "(save the config with 'write memory'; restart the node from the GUI)"
+            ),
+            total_commands=len(commands),
+        )
+
     device_type = _netmiko_device_type(node.image)
     try:
         conn = ConnectHandler(
@@ -215,6 +227,20 @@ def _push_via_netmiko(
     return _finish(node.name, "netmiko", overall_ok, results, len(commands))
 
 
+def _run_guest_directive(
+    vm: Any, directive: push_directives.Directive
+) -> tuple[int, str]:
+    """@reboot / @wait-reboot for a VM with VMware Tools: (0, text) once it is back, (1, reason) if not."""
+    try:
+        if directive.kind == "reboot":
+            vm.RebootGuest()
+        return 0, push_directives.wait_for_guest_reboot(vm, directive.timeout)
+    except push_directives.RebootError as exc:
+        return 1, str(exc)
+    except Exception as exc:
+        return 1, f"could not restart the guest ({type(exc).__name__}): {exc}"
+
+
 def _push_via_guest_ops(
     node: GenericNode,
     commands: list[str],
@@ -251,16 +277,21 @@ def _push_via_guest_ops(
 
     results: list[CommandResult] = []
     overall_ok = True
+    not_ready = False
     for command in commands:
-        exit_code, output = run_command_in_guest(
-            process_manager,
-            vm,
-            auth,
-            command,
-            is_windows,
-            file_manager=file_manager,
-            esxi_host=Settings.ESXI.IP,
-        )
+        directive = push_directives.parse(command)
+        if directive is None:
+            exit_code, output = run_command_in_guest(
+                process_manager,
+                vm,
+                auth,
+                command,
+                is_windows,
+                file_manager=file_manager,
+                esxi_host=Settings.ESXI.IP,
+            )
+        else:
+            exit_code, output = _run_guest_directive(vm, directive)
         ok = exit_code == 0
         results.append(CommandResult(command=command, output=output, ok=ok))
         if progress is not None:
@@ -269,10 +300,8 @@ def _push_via_guest_ops(
             overall_ok = False
             # exit_code None = the command could not even be started; for the
             # very first command that means "guest not ready", nothing was run.
-            not_ready = exit_code is None and len(results) == 1
+            not_ready = directive is None and exit_code is None and len(results) == 1
             break
-    else:
-        not_ready = False
 
     return _finish(
         node.name,
