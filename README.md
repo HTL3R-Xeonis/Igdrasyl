@@ -309,7 +309,8 @@ one request, for short lists.) A very long result is shortened to the failed com
   (the `root` entry, else the first). Guest operations only report an exit code, so each command's output is redirected
   into a temporary file in the guest, fetched through ESXi and deleted - the result shows the real output (failed commands
   expanded). Commands reach bash single-quoted, so quotes, `$variables` and pipes arrive unchanged. About one second per
-  command.
+  command. A **Windows VM that went to sleep** (powered on, but VMware Tools gone - Windows does that when idle) is woken by
+  a key press on its virtual keyboard before the push, up to 20 s of waiting; a VM suspended by ESXi itself is not resumed.
 - ESXi VMs **without** VMware Tools (MikroTik, pfSense, OPNsense, anything): the **serial console** (below). About 70 ms
   per command.
 

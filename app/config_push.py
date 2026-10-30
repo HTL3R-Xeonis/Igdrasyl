@@ -42,6 +42,11 @@ ProgressCallback = Callable[[str, int, int], None]
 
 _NETMIKO_CONNECT_TIMEOUT_SECONDS = 20
 
+# USB HID usage 0xE1 (left shift) on the virtual keyboard: wakes a sleeping guest, types nothing.
+_WAKE_KEY_CODE = (0xE1 << 16) | 7
+_WAKE_WAIT_SECONDS = 20
+_WAKE_POLL_SECONDS = 2
+
 # Minimal, deliberately narrow: only recognized for the cisco_ios_telnet
 # device type, where these prefixes are well-established. No attempt is
 # made to detect failures on the generic_telnet fallback (VPCS, unknown
@@ -227,6 +232,47 @@ def _push_via_netmiko(
     return _finish(node.name, "netmiko", overall_ok, results, len(commands))
 
 
+def _guest_operations_ready(vm: Any) -> bool:
+    return str(vm.guest.toolsRunningStatus) == "guestToolsRunning" and bool(
+        vm.guest.guestOperationsReady
+    )
+
+
+def _wake_sleeping_windows(
+    vm: Any,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """
+    A Windows VM that sat idle goes to sleep: it stays powered on, but VMware Tools is gone and
+    guest operations fail. A key press on the virtual keyboard wakes it (a few seconds). Done only
+    for a powered-on VM whose Tools are not running; harmless for one that is merely booting.
+    Best effort - the push goes on either way and reports the real state.
+    """
+    from pyVmomi import vim
+
+    if (
+        str(vm.runtime.powerState) != "poweredOn"
+        or str(vm.guest.toolsRunningStatus) != "guestToolsNotRunning"
+    ):
+        return
+    logger.info(
+        f"Config push: VM '{vm.name}' has no VMware Tools, pressing a key to wake it"
+    )
+    try:
+        vm.PutUsbScanCodes(
+            vim.vm.UsbScanCodeSpec(
+                keyEvents=[vim.vm.UsbScanCodeSpec.KeyEvent(usbHidCode=_WAKE_KEY_CODE)]
+            )
+        )
+    except Exception as exc:
+        logger.warning(f"Config push: could not press a key on '{vm.name}': {exc}")
+        return
+    deadline = clock() + _WAKE_WAIT_SECONDS
+    while clock() < deadline and not _guest_operations_ready(vm):
+        sleep(_WAKE_POLL_SECONDS)
+
+
 def _run_guest_directive(
     vm: Any, directive: push_directives.Directive
 ) -> tuple[int, str]:
@@ -274,6 +320,8 @@ def _push_via_guest_ops(
     process_manager = guest_ops.processManager
     file_manager = guest_ops.fileManager
     is_windows = "windows" in node.image.lower()
+    if is_windows:
+        _wake_sleeping_windows(vm)
 
     results: list[CommandResult] = []
     overall_ok = True

@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import app.config_push as cp
 
 
@@ -236,3 +238,82 @@ def test_guest_ops_failure_after_a_command_ran_is_not_retryable(graph):
     ):
         result = cp._push_via_guest_ops(node, ["a", "b"], fake_esxi)
     assert result.not_ready is False and not result.ok
+
+
+class _SleepingVm:
+    """A VM whose Tools come back after `wake_after` polls once a key was pressed."""
+
+    def __init__(self, power="poweredOn", tools="guestToolsNotRunning", wake_after=2):
+        self.name = "WINPC"
+        self.runtime = MagicMock(powerState=power)
+        self.guest = MagicMock(toolsRunningStatus=tools, guestOperationsReady=False)
+        self.pressed = []
+        self._polls_left = wake_after
+
+    def PutUsbScanCodes(self, spec):
+        self.pressed.append(spec.keyEvents[0].usbHidCode)
+
+    def poll(self):
+        if self.pressed:
+            self._polls_left -= 1
+            if self._polls_left <= 0:
+                self.guest.toolsRunningStatus = "guestToolsRunning"
+                self.guest.guestOperationsReady = True
+
+
+def _wake(vm):
+    ticks = {"now": 0.0}
+
+    def sleep(seconds):
+        ticks["now"] += seconds
+        vm.poll()
+
+    cp._wake_sleeping_windows(vm, sleep=sleep, clock=lambda: ticks["now"])
+    return ticks["now"]
+
+
+def test_a_sleeping_windows_vm_is_woken_with_a_key_and_waited_for():
+    vm = _SleepingVm()
+    waited = _wake(vm)
+    assert vm.pressed == [(0xE1 << 16) | 7]
+    assert vm.guest.toolsRunningStatus == "guestToolsRunning"
+    assert waited < cp._WAKE_WAIT_SECONDS
+
+
+def test_a_vm_that_does_not_wake_up_is_given_up_on_after_the_wait():
+    vm = _SleepingVm(wake_after=10_000)
+    assert _wake(vm) >= cp._WAKE_WAIT_SECONDS
+    assert len(vm.pressed) == 1
+
+
+@pytest.mark.parametrize(
+    ("power", "tools"),
+    [
+        ("poweredOff", "guestToolsNotRunning"),
+        ("poweredOn", "guestToolsRunning"),
+        ("poweredOn", "guestToolsExecutingScripts"),
+    ],
+)
+def test_no_key_is_pressed_unless_a_running_vm_has_lost_its_tools(power, tools):
+    vm = _SleepingVm(power=power, tools=tools)
+    _wake(vm)
+    assert vm.pressed == []
+
+
+def test_only_windows_vms_are_woken_before_a_guest_ops_push(graph):
+    with patch.object(cp, "_wake_sleeping_windows") as wake:
+        fake_esxi = MagicMock()
+        process_manager = fake_esxi.content.guestOperationsManager.processManager
+        process_manager.StartProgramInGuest.return_value = 1
+        process_manager.ListProcessesInGuest.return_value = [
+            MagicMock(endTime="t", exitCode=0)
+        ]
+        with patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")):
+            linux = MagicMock(image="Rocky 9.2")
+            linux.name = "VM1"
+            windows = MagicMock(image="Windows 10 Pro Education")
+            windows.name = "VM1"
+            cp._push_via_guest_ops(linux, ["a"], fake_esxi)
+            wake.assert_not_called()
+            cp._push_via_guest_ops(windows, ["a"], fake_esxi)
+            wake.assert_called_once()
