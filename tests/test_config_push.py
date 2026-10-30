@@ -317,3 +317,149 @@ def test_only_windows_vms_are_woken_before_a_guest_ops_push(graph):
             wake.assert_not_called()
             cp._push_via_guest_ops(windows, ["a"], fake_esxi)
             wake.assert_called_once()
+
+
+class _SuspendedVm:
+    def __init__(self, resume_ok=True, ready_after=2):
+        from pyVmomi import vim
+
+        self.name = "WINPC"
+        self.runtime = MagicMock(powerState="suspended")
+        self.guest = MagicMock(
+            toolsRunningStatus="guestToolsNotRunning", guestOperationsReady=False
+        )
+        self.polls = 0
+        self.ready_after = ready_after
+        self.resume_ok = resume_ok
+        self.task = MagicMock()
+        self.task.info.state = (
+            vim.TaskInfo.State.success if resume_ok else vim.TaskInfo.State.error
+        )
+
+    def PowerOnVM_Task(self):
+        self.runtime.powerState = "poweredOn"
+        return self.task
+
+    def tick(self):
+        self.polls += 1
+        if self.polls >= self.ready_after:
+            self.guest.toolsRunningStatus = "guestToolsRunning"
+            self.guest.guestOperationsReady = True
+
+
+def _resume(vm):
+    ticks = {"now": 0.0}
+
+    def sleep(seconds):
+        ticks["now"] += seconds
+        vm.tick()
+
+    cp._resume_suspended(vm, sleep=sleep, clock=lambda: ticks["now"])
+    return ticks["now"]
+
+
+def test_a_suspended_vm_is_resumed_and_waited_for():
+    vm = _SuspendedVm()
+    waited = _resume(vm)
+    assert vm.runtime.powerState == "poweredOn"
+    assert vm.guest.toolsRunningStatus == "guestToolsRunning"
+    assert waited < cp._RESUME_WAIT_SECONDS
+
+
+def test_a_failed_resume_does_not_stop_the_push():
+    vm = _SuspendedVm(resume_ok=False)
+    _resume(vm)  # logs, returns - the push then reports the real state
+
+
+def test_a_vm_that_is_not_suspended_is_left_alone():
+    vm = _SuspendedVm()
+    vm.runtime.powerState = "poweredOn"
+    vm.PowerOnVM_Task = MagicMock()
+    _resume(vm)
+    vm.PowerOnVM_Task.assert_not_called()
+
+
+def test_an_unreachable_guest_is_explained_instead_of_dumping_the_fault():
+    vm = MagicMock()
+    vm.runtime.powerState = "poweredOn"
+    vm.guest.toolsRunningStatus = "guestToolsNotRunning"
+    text = cp._guest_not_reachable_text(
+        vm, "(vim.fault.GuestOperationsUnavailable) {...}"
+    )
+    assert "VMware Tools is not running" in text and "open the VM's screen" in text
+    assert "GuestOperationsUnavailable" in text
+
+    vm.runtime.powerState = "poweredOff"
+    assert "the VM is poweredOff" in cp._guest_not_reachable_text(vm, "x")
+
+
+def test_the_first_failing_guest_command_gets_the_explanation():
+    vm = MagicMock()
+    vm.runtime.powerState = "poweredOn"
+    vm.guest.toolsRunningStatus = "guestToolsNotRunning"
+    esxi = MagicMock()
+    esxi.get_vm.return_value = vm
+    node = MagicMock(image="Rocky 9.2")
+    node.name = "VM1"
+    with (
+        patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")),
+        patch.object(cp, "run_command_in_guest", return_value=(None, "fault dump")),
+    ):
+        result = cp._push_via_guest_ops(node, ["hostname"], esxi)
+    assert result.not_ready and not result.ok
+    assert "VMware Tools is not running" in result.commands[0].output
+
+
+def test_a_starved_gns3_vm_is_named_as_the_reason_for_an_unreachable_console():
+    app = MagicMock()
+    app.state.gns3_vm_ip = "10.0.0.5"
+    with patch.object(cp, "compute_load", return_value={"cpu": 100.0, "memory": 52.0}):
+        text = cp._with_load_hint("couldn't connect: Login failed", app)
+    assert "CPU is at 100%" in text and "more vCPUs" in text
+    assert text.startswith("couldn't connect: Login failed")
+
+
+def test_a_normally_loaded_or_unreadable_gns3_vm_leaves_the_error_alone():
+    app = MagicMock()
+    app.state.gns3_vm_ip = "10.0.0.5"
+    for load in ({"cpu": 20.0, "memory": 10.0}, {"cpu": None, "memory": None}, None):
+        with patch.object(cp, "compute_load", return_value=load):
+            assert cp._with_load_hint("couldn't connect", app) == "couldn't connect"
+
+
+def test_a_netmiko_read_timeout_while_connecting_is_not_ready_not_a_crash(graph):
+    from netmiko.exceptions import ReadTimeout
+
+    with patch(
+        "netmiko.ConnectHandler", side_effect=ReadTimeout("Pattern not detected")
+    ):
+        result = cp._push_via_netmiko(
+            graph.nodes["R1"], ["show version"], "127.0.0.1", 1
+        )
+    assert not result.ok and result.not_ready
+    assert "still booting" in result.error
+
+
+def test_one_device_that_raises_does_not_take_the_others_down(graph):
+    app = MagicMock()
+    app.state.graph = graph
+    app.state.esxi_connection.get_vm.return_value = MagicMock()
+    boom = {"VM1": RuntimeError("kaboom")}
+
+    def fake_guest_ops(node, commands, esxi, progress=None):
+        if node.name in boom:
+            raise boom[node.name]
+        return cp.DeviceResult(device=node.name, transport="guest_ops", ok=True)
+
+    names = [n for n, node in graph.nodes.items() if node.env.name == "ON_ESXI"]
+    assert "VM1" in names
+    with (
+        patch.object(cp, "_push_via_guest_ops", fake_guest_ops),
+        patch.object(cp, "list_live_nodes", return_value=[]),
+        patch.object(cp, "_esxi_transport", return_value="guest_ops"),
+    ):
+        results = cp.push_all({n: ["x"] for n in names}, app)
+    by_name = {r.device: r for r in results}
+    assert not by_name["VM1"].ok and "kaboom" in by_name["VM1"].error
+    assert all(r.ok for n, r in by_name.items() if n != "VM1")
+    assert len(results) == len(names)

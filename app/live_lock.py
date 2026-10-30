@@ -31,3 +31,14 @@ def exclusive(what: str) -> Iterator[None]:
         yield
     finally:
         _LOCK.release()
+
+
+@contextmanager
+def try_exclusive() -> Iterator[bool]:
+    """Like exclusive(), but never waits: yields False (and holds nothing) when another change is running."""
+    got = _LOCK.acquire(blocking=False)
+    try:
+        yield got
+    finally:
+        if got:
+            _LOCK.release()

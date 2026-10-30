@@ -12,6 +12,7 @@ defaults apply, which won't match this project's real infrastructure.
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -21,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from src.connections.esxi_connection import ESXiConnection
 from src.graph.environment import Environment
 from src.settings import Settings
@@ -42,6 +43,7 @@ from app import (
     import_jobs,
     lifecycle,
     link_options,
+    live_lock,
     log_store,
     logging_setup,
     logs,
@@ -54,6 +56,7 @@ from app import (
     public_text,
     push_jobs,
     settings_profiles,
+    startup_retry,
     template_health,
     topology_write,
     vm_screen,
@@ -88,7 +91,7 @@ _LICENSE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "LICENSE")
 _SETTINGS_ENV_VAR = "TOPOLOGYOPERATOR_SETTINGS"
 
 
-def _refresh_startup_state(app: FastAPI) -> None:
+def _refresh_startup_state(app: FastAPI, allow_auto_deploy: bool = True) -> None:
     """
     (Re)computes app.state.graph and the live GNS3 project resolution -
     called once from lifespan at process start, and again from
@@ -129,7 +132,8 @@ def _refresh_startup_state(app: FastAPI) -> None:
         # absent - never when one exists but just isn't reporting an IP
         # yet (e.g. still booting). See gns3_vm_deploy_jobs's own
         # docstring for the exact rule and why.
-        gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
+        if allow_auto_deploy:
+            gns3_vm_deploy_jobs.auto_deploy_if_missing(app)
 
         gns3_vm_ip = app.state.esxi_connection.get_vm_ip_address(
             Settings.ESXI.GNS3_VM_NAME
@@ -168,6 +172,16 @@ def _refresh_startup_state(app: FastAPI) -> None:
         logger.warning(f"Starting without live GNS3 state: {exc}")
 
     app.state.startup_warning = "; ".join(warnings) or None
+
+
+def _retry_startup_state(app: FastAPI) -> bool:
+    """One background attempt to heal the startup warning; False when the lab was busy with another change."""
+    with live_lock.try_exclusive() as got:
+        if not got:
+            return False
+        # No auto-deploy here: replacing the GNS3 VM stays a decision of the startup / the user.
+        _refresh_startup_state(app, allow_auto_deploy=False)
+        return True
 
 
 @asynccontextmanager
@@ -228,7 +242,18 @@ async def lifespan(app: FastAPI):
     app.state.gns3_vm_deploy_job = None
     _refresh_startup_state(app)
 
+    # Whatever was missing at startup (GNS3 VM still booting, template service down) is
+    # retried in the background until the warning is gone - nobody has to press Retry.
+    stop_retry = threading.Event()
+    startup_retry.start(
+        lambda: bool(app.state.startup_warning) and _held_project() is None,
+        lambda: _retry_startup_state(app),
+        stop_retry,
+    )
+
     yield
+
+    stop_retry.set()
 
 
 app = FastAPI(title="TopologyOperator", lifespan=lifespan)
@@ -758,6 +783,8 @@ def reload_node(name: str) -> dict[str, str]:
 
 class PushRequest(BaseModel):
     devices: dict[str, list[str] | DeviceSpec]
+    # How long a job keeps retrying devices that are still booting; omitted = 15 minutes, 0 = once.
+    wait_seconds: int | None = Field(default=None, ge=0, le=3600)
 
 
 @app.post("/config-push/jobs", status_code=202)
@@ -768,7 +795,9 @@ def start_config_push_job(request: PushRequest) -> dict[str, Any]:
     GET /config-push/jobs/{job_id}.
     """
     try:
-        job = push_jobs.start_job(app, request.devices)
+        job = push_jobs.start_job(
+            app, request.devices, wait_seconds=request.wait_seconds
+        )
     except push_jobs.AlreadyRunning as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"job_id": job.id, "total_commands": job.total_commands}
@@ -1460,7 +1489,7 @@ def resume_held_project(project_id: str) -> dict[str, Any]:
         try:
             # In the background (it can be long, and devices may still be booting):
             # the client follows it through GET /config-push/jobs/{id}.
-            job = push_jobs.start_job(app, saved["devices"], wait=True)
+            job = push_jobs.start_job(app, saved["devices"])
             response["push_job_id"] = job.id
         except push_jobs.AlreadyRunning:
             response["push_job_error"] = "another config push is still running"

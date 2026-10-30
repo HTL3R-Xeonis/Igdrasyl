@@ -291,12 +291,12 @@ def test_push_job_reports_progress_and_results(app_state):
         return [cp.DeviceResult(device="R1", transport="netmiko", ok=True)]
 
     with patch.object(push_jobs, "push_all", slow_push):
-        job = push_jobs.start_job(main_module.app, {"R1": ["a", "b"]})
+        job = push_jobs.start_job(main_module.app, {"R1": ["a", "b"]}, wait_seconds=0)
         time.sleep(0.2)
         assert job.status == "running"
         assert job.progress()["done_commands"] == 1
         with pytest.raises(push_jobs.AlreadyRunning):
-            push_jobs.start_job(main_module.app, {"R1": ["a"]})
+            push_jobs.start_job(main_module.app, {"R1": ["a"]}, wait_seconds=0)
         release.set()
         for _ in range(50):
             if job.status != "running":
@@ -327,7 +327,7 @@ def test_push_job_endpoints(client, app_state):
 
 def test_a_crashing_push_job_ends_with_an_error_instead_of_hanging(app_state):
     with patch.object(push_jobs, "push_all", side_effect=OSError("disk full")):
-        job = push_jobs.start_job(main_module.app, {"R1": ["x"]})
+        job = push_jobs.start_job(main_module.app, {"R1": ["x"]}, wait_seconds=0)
         for _ in range(50):
             if job.status != "running":
                 break
@@ -343,3 +343,63 @@ def test_serial_status_and_enable_endpoints(client, app_state):
     again = client.post("/nodes/VM1/serial/enable").json()
     assert again["changed"] is False and again["port"] == 2002
     assert client.get("/nodes/R1/serial").status_code == 404
+
+
+def test_a_push_job_waits_for_a_booting_device_by_default_and_says_so(app_state):
+    calls = []
+
+    def fake_waiting(devices, app, wait_seconds, on_progress=None, on_waiting=None):
+        calls.append(wait_seconds)
+        on_waiting(["SW-CORE"])
+        waiting_seen.append(main_module.app.state.push_job.progress()["waiting_for"])
+        return [cp.DeviceResult(device="SW-CORE", transport="netmiko", ok=True)]
+
+    waiting_seen = []
+    with patch.object(push_jobs, "push_all_waiting", fake_waiting):
+        job = push_jobs.start_job(main_module.app, {"SW-CORE": ["a"]})
+        for _ in range(50):
+            if job.status != "running":
+                break
+            time.sleep(0.05)
+    assert calls == [cp.DEFAULT_WAIT_SECONDS] and waiting_seen == [["SW-CORE"]]
+    assert job.status == "done" and job.progress()["waiting_for"] == []
+
+
+def test_the_wait_of_a_push_job_can_be_chosen_or_switched_off(client, app_state):
+    with patch.object(push_jobs, "start_job") as start:
+        start.return_value = MagicMock(id="j1", total_commands=1)
+        client.post("/config-push/jobs", json={"devices": {"R1": ["a"]}})
+        client.post(
+            "/config-push/jobs", json={"devices": {"R1": ["a"]}, "wait_seconds": 0}
+        )
+        bad = client.post(
+            "/config-push/jobs", json={"devices": {"R1": ["a"]}, "wait_seconds": -5}
+        )
+    assert [c.kwargs["wait_seconds"] for c in start.call_args_list] == [None, 0]
+    assert bad.status_code == 422
+
+
+def test_push_all_waiting_tells_who_it_is_waiting_for():
+    seen = []
+    rounds = iter(
+        [
+            [
+                cp.DeviceResult(
+                    device="A", transport="netmiko", ok=False, not_ready=True
+                )
+            ],
+            [cp.DeviceResult(device="A", transport="netmiko", ok=True)],
+        ]
+    )
+    with patch.object(
+        cp, "push_all", lambda devices, app, on_progress=None: next(rounds)
+    ):
+        results = cp.push_all_waiting(
+            {"A": ["x"]},
+            None,
+            wait_seconds=60,
+            interval_seconds=1,
+            sleep=lambda s: None,
+            on_waiting=lambda names: seen.append(names),
+        )
+    assert results[0].ok and seen == [["A"], []]

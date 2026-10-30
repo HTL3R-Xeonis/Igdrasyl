@@ -36,6 +36,22 @@ def resolve_project_id(gns3_vm_ip: str, project_name: str) -> str | None:
     return project["project_id"] if project is not None else None
 
 
+def compute_load(gns3_vm_ip: str, port: int) -> dict[str, float | None] | None:
+    """
+    What the GNS3 server itself reports about its load ({"cpu": %, "memory": %}), None if it
+    cannot be asked. A GNS3 VM with too few vCPUs runs at 100 % while router/switch images
+    boot - which is why their consoles stay silent for hours.
+    """
+    try:
+        compute = GNS3Connection.get(f"http://{gns3_vm_ip}:{port}/v2/computes/local")
+    except Exception:
+        return None
+    return {
+        "cpu": compute.get("cpu_usage_percent"),
+        "memory": compute.get("memory_usage_percent"),
+    }
+
+
 def reload_project(gns3_vm_ip: str, port: int, project_id: str) -> None:
     """
     Closes then reopens the GNS3 project - refreshes the controller's

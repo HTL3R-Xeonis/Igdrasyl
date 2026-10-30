@@ -133,7 +133,12 @@ against a real OVA import from the sister template API.
   error surfaces via the existing warning banner (with a "Retry" button,
   `POST /reload`), and only the live topology view is unavailable; the
   landing page, design mode, and the Logs panel all keep working
-  regardless, since none of them touch `app.state.graph`.
+  regardless, since none of them touch `app.state.graph`. The app also
+  **retries by itself** in the background (every 15 s at first, then every
+  minute, never while another change to the lab runs or a project is on hold)
+  until the warning is gone - after a host reboot nobody has to press Retry or
+  restart the process once the GNS3 VM has finished booting. It never replaces
+  the GNS3 VM on its own (that stays with the startup check and the File menu).
 
 - **Health check and orphan cleanup** (`app/maintenance.py`): File menu >
   "Health Check…" runs TopologyBuilder's structural `verify` against the
@@ -305,6 +310,13 @@ A push runs as a **background job** (`POST /config-push/jobs`, then `GET /config
 bar per device and the per-device results at the end; only one push runs at a time. (`POST /config-push` still answers in
 one request, for short lists.) A very long result is shortened to the failed commands plus the last 50 (`truncated`).
 
+**The push solves what it can by itself.** A device that is still booting (nothing reachable yet, no command run) is retried
+every 15 s for up to **15 minutes** - for pushes started by hand too (`"wait_seconds": 0` in the request: try once; up to 3600);
+the job's status lists the devices it is waiting for (`waiting_for`). A Windows VM that went to sleep is woken with a key
+press, a VM that ESXi suspended is resumed, and a device that raises something unforeseen ends only its own entry - the others
+still run. When it still cannot get in it says why instead of dumping a fault: no VMware Tools / stuck before the OS starts
+(look at the VM's screen), or a GNS3 VM whose CPU is at 100 % (too few vCPUs - its router/switch images never finish booting).
+
 **How a device is reached**
 - GNS3 consoles (routers, VPCS): Telnet through Netmiko. No login is attempted - a console that asks for one fails.
 - ESXi VMs with VMware Tools: guest operations, which log in by themselves with the account from the template catalog
@@ -350,7 +362,7 @@ in time, fails at that line and the rest of its list is not run. Any other line 
 `@echo off` - is an ordinary command.
 
 Automatic pushes (after a deploy, and after a resume - as a job you can follow in the tab) wait for devices that are still
-booting (`not_ready`: unreachable, nothing ran) and retry them every 15 s for up to 5 minutes; a device where a command
+booting (`not_ready`: unreachable, nothing ran) and retry them every 15 s for up to 15 minutes; a device where a command
 already ran is never repeated. Nothing in the app logs commands, output or passwords.
 
 ## One structural change at a time

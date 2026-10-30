@@ -261,7 +261,7 @@ def test_resume_starts_a_push_job_for_the_saved_configs_when_the_project_wants_t
     assert response.status_code == 200
     start.assert_called_once()
     assert start.call_args.args[1] == {"R1": ["show version"]}
-    assert start.call_args.kwargs == {"wait": True}
+    assert start.call_args.kwargs == {}  # the default: waits for devices still booting
     assert response.json()["push_job_id"] == "job-1"
 
 

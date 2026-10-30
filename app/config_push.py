@@ -34,7 +34,7 @@ from src.settings import Settings
 
 from app import esxi_serial, push_directives, serial_agent
 from app.esxi_serial import serial_port_of
-from app.gns3_state import NoLiveProject, list_live_nodes
+from app.gns3_state import NoLiveProject, compute_load, list_live_nodes
 from app.guest_ops import guest_credentials_for_image, run_command_in_guest
 
 # (device, commands done, commands total) - lets a long push report its progress.
@@ -46,6 +46,7 @@ _NETMIKO_CONNECT_TIMEOUT_SECONDS = 20
 _WAKE_KEY_CODE = (0xE1 << 16) | 7
 _WAKE_WAIT_SECONDS = 20
 _WAKE_POLL_SECONDS = 2
+_RESUME_WAIT_SECONDS = 120
 
 # Minimal, deliberately narrow: only recognized for the cisco_ios_telnet
 # device type, where these prefixes are well-established. No attempt is
@@ -180,6 +181,7 @@ def _push_via_netmiko(
     from netmiko.exceptions import (
         NetmikoAuthenticationException,
         NetmikoTimeoutException,
+        ReadTimeout,
     )
 
     if push_directives.has_directive(commands):
@@ -203,6 +205,16 @@ def _push_via_netmiko(
             username="",
             password="",
             timeout=_NETMIKO_CONNECT_TIMEOUT_SECONDS,
+        )
+    except ReadTimeout:
+        # Connected, but the device never answered the session set-up: still booting (or starved).
+        return DeviceResult(
+            device=node.name,
+            transport="netmiko",
+            ok=False,
+            error="couldn't connect: the console did not answer in time (the device is still booting)",
+            not_ready=True,
+            total_commands=len(commands),
         )
     except (NetmikoTimeoutException, NetmikoAuthenticationException, OSError) as exc:
         return DeviceResult(
@@ -238,6 +250,41 @@ def _guest_operations_ready(vm: Any) -> bool:
     )
 
 
+def _resume_suspended(
+    vm: Any,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """
+    A VM that ESXi has suspended cannot run guest operations; powering it on resumes it where it
+    stopped (nothing is lost). Waits until its VMware Tools answer again. Best effort - the push
+    goes on either way and reports the real state.
+    """
+    from pyVmomi import vim
+
+    if str(vm.runtime.powerState) != "suspended":
+        return
+    logger.info(f"Config push: VM '{vm.name}' is suspended, resuming it")
+    try:
+        task = vm.PowerOnVM_Task()
+        while task.info.state not in (
+            vim.TaskInfo.State.success,
+            vim.TaskInfo.State.error,
+        ):
+            sleep(1)
+        if task.info.state == vim.TaskInfo.State.error:
+            logger.warning(
+                f"Config push: could not resume '{vm.name}': {task.info.error}"
+            )
+            return
+    except Exception as exc:
+        logger.warning(f"Config push: could not resume '{vm.name}': {exc}")
+        return
+    deadline = clock() + _RESUME_WAIT_SECONDS
+    while clock() < deadline and not _guest_operations_ready(vm):
+        sleep(_WAKE_POLL_SECONDS)
+
+
 def _wake_sleeping_windows(
     vm: Any,
     sleep: Callable[[float], None] = time.sleep,
@@ -271,6 +318,27 @@ def _wake_sleeping_windows(
     deadline = clock() + _WAKE_WAIT_SECONDS
     while clock() < deadline and not _guest_operations_ready(vm):
         sleep(_WAKE_POLL_SECONDS)
+
+
+def _guest_not_reachable_text(vm: Any, raw: str) -> str:
+    """
+    What a guest-operations failure on the very first command means, in words. The raw fault
+    ('GuestOperationsUnavailable ...') says nothing about why - and for a VM that sits idle with
+    no Tools the usual reason is one the push cannot fix (nothing boots), so say where to look.
+    """
+    power = str(vm.runtime.powerState)
+    tools = str(vm.guest.toolsRunningStatus)
+    if power != "poweredOn":
+        what = f"the VM is {power}"
+    elif tools == "guestToolsNotRunning":
+        what = (
+            "VMware Tools is not running in the guest. It may still be booting, or it is "
+            "stuck before the operating system starts (for example no bootable disk, the "
+            "firmware boot menu) - open the VM's screen to see which"
+        )
+    else:
+        what = f"VMware Tools reports '{tools}'"
+    return f"guest operations are not available: {what}.\n{raw[:300]}".strip()
 
 
 def _run_guest_directive(
@@ -320,6 +388,7 @@ def _push_via_guest_ops(
     process_manager = guest_ops.processManager
     file_manager = guest_ops.fileManager
     is_windows = "windows" in node.image.lower()
+    _resume_suspended(vm)
     if is_windows:
         _wake_sleeping_windows(vm)
 
@@ -349,6 +418,8 @@ def _push_via_guest_ops(
             # exit_code None = the command could not even be started; for the
             # very first command that means "guest not ready", nothing was run.
             not_ready = directive is None and exit_code is None and len(results) == 1
+            if not_ready:
+                results[0].output = _guest_not_reachable_text(vm, output)
             break
 
     return _finish(
@@ -447,20 +518,27 @@ def _push_via_serial(
     return _finish(node.name, "serial", ok, results, total)
 
 
+# How long a push waits for a device that is still booting. A router image on a small GNS3 VM can
+# take a quarter of an hour (measured: ~11 minutes for IOSv with four of them booting at once).
+DEFAULT_WAIT_SECONDS = 900
+
+
 def push_all_waiting(
     devices: dict[str, Any],
     app: Any,
-    wait_seconds: int = 300,
+    wait_seconds: int = DEFAULT_WAIT_SECONDS,
     interval_seconds: int = 15,
     sleep: Any = time.sleep,
     on_progress: ProgressCallback | None = None,
+    on_waiting: Callable[[list[str]], None] | None = None,
 ) -> list[DeviceResult]:
     """
-    push_all for an automatic push right after a deploy or resume, when devices
-    are still booting: a device that could not be reached at all and ran no
+    push_all that does not give up on devices that are still booting (after a deploy,
+    a resume or a power-on): a device that could not be reached at all and ran no
     command (DeviceResult.not_ready) is tried again every `interval_seconds`, up
     to `wait_seconds`. A device where a command already ran or failed is never
     repeated - re-sending a half-applied config could do harm.
+    `on_waiting(names)` is told which devices are being waited for.
     """
     deadline = time.monotonic() + wait_seconds
     pending = dict(devices)
@@ -473,6 +551,8 @@ def push_all_waiting(
             for name, commands in pending.items()
             if name in final and final[name].not_ready
         }
+        if on_waiting is not None:
+            on_waiting(sorted(pending))
         if not pending or time.monotonic() + interval_seconds > deadline:
             break
         logger.info(
@@ -545,6 +625,26 @@ def _ensure_serial(node: GenericNode, app: Any) -> str | None:
     return None
 
 
+_STARVED_CPU_PERCENT = 95
+
+
+def _with_load_hint(error: str | None, app: Any) -> str | None:
+    """
+    A console that stays unreachable on a GNS3 VM whose CPU is saturated is not 'broken' - the
+    images are starved while booting. Say so; the operator can then give the VM more vCPUs
+    (a GNS3 VM deployed through this program gets 4).
+    """
+    load = compute_load(app.state.gns3_vm_ip, Settings.GNS3.PORT)
+    cpu = load["cpu"] if load else None
+    if cpu is None or cpu < _STARVED_CPU_PERCENT:
+        return error
+    return (
+        f"{error or 'console not reachable'} - the GNS3 VM's CPU is at {cpu:.0f}%, so the "
+        f"router/switch images are starved and boot very slowly (or never); give the GNS3 VM "
+        f"more vCPUs"
+    )
+
+
 def push_all(
     devices: dict[str, Any],
     app: Any,
@@ -570,88 +670,104 @@ def push_all(
         live_error = str(exc)
 
     for device_name, spec in specs.items():
-        commands = spec.commands
+        try:
+            commands = spec.commands
 
-        def progress(done: int, total: int, name: str = device_name) -> None:
-            if on_progress is not None:
-                on_progress(name, done, total)
+            def progress(done: int, total: int, name: str = device_name) -> None:
+                if on_progress is not None:
+                    on_progress(name, done, total)
 
-        node = app.state.graph.nodes.get(device_name)
-        if node is None:
-            results.append(
-                DeviceResult(
-                    device=device_name,
-                    transport="n/a",
-                    ok=False,
-                    error="not found in topology",
-                    total_commands=len(commands),
-                )
-            )
-            continue
-
-        if node.env == Environment.ON_GNS3:
-            live = live_by_name.get(device_name)
-            if live is None:
+            node = app.state.graph.nodes.get(device_name)
+            if node is None:
                 results.append(
                     DeviceResult(
                         device=device_name,
-                        transport="netmiko",
+                        transport="n/a",
                         ok=False,
-                        error=live_error or "no live console info for this node",
+                        error="not found in topology",
                         total_commands=len(commands),
                     )
                 )
                 continue
-            console_port = live.get("console")
-            if live.get("console_type") != "telnet" or console_port is None:
-                results.append(
-                    DeviceResult(
-                        device=device_name,
-                        transport="netmiko",
-                        ok=False,
-                        error=f"no telnet console available (type={live.get('console_type')!r})",
-                        total_commands=len(commands),
-                    )
-                )
-                continue
-            results.append(
-                _push_via_netmiko(
-                    node, commands, app.state.gns3_vm_ip, console_port, progress
-                )
-            )
-        elif node.env == Environment.ON_ESXI:
-            if _esxi_transport(node, spec, app.state.esxi_connection) == "serial":
-                setup_error = _ensure_serial(node, app)
-                if setup_error is not None:
+
+            if node.env == Environment.ON_GNS3:
+                live = live_by_name.get(device_name)
+                if live is None:
                     results.append(
                         DeviceResult(
                             device=device_name,
-                            transport="serial",
+                            transport="netmiko",
                             ok=False,
-                            error=setup_error,
+                            error=live_error or "no live console info for this node",
                             total_commands=len(commands),
                         )
                     )
+                    continue
+                console_port = live.get("console")
+                if live.get("console_type") != "telnet" or console_port is None:
+                    results.append(
+                        DeviceResult(
+                            device=device_name,
+                            transport="netmiko",
+                            ok=False,
+                            error=f"no telnet console available (type={live.get('console_type')!r})",
+                            total_commands=len(commands),
+                        )
+                    )
+                    continue
+                result = _push_via_netmiko(
+                    node, commands, app.state.gns3_vm_ip, console_port, progress
+                )
+                if result.not_ready:
+                    result.error = _with_load_hint(result.error, app)
+                results.append(result)
+            elif node.env == Environment.ON_ESXI:
+                if _esxi_transport(node, spec, app.state.esxi_connection) == "serial":
+                    setup_error = _ensure_serial(node, app)
+                    if setup_error is not None:
+                        results.append(
+                            DeviceResult(
+                                device=device_name,
+                                transport="serial",
+                                ok=False,
+                                error=setup_error,
+                                total_commands=len(commands),
+                            )
+                        )
+                    else:
+                        results.append(
+                            _push_via_serial(
+                                node, spec, app.state.esxi_connection, progress
+                            )
+                        )
                 else:
                     results.append(
-                        _push_via_serial(
-                            node, spec, app.state.esxi_connection, progress
+                        _push_via_guest_ops(
+                            node, commands, app.state.esxi_connection, progress
                         )
                     )
             else:
                 results.append(
-                    _push_via_guest_ops(
-                        node, commands, app.state.esxi_connection, progress
+                    DeviceResult(
+                        device=device_name,
+                        transport="n/a",
+                        ok=False,
+                        error=f"node environment {node.env.name} has no config-push transport",
+                        total_commands=len(commands),
                     )
                 )
-        else:
+        except Exception as exc:
+            # Whatever a transport raises that it did not foresee ends this device only.
+            logger.opt(exception=exc).warning(
+                f"Config push to {device_name} failed unexpectedly: {exc}"
+            )
             results.append(
                 DeviceResult(
                     device=device_name,
                     transport="n/a",
                     ok=False,
-                    error=f"node environment {node.env.name} has no config-push transport",
-                    total_commands=len(commands),
+                    error=f"unexpected error ({type(exc).__name__}): {str(exc)[:300]}",
+                    total_commands=len(spec.commands),
                 )
             )
 
