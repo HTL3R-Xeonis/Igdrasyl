@@ -312,7 +312,7 @@ one request, for short lists.) A very long result is shortened to the failed com
 
 **The push solves what it can by itself.** A device that is still booting (nothing reachable yet, no command run) is retried
 every 15 s for up to **15 minutes** - for pushes started by hand too (`"wait_seconds": 0` in the request: try once; up to 3600);
-the job's status lists the devices it is waiting for (`waiting_for`). A Windows VM that went to sleep is woken with a key
+the job's status lists the devices it is waiting for (`waiting_for`; the tab shows "Waiting for: ..." under the progress). A Windows VM that went to sleep is woken with a key
 press, a VM that ESXi suspended is resumed, and a device that raises something unforeseen ends only its own entry - the others
 still run. When it still cannot get in it says why instead of dumping a fault: no VMware Tools / stuck before the OS starts
 (look at the VM's screen), or a GNS3 VM whose CPU is at 100 % (too few vCPUs - its router/switch images never finish booting).
@@ -489,7 +489,10 @@ same restart flow as host changes. Import and live edits require a selected proj
   /links/{node1}/{node2}/capture/start`, `.../capture/stop`, `GET
   .../capture/stream` (proxies GNS3's own live pcap stream) - see
   Architecture above.
-- `POST /config-push`, `GET/POST /drawings`.
+- `POST /config-push` (one request, for short lists), `POST /config-push/jobs` (background job; body `devices` plus optional
+  `wait_seconds`: how long devices that are still booting are retried - default 900, `0` = try once, max 3600) and
+  `GET /config-push/jobs/{id}` (`status`, per-device progress, `waiting_for` = names of the devices the push is waiting for,
+  `results` once done), `GET/POST /drawings`.
 - `GET /logs?lines=N` (the in-project panel), `GET /logs/entries?lines=N&level=L&search=S` (entries with
   tracebacks kept together, plus how full the log is), `GET /logs/download` (the whole retained log as text),
   `GET /templates/health` - see Architecture above.

@@ -4869,6 +4869,13 @@ async function followPushJob(jobId) {
   }
 }
 
+// The line shown while a push waits for devices that are still booting (job.waiting_for,
+// retried by the server on its own); empty when nothing is waited for.
+function pushWaitingText(names) {
+  if (!Array.isArray(names) || names.length === 0) return "";
+  return `Waiting for: ${names.join(", ")} (still booting)`;
+}
+
 function renderPushProgress(job) {
   const resultsEl = document.getElementById("push-results");
   resultsEl.replaceChildren();
@@ -4876,6 +4883,13 @@ function renderPushProgress(job) {
   heading.style.cssText = "margin:6px 0;color:var(--dim);font-size:12px";
   heading.textContent = `Pushing… ${job.done_commands.toLocaleString()} of ${job.total_commands.toLocaleString()} commands, ${Math.round(job.elapsed_seconds)} s`;
   resultsEl.appendChild(heading);
+  const waitingText = pushWaitingText(job.waiting_for);
+  if (waitingText) {
+    const waiting = document.createElement("div");
+    waiting.style.cssText = "margin:6px 0;color:var(--dim);font-size:12px";
+    waiting.textContent = waitingText;
+    resultsEl.appendChild(waiting);
+  }
   for (const device of job.devices) {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px";
