@@ -10,6 +10,7 @@ host_defaults.yml
 .env
 logs/
 layout.json
+label_layout.json
 design_state.json
 settings_profiles/
 handoff/

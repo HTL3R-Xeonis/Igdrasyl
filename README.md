@@ -1,4 +1,8 @@
-# TopologyOperator
+# Ginnungagap
+
+*(The project, repository and Python package are still called TopologyOperator, as are the `TOPOLOGYOPERATOR_*`
+environment variables; "Ginnungagap" is the name shown in the app. In Norse myth it is the void between ice and fire
+from which the world arises - here, the empty canvas from which a lab arises.)*
 
 A GUI tool for *operating* topologies already deployed by
 [TopologyBuilder](https://github.com/HTL3R-Xeonis/TopologyBuilder): a
@@ -16,6 +20,8 @@ Generate via LLM, packet capture, and the template-outage degrade path
 have all been exercised live, not just in the test suite. The GNS3 VM
 Deploy feature (below) is thoroughly unit-tested but not yet exercised
 against a real OVA import from the sister template API.
+
+Design proposal for running everything as one VM with one config file: [docs/DESIGN-single-vm.md](docs/DESIGN-single-vm.md).
 
 ## Architecture
 
@@ -35,6 +41,12 @@ against a real OVA import from the sister template API.
 - GNS3 console embedding: `xterm.js` in the browser, bridged to the
   node's real Telnet console port via a backend WebSocket proxy
   (`app/console.py`).
+- **Serial console of an ESXi VM** (`app/serial_console.py`): once a VM has its network serial port (see "Serial console
+  agent" below), its popup's **Serial console** entry opens the serial line in the same terminal panel
+  (`/ws/serial/{name}`). The ESXi serial port takes one client at a time, so a second console of the same VM is refused,
+  and a running serial config push (or another console) blocks the connect - the tab then says so. It needs the VM to
+  be powered on; if the screen stays empty, press Enter. (An earlier interactive serial console was removed on
+  2026-09-22; this one reuses the port setup the config push brought back.)
 - VM screens: a direct VNC server enabled on the VM itself
   (`RemoteDisplay.vnc.*`), bridged the same way (`app/vm_screen.py`),
   rendered in the browser with open-source `noVNC`.
@@ -132,6 +144,11 @@ against a real OVA import from the sister template API.
   If the interfaces match no live link, the request fails instead of
   hitting the link that does exist. `verify` checks each link by its ports,
   and TopologyBuilder creates each one in GNS3 by its own interface pair.
+- **Movable labels**: port labels and node names are dragged with the mouse (double-click puts one back; View menu >
+  Reset Label Positions resets all). They sit in a layer above the nodes, so no icon hides one, and keep a halo so
+  overlapping text stays readable. What is stored is the offset from the default spot (`app/label_layout.py`,
+  `GET/POST /labels`, `label_layout.json`, git-ignored), so a label follows its node; the design sketch keeps its own
+  copy in the design state, which makes label moves undoable there. Not yet part of a `.topoproj` export.
 - **Wireshark-style packet capture** (`app/capture.py`): start/stop a
   capture on any live link and view it as a live, in-browser
   Wireshark-style packet table (click a link on the canvas) - a

@@ -44,6 +44,14 @@ def _design_store_tmp_file(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _label_layout_tmp_file(tmp_path, monkeypatch):
+    """POST /labels writes a local file (app/label_layout.py); never into the repo root."""
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_LABELS_FILE", str(tmp_path / "label_layout.json")
+    )
+
+
 @pytest.fixture
 def temp_topology_file(tmp_path, app_state):
     """

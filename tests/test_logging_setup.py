@@ -105,7 +105,7 @@ def test_the_startup_lines_describe_the_setup_but_never_a_password(
     logging_setup.configure_logging()
     text = _text(log_path)
 
-    assert "TopologyOperator starting" in text
+    assert "Ginnungagap starting" in text
     assert "at most 100,000 lines" in text
     assert "esxi_host" in text and "gns3_vm_name" in text
     assert "hunter2" not in text

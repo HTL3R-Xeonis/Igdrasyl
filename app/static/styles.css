@@ -362,6 +362,7 @@
      selected, and a small corner dot showing whether it's running. */
   .node-shape { cursor: pointer; }
   .node-shape text { fill: var(--canvas-text); font-size: 11px; pointer-events: none; user-select: none; }
+  .node-shape text.node-name-label { pointer-events: all; cursor: grab; stroke: var(--canvas-bg); stroke-width: 3px; paint-order: stroke; }
   .node-select-box { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; opacity: 0; }
   .node-shape.selected .node-select-box { opacity: 1; }
   .status-dot.status-ok { fill: var(--ok); stroke: var(--canvas-bg); stroke-width: 1.5; }
@@ -374,7 +375,8 @@
   .link-hit:hover + .link-line { stroke: var(--accent); stroke-width: 2.5; }
   .link-line-capturing { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
   .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
-  .port-label { fill: var(--canvas-link); font-size: 9px; pointer-events: none; user-select: none; }
+  /* Labels can be dragged (and a double click puts one back); the halo keeps text readable where labels overlap. */
+  .port-label { fill: var(--canvas-link); font-size: 9px; cursor: grab; user-select: none; stroke: var(--canvas-bg); stroke-width: 3px; paint-order: stroke; }
   #canvas-toolbar {
     position: absolute;
     top: 10px;
@@ -1671,3 +1673,21 @@ input:focus, select:focus, textarea:focus {
 .device-result details { margin: 2px 10px 6px 28px; }
 .device-result details summary { cursor: pointer; color: var(--dim); font-size: 12px; }
 .device-result pre.cmd-output { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+
+/* Ginnungagap landing page: only the brand header differs from the plain landing page above. The ice/ember colours
+   appear in the mark and the rule under the header. No hover styling and no tooltips on this page. */
+#landing-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-align: left;
+  border-width: 0 0 1px;
+  border-style: solid;
+  border-image: linear-gradient(90deg, #5b92b8, #3e4650 48%, #d4572b) 1;
+}
+.landing-brand-mark { flex: none; width: 44px; height: 44px; }
+.landing-brand-text h1 { margin: 0 0 4px; font-size: 26px; font-weight: 600; letter-spacing: .01em; line-height: 1.1; }
+@media (max-width: 600px) {
+  #landing-header { padding-left: 0; }
+  .landing-brand-text h1 { font-size: 22px; }
+}

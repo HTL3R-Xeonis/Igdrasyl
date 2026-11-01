@@ -73,7 +73,7 @@ def render(status_code: int, detail: str | None = None) -> Response:
   <p>{escape(message)}</p>
   {shown}
   <nav>
-    <a class="toolbar-btn" href="/">Back to TopologyOperator</a>
+    <a class="toolbar-btn" href="/">Back to Ginnungagap</a>
     <a class="toolbar-btn" href="/logs.html">View Logs</a>
   </nav>
 </main>

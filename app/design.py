@@ -33,6 +33,8 @@ import yaml
 from src.graph.environment import Environment
 from src.graph.layout import compute_node_positions
 
+from app import label_layout
+
 _CANVAS_WIDTH = 1600.0
 _CANVAS_HEIGHT = 900.0
 
@@ -52,6 +54,8 @@ class DesignState:
     links: list[tuple[str, str, str, str]] = field(default_factory=list)
     layout: dict[str, dict[str, float]] = field(default_factory=dict)
     drawings: list[dict[str, Any]] = field(default_factory=list)
+    # user-moved port/name labels, see app/label_layout.py
+    labels: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 def new_state() -> DesignState:
@@ -83,6 +87,7 @@ def remove_node(state: DesignState, name: str) -> None:
             if neighbour == name:
                 del node.interfaces[if_name]
     state.layout.pop(name, None)
+    label_layout.drop_node(state.labels, name)
 
 
 def add_link(state: DesignState, node1: str, if1: str, node2: str, if2: str) -> None:
@@ -295,6 +300,7 @@ def to_dict(state: DesignState) -> dict[str, Any]:
         "links": [list(link) for link in state.links],
         "layout": {name: dict(pos) for name, pos in state.layout.items()},
         "drawings": list(state.drawings),
+        "labels": {key: dict(offset) for key, offset in state.labels.items()},
     }
 
 
@@ -320,6 +326,7 @@ def from_dict(data: dict[str, Any]) -> DesignState:
     state.links = [tuple(link) for link in data.get("links", [])]
     state.layout = {name: dict(pos) for name, pos in data.get("layout", {}).items()}
     state.drawings = list(data.get("drawings", []))
+    state.labels = {key: dict(offset) for key, offset in data.get("labels", {}).items()}
     return state
 
 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Ginnungagap">
+  <defs>
+    <linearGradient id="ice" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c6e6f8"/>
+      <stop offset="1" stop-color="#5b92b8"/>
+    </linearGradient>
+    <linearGradient id="fire" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7bd78"/>
+      <stop offset="1" stop-color="#d4572b"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="31" fill="#12161b"/>
+  <!-- Niflheim (ice) and Muspelheim (fire) as two crescents around the void in the middle -->
+  <path d="M29 6 A26 26 0 0 0 29 58 A13 26 0 0 1 29 6 Z" fill="url(#ice)"/>
+  <path d="M35 6 A26 26 0 0 1 35 58 A13 26 0 0 0 35 6 Z" fill="url(#fire)"/>
+</svg>

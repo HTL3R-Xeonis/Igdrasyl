@@ -322,6 +322,9 @@ function snapToGrid(value) {
 // appears at all; when off, the action just proceeds directly.
 let showDisruptionWarnings = true;
 let showPortLabels = true;
+// Offsets of the labels the user has moved, keyed "<node>|<interface>" (port label) or "<node>|" (the node's name);
+// a label without an entry sits at its default spot. Loaded with the canvas, see saveLabelOffsets.
+let labelOffsets = {};
 // Reflects the server's own Settings.INCREMENTAL_DEPLOY (see /health),
 // which only the server's settings.yml controls - not user-settable
 // from here. Defaults true (matches the server's own default) until
@@ -566,6 +569,7 @@ async function loadCanvas() {
     }
     esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/` : "#";
 
+    labelOffsets = await fetch(apiPath("/labels")).then(r => r.ok ? r.json() : {}).catch(() => ({}));
     const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
     nodesData = {};
     for (const node of topology) {
@@ -645,6 +649,63 @@ function portLabelPoint(nearNode, farNode, offset = 0, nearIsFirst = true) {
   return { x: p.x + (dx / len) * 12, y: p.y + (dy / len) * 12 };
 }
 
+function labelKey(nodeName, ifName = "") {
+  return `${nodeName}|${ifName}`;
+}
+
+// A port label's place: the default spot next to its endpoint dot plus whatever the user dragged it by.
+function portLabelPosition(label) {
+  const base = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other], Number(label.dataset.offset) || 0, label.dataset.first === "1");
+  const moved = labelOffsets[label.dataset.key];
+  return moved ? { x: base.x + moved.dx, y: base.y + moved.dy } : base;
+}
+
+function applyNodeLabelOffset(textEl, nodeName) {
+  const moved = labelOffsets[labelKey(nodeName)];
+  if (moved) textEl.setAttribute("transform", `translate(${moved.dx}, ${moved.dy})`);
+  else textEl.removeAttribute("transform");
+}
+
+// Dragging a label moves only the label (stored as an offset, so it follows its node afterwards); a double click
+// puts it back. Both kinds of label call this: `reposition` re-applies the position after each change.
+function startLabelDrag(evt, key, reposition) {
+  if (linkMode || drawMode || evt.button !== 0) return;
+  evt.stopPropagation();
+  evt.preventDefault();
+  const start = svgPoint(evt);
+  const base = labelOffsets[key] || { dx: 0, dy: 0 };
+  let moved = false;
+  const onMove = (e) => {
+    const p = svgPoint(e);
+    if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 3) return;
+    moved = true;
+    labelOffsets[key] = { dx: base.dx + p.x - start.x, dy: base.dy + p.y - start.y };
+    reposition();
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    if (moved) saveLabelOffsets({ [key]: labelOffsets[key] });
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function resetLabel(key, reposition) {
+  if (!labelOffsets[key]) return;
+  delete labelOffsets[key];
+  reposition();
+  saveLabelOffsets({ [key]: null });
+}
+
+function saveLabelOffsets(changes) {
+  return fetch(apiPath("/labels"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ labels: changes }),
+  }).then((resp) => { if (designMode) refreshHistoryState(); return resp; }).catch(() => {});
+}
+
 function appendLinkEndpointDot(layer, nearNode, farNode, ifName, offset = 0, nearIsFirst = true) {
   const p = shiftedEdgePoint(nearNode, farNode, offset, nearIsFirst);
   const dot = document.createElementNS(SVG_NS, "circle");
@@ -659,17 +720,24 @@ function appendLinkEndpointDot(layer, nearNode, farNode, ifName, offset = 0, nea
   layer.appendChild(dot);
 
   if (!ifName || !showPortLabels) return;
-  const labelPoint = portLabelPoint(nearNode, farNode, offset, nearIsFirst);
+  // Port labels live in their own layer above the nodes, so no icon or name can hide one.
   const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("class", "port-label");
-  label.setAttribute("x", labelPoint.x);
-  label.setAttribute("y", labelPoint.y);
   label.dataset.for = nearNode.name;
   label.dataset.other = farNode.name;
   label.dataset.offset = offset;
   label.dataset.first = nearIsFirst ? "1" : "0";
+  label.dataset.key = labelKey(nearNode.name, ifName);
   label.textContent = ifName;
-  layer.appendChild(label);
+  const reposition = () => {
+    const at = portLabelPosition(label);
+    label.setAttribute("x", at.x);
+    label.setAttribute("y", at.y);
+  };
+  reposition();
+  label.addEventListener("pointerdown", (evt) => startLabelDrag(evt, label.dataset.key, reposition));
+  label.addEventListener("dblclick", () => resetLabel(label.dataset.key, reposition));
+  document.getElementById("labels-layer").appendChild(label);
 }
 
 function setDrawMode(mode) {
@@ -1352,6 +1420,7 @@ function renderCanvas() {
   const nodesLayer = document.getElementById("nodes-layer");
   linksLayer.innerHTML = "";
   nodesLayer.innerHTML = "";
+  document.getElementById("labels-layer").innerHTML = "";
 
   const links = topologyLinks();
   const perPair = {};
@@ -1445,7 +1514,11 @@ function buildNodeShape(node) {
   label.setAttribute("x", NODE_W / 2);
   label.setAttribute("y", NODE_ICON_SIZE + 16);
   label.setAttribute("text-anchor", "middle");
+  label.setAttribute("class", "node-name-label");
   label.textContent = node.name;
+  applyNodeLabelOffset(label, node.name);
+  label.addEventListener("pointerdown", (evt) => startLabelDrag(evt, labelKey(node.name), () => applyNodeLabelOffset(label, node.name)));
+  label.addEventListener("dblclick", () => resetLabel(labelKey(node.name), () => applyNodeLabelOffset(label, node.name)));
   g.appendChild(label);
 
   g.addEventListener("pointerdown", (evt) => startNodeDrag(evt, node.name));
@@ -1586,7 +1659,7 @@ function moveNodeShape(name) {
   });
   document.querySelectorAll(".port-label").forEach((label) => {
     if (label.dataset.for !== name && label.dataset.other !== name) return;
-    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other], Number(label.dataset.offset) || 0, label.dataset.first === "1");
+    const labelPoint = portLabelPosition(label);
     label.setAttribute("x", labelPoint.x);
     label.setAttribute("y", labelPoint.y);
   });
@@ -1965,8 +2038,8 @@ function showNodeActions(name, anchor) {
   positionNear(popup, anchor);
 }
 
-// "Serial console" entry of a VM's popup: whether the VM has a network serial port (what the
-// config push can use for appliances without VMware Tools) and the action to add one.
+// "Serial console" entry of a VM's popup: opens the VM's serial line in a terminal tab when it has a network serial
+// port (which the config push can use as well), otherwise offers to add one.
 async function refreshSerialButton(name, applicable) {
   const button = document.getElementById("selected-serial-btn");
   button.hidden = !applicable;
@@ -1974,14 +2047,21 @@ async function refreshSerialButton(name, applicable) {
   button.disabled = true;
   button.textContent = "Serial console…";
   button.title = "";
+  button.onclick = null;
   try {
     const resp = await fetch(`/nodes/${encodeURIComponent(name)}/serial`);
     const state = await resp.json();
     if (selectedName !== name) return;
     if (!resp.ok) throw new Error(state.detail || resp.status);
     if (state.enabled) {
-      button.textContent = `Serial console: port ${state.port}`;
-      button.title = "This VM has a network serial port - config push can use it (\"via\": \"serial\").";
+      if (!state.powered_on) {
+        button.textContent = "Serial console (VM is off)";
+        return;
+      }
+      button.disabled = false;
+      button.textContent = "Serial console";
+      button.title = `Opens the serial line (port ${state.port}) in a terminal. It takes one session at a time, so a running config push or another open console blocks it.`;
+      button.onclick = () => openSerialConsole(name);
       return;
     }
     button.disabled = false;
@@ -3949,20 +4029,25 @@ async function loadLandingHostGrid() {
   actionsGrid.appendChild(buildDesignTile());
   actionsGrid.appendChild(buildGenerateTile());
   const hostDesign = document.createElement("button");
+  hostDesign.type = "button";
   hostDesign.className = "landing-host-tile add-tile";
-  hostDesign.textContent = "Design a host configuration";
+  appendTileText(hostDesign, "Design a host configuration");
   hostDesign.addEventListener("click", () => openConnectionSettings());
   actionsGrid.appendChild(hostDesign);
+}
+
+function appendTileText(tile, title) {
+  const name = document.createElement("div");
+  name.className = "landing-host-name";
+  name.textContent = title;
+  tile.appendChild(name);
 }
 
 function buildDesignTile() {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "landing-host-tile add-tile";
-  const name = document.createElement("div");
-  name.className = "landing-host-name";
-  name.textContent = "Design a Topology";
-  tile.appendChild(name);
+  appendTileText(tile, "Design a Topology");
   tile.addEventListener("click", () => enterDesignMode());
   return tile;
 }
@@ -3971,10 +4056,7 @@ function buildGenerateTile() {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "landing-host-tile add-tile";
-  const name = document.createElement("div");
-  name.className = "landing-host-name";
-  name.textContent = "Generate via LLM";
-  tile.appendChild(name);
+  appendTileText(tile, "Generate via LLM");
   tile.addEventListener("click", () => promptAndGenerateTopology());
   return tile;
 }
@@ -4039,10 +4121,7 @@ function buildAddHostTile() {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = "landing-host-tile add-tile";
-  const name = document.createElement("div");
-  name.className = "landing-host-name";
-  name.textContent = "Add host";
-  tile.appendChild(name);
+  appendTileText(tile, "Add host");
   tile.addEventListener("click", () => document.getElementById("landing-upload-input").click());
   return tile;
 }
@@ -4515,6 +4594,21 @@ function openTerminalWebSocket(session, wsUrl) {
   });
 }
 
+// The serial line of an ESXi VM, in the same terminal panel as a GNS3 console. Opening it again after it closed
+// (VM was off, port busy) reconnects instead of just switching to the dead tab.
+function openSerialConsole(nodeName) {
+  const id = sessionIdFor(nodeName, "serial");
+  const session = ensureSessionPanel(id, nodeName, `${nodeName} (serial)`);
+  switchToSession(id);
+  if (session.kind && session.ws && session.ws.readyState !== WebSocket.CLOSED) return;
+  session.kind = "terminal";
+  setSessionStatus(session, "connecting…");
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  openTerminalWebSocket(session, `${proto}//${location.host}/ws/serial/${encodeURIComponent(nodeName)}`);
+  session.ws.onopen = () => setSessionStatus(session, "connected - press Enter if the screen stays empty", "status-ok");
+}
+
 function openConsole(nodeName) {
   const id = sessionIdFor(nodeName, "console");
   const session = ensureSessionPanel(id, nodeName, nodeName);
@@ -4664,6 +4758,14 @@ document.getElementById("settings-show-grid").addEventListener("change", (evt) =
 
 document.getElementById("settings-snap-grid").addEventListener("change", (evt) => {
   snapToGridEnabled = evt.target.checked;
+});
+
+document.getElementById("reset-labels-btn").addEventListener("click", async () => {
+  if (!Object.keys(labelOffsets).length) return;
+  const changes = Object.fromEntries(Object.keys(labelOffsets).map((key) => [key, null]));
+  labelOffsets = {};
+  await saveLabelOffsets(changes);
+  renderCanvas();
 });
 
 document.getElementById("settings-port-labels").addEventListener("change", (evt) => {
@@ -5130,7 +5232,7 @@ document.getElementById("popout-btn").addEventListener("click", () => {
     showAlert("Couldn't open a new window - check your browser's popup blocker.");
     return;
   }
-  win.document.title = "TopologyOperator - Console/Screen View";
+  win.document.title = "Ginnungagap - Console/Screen View";
   win.document.head.innerHTML = document.head.innerHTML;
   win.document.body.appendChild(consoleArea);
   poppedOutWindow = win;

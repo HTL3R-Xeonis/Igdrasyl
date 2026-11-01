@@ -41,6 +41,7 @@ from app import (
     gns3_vm_deploy_jobs,
     holds,
     import_jobs,
+    label_layout,
     lifecycle,
     link_options,
     live_lock,
@@ -55,6 +56,7 @@ from app import (
     project_selection,
     public_text,
     push_jobs,
+    serial_console,
     settings_profiles,
     startup_retry,
     template_health,
@@ -256,9 +258,10 @@ async def lifespan(app: FastAPI):
     stop_retry.set()
 
 
-app = FastAPI(title="TopologyOperator", lifespan=lifespan)
+app = FastAPI(title="Ginnungagap", lifespan=lifespan)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(console.router)
+app.include_router(serial_console.router)
 app.include_router(vm_screen.router)
 
 
@@ -568,6 +571,52 @@ def update_layout_batch(update: PositionsUpdate) -> dict[str, str]:
         raise HTTPException(404, f"no node named {unknown[0]!r}")
     save_positions({n: {"x": p.x, "y": p.y} for n, p in update.positions.items()})
     return {"status": "ok"}
+
+
+class LabelOffset(BaseModel):
+    dx: float
+    dy: float
+
+
+class LabelsUpdate(BaseModel):
+    """Label key ("<node>|<interface>", or "<node>|" for the node's name) -> offset; null puts a label back."""
+
+    labels: dict[str, LabelOffset | None]
+
+
+def _label_changes(
+    update: LabelsUpdate, known_nodes
+) -> dict[str, dict[str, float] | None]:
+    changes = {
+        k: (None if v is None else {"dx": v.dx, "dy": v.dy})
+        for k, v in update.labels.items()
+    }
+    for key in changes:
+        node = label_layout.node_of(key)
+        if not node:
+            raise HTTPException(
+                422, f"{key!r} is not a label key (expected '<node>|<interface>')"
+            )
+        if node not in known_nodes:
+            raise HTTPException(404, f"no node named {node!r}")
+    return changes
+
+
+@app.get("/labels")
+def labels() -> dict[str, dict[str, float]]:
+    """Offsets of the labels the user has moved (everything else sits at its default spot). See app/label_layout.py."""
+    return label_layout.load()
+
+
+@app.post("/labels")
+def update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+    changes = _label_changes(update, app.state.graph.nodes)
+    try:
+        return label_layout.save_changes(changes)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @app.get("/templates")
@@ -981,6 +1030,23 @@ def design_update_layout_batch(update: PositionsUpdate) -> dict[str, str]:
             app.state.design.layout[name] = {"x": pos.x, "y": pos.y}
     design_store.save(app.state.design)
     return {"status": "ok"}
+
+
+@app.get("/design/labels")
+def design_labels() -> dict[str, dict[str, float]]:
+    return app.state.design.labels
+
+
+@app.post("/design/labels")
+def design_update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
+    changes = _label_changes(update, app.state.design.nodes)
+    try:
+        with design_history.step(app):
+            label_layout.apply_changes(app.state.design.labels, changes)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    design_store.save(app.state.design)
+    return app.state.design.labels
 
 
 class DesignDelete(BaseModel):

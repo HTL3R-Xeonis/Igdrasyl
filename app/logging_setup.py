@@ -140,7 +140,7 @@ def configure_logging() -> None:
     _intercept_standard_logging()
 
     logger.info(
-        f"TopologyOperator starting - pid {os.getpid()}, python "
+        f"Ginnungagap starting - pid {os.getpid()}, python "
         f"{platform.python_version()} on {platform.system()} {platform.release()}"
     )
     logger.info(
