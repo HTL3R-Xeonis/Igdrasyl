@@ -20,14 +20,21 @@ from src.settings import Settings
 from app.topology_write import get_or_create_backend
 
 
-def run_verify(app: FastAPI, fix: bool) -> dict[str, Any]:
+def run_verify(app: FastAPI, fix: bool, fix_vlan_subinterfaces: bool = False) -> dict[str, Any]:
     """
     :param fix: apply the automatic repairs first, then check
+    :param fix_vlan_subinterfaces: also re-create the GNS3 VM's missing VLAN subinterfaces. Not part of
+        `fix`: it re-creates and restarts the Cloud nodes, which once coincided with the ESXi host
+        going offline, so it only ever runs on its own explicit request.
     :return: {"actions": [str], "results": [{"ok": bool, "description": str}], "passed": int, "total": int}
     """
-    logger.info(f"Health check started (automatic fixes: {'on' if fix else 'off'})")
+    logger.info(
+        f"Health check started (automatic fixes: {'on' if fix else 'off'}, "
+        f"VLAN subinterface repair: {'on' if fix_vlan_subinterfaces else 'off'})"
+    )
     backend = get_or_create_backend(app)
-    actions, results = backend.verify(Settings.TOPOLOGY_FILE, fix=fix)
+    extra = {"fix_vlan_subinterfaces": True} if fix_vlan_subinterfaces else {}
+    actions, results = backend.verify(Settings.TOPOLOGY_FILE, fix=fix, **extra)
     for action in actions:
         logger.warning(f"Health check repaired: {action}")
     failed = [description for ok, description in results if not ok]

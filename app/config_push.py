@@ -228,9 +228,26 @@ def _push_via_netmiko(
 
     results: list[CommandResult] = []
     overall_ok = True
+    not_ready = False
     try:
         for command in commands:
-            output = conn.send_command_timing(command)
+            try:
+                output = conn.send_command_timing(command)
+            except ReadTimeout:
+                # The console answered the login but then stopped answering (still booting, or
+                # starved): nothing ran yet = safe to try the whole list again later.
+                overall_ok = False
+                if results:
+                    results.append(
+                        CommandResult(
+                            command=command,
+                            output="no answer from the console in time",
+                            ok=False,
+                        )
+                    )
+                else:
+                    not_ready = True
+                break
             failed = device_type == "cisco_ios_telnet" and _looks_like_ios_error(output)
             results.append(CommandResult(command=command, output=output, ok=not failed))
             if progress is not None:
@@ -241,7 +258,17 @@ def _push_via_netmiko(
     finally:
         conn.disconnect()
 
-    return _finish(node.name, "netmiko", overall_ok, results, len(commands))
+    return _finish(
+        node.name,
+        "netmiko",
+        overall_ok,
+        results,
+        len(commands),
+        error="the console did not answer in time (the device is still booting)"
+        if not_ready
+        else None,
+        not_ready=not_ready,
+    )
 
 
 def _guest_operations_ready(vm: Any) -> bool:

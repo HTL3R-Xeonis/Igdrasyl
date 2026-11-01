@@ -145,7 +145,11 @@ against a real OVA import from the sister template API.
   live lab (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups,
   links) and, if anything fails, offers its curated low-risk repairs (start
   stopped GNS3 nodes, power on stopped ESXi VMs, create missing port groups -
-  never a redeploy of a genuinely missing VM/node). "Find Orphans…" lists
+  never a redeploy of a genuinely missing VM/node). Missing VLAN
+  subinterfaces on the GNS3 VM (lost on its reboot, so links to ESXi VMs carry
+  no traffic) are never part of those repairs: re-creating them restarts the
+  Cloud nodes, so the dialog asks for it separately
+  (`POST /maintenance/verify` with `fix_vlan_subinterfaces`). "Find Orphans…" lists
   live GNS3 nodes and tool-created ESXi VMs that no node in the topology
   file describes anymore - what a partially failed live delete leaves behind
   - and can delete them after a second, explicit confirmation (irreversible).

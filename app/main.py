@@ -1195,6 +1195,7 @@ def reload_gns3_project() -> dict[str, str]:
 
 class VerifyRequest(BaseModel):
     fix: bool = False
+    fix_vlan_subinterfaces: bool = False
 
 
 class OrphanItem(BaseModel):
@@ -1219,12 +1220,15 @@ def maintenance_verify(request: VerifyRequest | None = None) -> dict[str, Any]:
     (the same checks as TopologyBuilder's `verify`). With fix=true the
     low-risk automatic repairs run first (start stopped GNS3 nodes, power
     on stopped ESXi VMs, create missing port groups) and the checks
-    afterwards, so the result shows what is still wrong.
+    afterwards, so the result shows what is still wrong. Re-creating the
+    GNS3 VM's missing VLAN subinterfaces is a separate flag
+    (fix_vlan_subinterfaces) because it restarts the Cloud nodes.
     """
     _require_live_topology()
     fix = request.fix if request is not None else False
+    fix_subinterfaces = request.fix_vlan_subinterfaces if request is not None else False
     try:
-        return maintenance.run_verify(app, fix)
+        return maintenance.run_verify(app, fix, fix_subinterfaces)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except _LIVE_WRITE_ERRORS as exc:

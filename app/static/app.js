@@ -4341,6 +4341,31 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
     setMenubarMessage(`Health check after fixes: ${second.passed}/${second.total} checks passed.`, { error: second.passed !== second.total });
     await showAlert(applied + formatVerifyReport(second), { title: "Health Check" });
     await loadCanvas();
+
+    // Never part of the automatic fixes: re-creating the Cloud nodes can briefly cut every
+    // link between the GNS3 VM and the ESXi VMs, so it is its own, explicit confirmation.
+    if (!second.results.some((r) => !r.ok && /VLAN subinterfaces/i.test(r.description))) return;
+    const wantSubinterfaces = await showConfirm(
+      "The GNS3 VM is missing VLAN subinterfaces (they are lost when it reboots), so links " +
+      "between GNS3 nodes and ESXi VMs carry no traffic.\n\n" +
+      "Re-create them? This restarts the Cloud nodes and briefly interrupts those links. " +
+      "Do it while nothing important is running.",
+      { title: "Re-create VLAN subinterfaces", confirmLabel: "Re-create", danger: true }
+    );
+    if (!wantSubinterfaces) return;
+
+    setMenubarBusy("Re-creating VLAN subinterfaces…");
+    const third = await maintenanceRequest("/maintenance/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fix: false, fix_vlan_subinterfaces: true }),
+    });
+    const repaired = third.actions.length
+      ? `Applied:\n${third.actions.map((a) => `- ${a}`).join("\n")}\n\n`
+      : "Nothing to re-create.\n\n";
+    setMenubarMessage(`Health check after re-creating subinterfaces: ${third.passed}/${third.total} checks passed.`, { error: third.passed !== third.total });
+    await showAlert(repaired + formatVerifyReport(third), { title: "Health Check" });
+    await loadCanvas();
   } catch (err) {
     setMenubarMessage(`Health check failed: ${err.message || err}`);
   }

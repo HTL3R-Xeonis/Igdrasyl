@@ -463,3 +463,32 @@ def test_one_device_that_raises_does_not_take_the_others_down(graph):
     assert not by_name["VM1"].ok and "kaboom" in by_name["VM1"].error
     assert all(r.ok for n, r in by_name.items() if n != "VM1")
     assert len(results) == len(names)
+
+
+def test_a_console_that_stops_answering_before_the_first_command_is_not_ready(graph):
+    from netmiko.exceptions import ReadTimeout
+
+    conn = MagicMock()
+    conn.send_command_timing.side_effect = ReadTimeout("no answer")
+    with patch("netmiko.ConnectHandler", return_value=conn):
+        result = cp._push_via_netmiko(
+            graph.nodes["R1"], ["enable", "show x"], "127.0.0.1", 1
+        )
+    assert not result.ok and result.not_ready and result.executed == 0
+    assert "still booting" in result.error
+    conn.disconnect.assert_called_once()
+
+
+def test_a_console_that_stops_answering_later_fails_that_command_and_is_not_repeated(
+    graph,
+):
+    from netmiko.exceptions import ReadTimeout
+
+    conn = MagicMock()
+    conn.send_command_timing.side_effect = ["R1#", ReadTimeout("no answer")]
+    with patch("netmiko.ConnectHandler", return_value=conn):
+        result = cp._push_via_netmiko(
+            graph.nodes["R1"], ["enable", "show x", "show y"], "127.0.0.1", 1
+        )
+    assert not result.ok and not result.not_ready and result.executed == 2
+    assert result.commands[1].ok is False and "no answer" in result.commands[1].output
