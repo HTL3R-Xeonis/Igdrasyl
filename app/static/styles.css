@@ -370,6 +370,8 @@
   .status-dot.status-unknown { fill: var(--canvas-bg); stroke: var(--canvas-status-unknown-stroke); stroke-width: 1; opacity: 0.8; }
   .link-line { stroke: var(--canvas-link); stroke-width: 1.5; cursor: pointer; }
   .link-line:hover { stroke: var(--accent); stroke-width: 2.5; }
+  .link-hit { stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; pointer-events: stroke; }
+  .link-hit:hover + .link-line { stroke: var(--accent); stroke-width: 2.5; }
   .link-line-capturing { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
   .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
   .port-label { fill: var(--canvas-link); font-size: 9px; pointer-events: none; user-select: none; }

@@ -1351,11 +1351,20 @@ function renderCanvas() {
       line.setAttribute("class", `link-line${isCapturing ? " link-line-capturing" : ""}${impaired ? " link-line-impaired" : ""}${liveLink && liveLink.suspended ? " link-line-suspended" : ""}`);
       line.dataset.pair = pairKey;
       setLineEndpoints(line, node, neighbour);
-      line.addEventListener("pointerdown", (evt) => {
+      // The drawn line is only ~1.5 px wide, too thin to hit with a mouse: an invisible wide line
+      // right before it takes the click (and the hover highlight, see styles.css).
+      const hit = document.createElementNS(SVG_NS, "line");
+      hit.setAttribute("class", "link-hit");
+      hit.dataset.pair = pairKey;
+      setLineEndpoints(hit, node, neighbour);
+      const openLinkActions = (evt) => {
         evt.stopPropagation();
         if (linkMode) return;
         showLinkActions(node.name, ifName, neighbourName, neighbourIfName, { x: evt.clientX, y: evt.clientY });
-      });
+      };
+      hit.addEventListener("pointerdown", openLinkActions);
+      line.addEventListener("pointerdown", openLinkActions);
+      linksLayer.appendChild(hit);
       linksLayer.appendChild(line);
       appendLinkEndpointDot(linksLayer, node, neighbour, ifName);
       appendLinkEndpointDot(linksLayer, neighbour, node, neighbourIfName);
@@ -1538,7 +1547,7 @@ function moveNodeShape(name) {
   const node = nodesData[name];
   const g = document.querySelector(`.node-shape[data-name="${name}"]`);
   if (g) g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
-  document.querySelectorAll(".link-line").forEach((line) => {
+  document.querySelectorAll(".link-line, .link-hit").forEach((line) => {
     const [a, b] = line.dataset.pair.split("|");
     if (a !== name && b !== name) return;
     const other = a === name ? b : a;
@@ -2781,7 +2790,7 @@ document.getElementById("link-delete-btn").addEventListener("click", async () =>
 document.addEventListener("click", (evt) => {
   const popup = document.getElementById("link-actions");
   if (popup.hidden || popup.contains(evt.target)) return;
-  if (evt.target.closest(".link-line")) return;
+  if (evt.target.closest(".link-line, .link-hit")) return;
   deselectLink();
 });
 
