@@ -2555,11 +2555,15 @@ async function promptForInterface(nodeName, anchor) {
 
   let options, defaultValue;
   if (ports) {
-    const free = ports.filter((p) => !p.in_use);
+    // GNS3 only knows its own links; the topology file can hold one GNS3 lacks (or a design-only one). An
+    // interface that either side uses is taken - the file rejects a second use of it ("used twice").
+    const fileInterfaces = nodesData[nodeName]?.interfaces || {};
+    const taken = (p) => p.in_use || !!fileInterfaces[p.name];
+    const free = ports.filter((p) => !taken(p));
     options = ports.map((p) => ({
       value: p.name,
-      label: `${p.name}${p.in_use ? " (in use)" : ""}`,
-      disabled: p.in_use,
+      label: `${p.name}${taken(p) ? " (in use)" : ""}`,
+      disabled: taken(p),
     }));
     defaultValue = free.length ? free[0].name : undefined;
   } else {
