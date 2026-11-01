@@ -20,7 +20,9 @@ from src.settings import Settings
 from app.topology_write import get_or_create_backend
 
 
-def run_verify(app: FastAPI, fix: bool, fix_vlan_subinterfaces: bool = False) -> dict[str, Any]:
+def run_verify(
+    app: FastAPI, fix: bool, fix_vlan_subinterfaces: bool = False
+) -> dict[str, Any]:
     """
     :param fix: apply the automatic repairs first, then check
     :param fix_vlan_subinterfaces: also re-create the GNS3 VM's missing VLAN subinterfaces. Not part of

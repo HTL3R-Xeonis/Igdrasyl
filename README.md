@@ -114,7 +114,11 @@ against a real OVA import from the sister template API.
   both template APIs (and the GNS3 one's own `/api/servers`, which states
   why a server is unreachable) and shows the problem in a banner on every
   screen (`GET /templates/health`); "Image ... not found" errors get the
-  likely cause appended.
+  likely cause appended. When the service cannot be reached at all, the
+  startup banner and the 503 answers of `/templates`, `/design/templates`,
+  `/design/nodes` and `/topology` name the service and the reason ("The ESXi
+  template service (host) is not reachable: connection refused or host
+  down.") instead of a raw connection error; design mode keeps working.
 - **Wireshark-style packet capture** (`app/capture.py`): start/stop a
   capture on any live link and view it as a live, in-browser
   Wireshark-style packet table (click a link on the canvas) - a

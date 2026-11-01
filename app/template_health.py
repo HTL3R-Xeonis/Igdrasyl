@@ -140,3 +140,23 @@ def explain(message: str) -> str:
     if health["ok"]:
         return message
     return f"{message} - possible cause: {'; '.join(health['problems'][:3])}"
+
+
+def describe(exc: Exception) -> str:
+    """
+    A readable text for a failed template lookup. When the template service could not be reached,
+    its own state (which service, which host, why) replaces the raw connection error, whose URL
+    and retry details mean nothing to someone using the GUI. Anything else goes through explain().
+    Never raises.
+    """
+    message = explain(str(exc))
+    if not isinstance(exc, (requests.RequestException, TimeoutError)):
+        return message
+    try:
+        problems = check()["problems"]
+    except Exception as check_exc:
+        logger.debug(
+            f"Template service check failed while describing an error: {check_exc}"
+        )
+        return message
+    return " ".join(problems[:3]) if problems else message

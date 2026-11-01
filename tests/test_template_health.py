@@ -166,3 +166,24 @@ def test_explaining_never_raises_even_if_the_check_itself_fails():
     with patch.object(template_health, "check", side_effect=RuntimeError("boom")):
         message = "Image X not found on ESXi or GNS3"
         assert template_health.explain(message) == message
+
+
+def test_an_unreachable_service_is_described_by_the_services_state_not_the_raw_error():
+    down = requests.ConnectionError(
+        "HTTPConnectionPool(host='x', port=9): Max retries exceeded with url: /api/templates"
+    )
+    routes = {
+        f"{ESXI_URL}/api/templates": down,
+        f"{GNS3_URL}/api/templates": down,
+    }
+    with patch("requests.get", _fake_get(routes)):
+        text = template_health.describe(down)
+
+    assert "ESXi template service" in text and "is not reachable" in text
+    assert "Max retries" not in text
+
+
+def test_describe_keeps_other_errors_and_survives_a_failing_check():
+    assert template_health.describe(ValueError("nope")) == "nope"
+    with patch.object(template_health, "check", side_effect=RuntimeError("boom")):
+        assert template_health.describe(TimeoutError("slow")) == "slow"

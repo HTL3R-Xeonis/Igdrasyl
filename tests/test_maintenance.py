@@ -61,15 +61,21 @@ def test_verify_with_fix_returns_the_applied_repairs(client, app_state):
     backend.verify.assert_called_once_with(Settings.TOPOLOGY_FILE, fix=True)
 
 
-def test_verify_subinterface_repair_only_runs_when_asked_for_explicitly(client, app_state):
+def test_verify_subinterface_repair_only_runs_when_asked_for_explicitly(
+    client, app_state
+):
     backend = _backend()
     backend.verify.return_value = (["Created VLAN subinterface vlan10"], [(True, "ok")])
 
     with patch("app.maintenance.get_or_create_backend", return_value=backend):
-        resp = client.post("/maintenance/verify", json={"fix": True, "fix_vlan_subinterfaces": True})
+        resp = client.post(
+            "/maintenance/verify", json={"fix": True, "fix_vlan_subinterfaces": True}
+        )
 
     assert resp.status_code == 200, resp.text
-    backend.verify.assert_called_once_with(Settings.TOPOLOGY_FILE, fix=True, fix_vlan_subinterfaces=True)
+    backend.verify.assert_called_once_with(
+        Settings.TOPOLOGY_FILE, fix=True, fix_vlan_subinterfaces=True
+    )
 
 
 def test_verify_503s_when_the_topology_is_unavailable(client, app_state):

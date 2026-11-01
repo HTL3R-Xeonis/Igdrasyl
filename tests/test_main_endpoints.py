@@ -4,6 +4,7 @@ import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 import yaml
 from src.settings import Settings
@@ -740,6 +741,26 @@ def test_design_endpoints_still_work_when_graph_failed_to_load(client, app_state
     )
     assert resp.status_code == 200, resp.text
     assert client.get("/design/topology").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/templates", "/design/templates"])
+def test_template_lists_503_with_a_readable_reason_when_the_service_is_down(
+    client, app_state, path
+):
+    down = requests.exceptions.ConnectionError(
+        "HTTPConnectionPool(host='x', port=9): Max retries exceeded"
+    )
+    with (
+        patch("app.main.topology_write.list_templates", side_effect=down),
+        patch(
+            "app.main.template_health.describe",
+            return_value="The ESXi template service (x) is not reachable.",
+        ),
+    ):
+        resp = client.get(path)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "The ESXi template service (x) is not reachable."
 
 
 def test_reload_endpoint_recovers_after_a_transient_failure(client, app_state):

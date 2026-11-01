@@ -122,7 +122,7 @@ def _refresh_startup_state(app: FastAPI, allow_auto_deploy: bool = True) -> None
         app.state.graph = load_graph()
     except Exception as exc:
         app.state.graph = None
-        warnings.append(template_health.explain(str(exc)))
+        warnings.append(template_health.describe(exc))
         logger.warning(f"Starting without a loaded topology: {exc}")
 
     app.state.gns3_vm_ip = None
@@ -575,8 +575,8 @@ def templates() -> dict[str, Any]:
     """
     try:
         return topology_write.list_templates()
-    except TimeoutError as exc:
-        raise HTTPException(503, str(exc))
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(503, template_health.describe(exc))
 
 
 class AddNodeRequest(BaseModel):
@@ -863,8 +863,8 @@ def set_drawings(request: DrawingsRequest) -> dict[str, str]:
 def design_templates() -> dict[str, Any]:
     try:
         return topology_write.list_templates()
-    except TimeoutError as exc:
-        raise HTTPException(503, str(exc))
+    except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(503, template_health.describe(exc))
 
 
 @app.get("/design/topology")
@@ -884,7 +884,7 @@ def design_add_node(request: AddNodeRequest) -> dict[str, str]:
         # service - same degraded-mode story as GET /templates above,
         # not a 500: the sketch itself is untouched, only classifying a
         # brand new node needs that service to be up.
-        raise HTTPException(503, str(exc))
+        raise HTTPException(503, template_health.describe(exc))
     design_store.save(app.state.design)
     return {"status": "ok"}
 
