@@ -427,6 +427,9 @@ def topology() -> list[dict[str, Any]]:
     """The topology file's own structure - no live GNS3/ESXi state."""
     if app.state.graph is None:
         raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+    edges = getattr(app.state.graph, "edges", None)
+    if not isinstance(edges, (list, tuple)):
+        edges = []
     return [
         {
             "name": node.name,
@@ -437,6 +440,9 @@ def topology() -> list[dict[str, Any]]:
                 if_name: (intf.neighbour.name if intf.neighbour is not None else None)
                 for if_name, intf in node.interfaces.items()
             },
+            # every link incl. the interface on the far side, so two nodes linked more than
+            # once over different interfaces can be told apart (interfaces above cannot)
+            "links": design.node_links(edges, node.name),
         }
         for node in app.state.graph.nodes.values()
     ]
@@ -636,9 +642,12 @@ def add_link(request: AddLinkRequest) -> dict[str, str]:
 
 
 @app.delete("/links/{node1}/{node2}")
-def remove_link(node1: str, node2: str) -> dict[str, str]:
+def remove_link(
+    node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, str]:
+    """``if1``/``if2`` (interface on node1/node2) pick one of several links between the same two nodes."""
     try:
-        topology_write.remove_link(app, node1, node2)
+        topology_write.remove_link(app, node1, node2, if1, if2)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
@@ -664,7 +673,13 @@ class LinkOptions(BaseModel):
 
 
 @app.put("/links/{node1}/{node2}/options")
-def set_link_options(node1: str, node2: str, options: LinkOptions) -> dict[str, Any]:
+def set_link_options(
+    node1: str,
+    node2: str,
+    options: LinkOptions,
+    if1: str | None = None,
+    if2: str | None = None,
+) -> dict[str, Any]:
     """Latency/jitter, packet loss, corruption and suspend on a live link - see app/link_options.py."""
     try:
         link_options.filters_from_options(
@@ -676,7 +691,9 @@ def set_link_options(node1: str, node2: str, options: LinkOptions) -> dict[str, 
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     try:
-        return link_options.set_options(app, node1, node2, **options.model_dump())
+        return link_options.set_options(
+            app, node1, node2, if1=if1, if2=if2, **options.model_dump()
+        )
     except (NoLiveProject, ValueError) as exc:
         raise HTTPException(404, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
@@ -684,9 +701,11 @@ def set_link_options(node1: str, node2: str, options: LinkOptions) -> dict[str, 
 
 
 @app.post("/links/{node1}/{node2}/capture/start")
-def start_link_capture(node1: str, node2: str) -> dict[str, Any]:
+def start_link_capture(
+    node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, Any]:
     try:
-        return capture.start_capture(app, node1, node2) or {"status": "ok"}
+        return capture.start_capture(app, node1, node2, if1, if2) or {"status": "ok"}
     except (NoLiveProject, ValueError) as exc:
         raise HTTPException(404, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
@@ -694,9 +713,11 @@ def start_link_capture(node1: str, node2: str) -> dict[str, Any]:
 
 
 @app.post("/links/{node1}/{node2}/capture/stop")
-def stop_link_capture(node1: str, node2: str) -> dict[str, str]:
+def stop_link_capture(
+    node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, str]:
     try:
-        capture.stop_capture(app, node1, node2)
+        capture.stop_capture(app, node1, node2, if1, if2)
     except (NoLiveProject, ValueError) as exc:
         raise HTTPException(404, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
@@ -705,7 +726,9 @@ def stop_link_capture(node1: str, node2: str) -> dict[str, str]:
 
 
 @app.get("/links/{node1}/{node2}/capture/stream")
-def stream_link_capture(node1: str, node2: str) -> StreamingResponse:
+def stream_link_capture(
+    node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> StreamingResponse:
     """
     Proxies GNS3's own live pcap stream for this link straight through -
     the same mechanism GNS3's desktop client pipes into a local
@@ -713,7 +736,7 @@ def stream_link_capture(node1: str, node2: str) -> StreamingResponse:
     why there's no separate "finished file" to download instead).
     """
     try:
-        upstream = capture.capture_stream(app, node1, node2)
+        upstream = capture.capture_stream(app, node1, node2, if1, if2)
     except (NoLiveProject, ValueError) as exc:
         raise HTTPException(404, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
@@ -721,7 +744,9 @@ def stream_link_capture(node1: str, node2: str) -> StreamingResponse:
     return StreamingResponse(
         upstream.iter_content(chunk_size=4096),
         media_type="application/vnd.tcpdump.pcap",
-        headers={"Content-Disposition": f'attachment; filename="{node1}_{node2}.pcap"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{capture._capture_file_name(node1, node2, if1, if2)}"'
+        },
     )
 
 
@@ -918,10 +943,12 @@ def design_add_link(request: AddLinkRequest) -> dict[str, str]:
 
 
 @app.delete("/design/links/{node1}/{node2}")
-def design_remove_link(node1: str, node2: str) -> dict[str, str]:
+def design_remove_link(
+    node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, str]:
     try:
         with design_history.step(app):
-            design.remove_link(app.state.design, node1, node2)
+            design.remove_link(app.state.design, node1, node2, if1, if2)
     except KeyError as exc:
         raise HTTPException(404, str(exc))
     design_store.save(app.state.design)

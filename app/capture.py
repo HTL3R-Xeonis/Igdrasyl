@@ -51,18 +51,36 @@ from app import link_options
 from app.gns3_state import list_live_nodes
 
 
-def _live_link(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
+def _port_name(node: dict[str, Any], endpoint: dict[str, Any]) -> str | None:
+    for port in node.get("ports", []):
+        if port.get("adapter_number") == endpoint.get("adapter_number") and port.get(
+            "port_number"
+        ) == endpoint.get("port_number"):
+            return port.get("name")
+    return None
+
+
+def _live_link(
+    app: FastAPI, node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, Any]:
     """
-    Resolves the real GNS3 link between two node *names* - same
-    node-name-pair addressing GET/DELETE /links/{node1}/{node2} already
-    use (app/topology_write.py) - by cross-referencing list_live_nodes
-    (name -> node_id) with GNS3Connection.list_project_links, the same
-    join app/gns3_state.py's list_node_ports already does for ports.
+    Resolves the real GNS3 link between two node *names* by
+    cross-referencing list_live_nodes (name -> node_id) with
+    GNS3Connection.list_project_links, the same join
+    app/gns3_state.py's list_node_ports already does for ports.
+    Two nodes can be linked more than once over different interfaces:
+    ``if1``/``if2`` (the GNS3 port name on node1/node2, which equals the
+    interface name in the topology file) pick one of them; a Cloud node's
+    port name says nothing about the VM's interface and never narrows the
+    choice down. Without interfaces the first link is used. If the
+    interfaces match no link, nothing is guessed - a topology file can list
+    a link GNS3 never got, and acting on the one that exists would hit
+    the wrong link.
     :raises NoLiveProject: propagated from list_live_nodes - no live GNS3
         project resolved at all.
-    :raises ValueError: either node isn't live right now, or GNS3 has no
+    :raises ValueError: either node isn't live right now, GNS3 has no
         link between them (e.g. one endpoint is an ESXi VM with no
-        GNS3-side port to capture on).
+        GNS3-side port to capture on), or the interfaces match no link.
     """
     live_by_name = {n["name"]: n for n in list_live_nodes(app)}
     n1, n2 = live_by_name.get(node1), live_by_name.get(node2)
@@ -73,10 +91,39 @@ def _live_link(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )
     ids = {n1["node_id"], n2["node_id"]}
-    for link in links:
-        if {endpoint["node_id"] for endpoint in link["nodes"]} == ids:
-            return link
-    raise ValueError(f"no live link between '{node1}' and '{node2}'")
+    candidates = [
+        link
+        for link in links
+        if {endpoint["node_id"] for endpoint in link["nodes"]} == ids
+    ]
+    if not candidates:
+        raise ValueError(f"no live link between '{node1}' and '{node2}'")
+    if if1 is None and if2 is None:
+        return candidates[0]
+
+    def uses(link: dict[str, Any], node: dict[str, Any], interface: str | None) -> bool:
+        # A Cloud node (the GNS3 side of an ESXi VM) names its port like the host NIC, not like the
+        # VM's interface in the topology file, so its port name says nothing about the interface.
+        if interface is None or node.get("node_type") == "cloud":
+            return True
+        endpoint = next(e for e in link["nodes"] if e["node_id"] == node["node_id"])
+        name = _port_name(node, endpoint)
+        return name is None or name == interface
+
+    matching = [
+        link for link in candidates if uses(link, n1, if1) and uses(link, n2, if2)
+    ]
+    if len(matching) == 1:
+        return matching[0]
+    raise ValueError(
+        f"no single live link between '{node1}' and '{node2}' uses the interfaces {if1 or '*'} and {if2 or '*'}"
+    )
+
+
+def _capture_file_name(node1: str, node2: str, if1: str | None, if2: str | None) -> str:
+    """One file per link, so two captures on parallel links between the same nodes do not overwrite each other."""
+    parts = [node1] + ([if1] if if1 else []) + [node2] + ([if2] if if2 else [])
+    return "_".join(part.replace("/", "-") for part in parts) + ".pcap"
 
 
 def _base_url(app: FastAPI) -> str:
@@ -93,6 +140,7 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
     """
     live_nodes = list_live_nodes(app)
     name_by_id = {n["node_id"]: n["name"] for n in live_nodes}
+    node_by_id = {n["node_id"]: n for n in live_nodes}
     links = GNS3Connection.list_project_links(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )
@@ -112,6 +160,8 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
                 "if1": e1.get("label", {}).get("text", ""),
                 "node2": n2,
                 "if2": e2.get("label", {}).get("text", ""),
+                "port1": _port_name(node_by_id[e1["node_id"]], e1),
+                "port2": _port_name(node_by_id[e2["node_id"]], e2),
                 "capturing": bool(link.get("capturing")),
                 **link_options.options_from_link(link),
             }
@@ -119,8 +169,10 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
     return result
 
 
-def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
-    link = _live_link(app, node1, node2)
+def start_capture(
+    app: FastAPI, node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> dict[str, Any]:
+    link = _live_link(app, node1, node2, if1, if2)
     logger.info(f"Starting a packet capture on {node1} <-> {node2}")
     # GNS3's own controller state can silently drift from "opened" back
     # to "closed" independently of whether the project's nodes are still
@@ -134,14 +186,16 @@ def start_capture(app: FastAPI, node1: str, node2: str) -> dict[str, Any]:
     return GNS3Connection.post(
         f"{_base_url(app)}/links/{link['link_id']}/start_capture",
         json={
-            "capture_file_name": f"{node1}_{node2}.pcap",
+            "capture_file_name": _capture_file_name(node1, node2, if1, if2),
             "data_link_type": "DLT_EN10MB",
         },
     )
 
 
-def stop_capture(app: FastAPI, node1: str, node2: str) -> None:
-    link = _live_link(app, node1, node2)
+def stop_capture(
+    app: FastAPI, node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> None:
+    link = _live_link(app, node1, node2, if1, if2)
     logger.info(f"Stopping the packet capture on {node1} <-> {node2}")
     GNS3Connection.ensure_project_open(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
@@ -149,7 +203,9 @@ def stop_capture(app: FastAPI, node1: str, node2: str) -> None:
     GNS3Connection.post(f"{_base_url(app)}/links/{link['link_id']}/stop_capture")
 
 
-def capture_stream(app: FastAPI, node1: str, node2: str) -> requests.Response:
+def capture_stream(
+    app: FastAPI, node1: str, node2: str, if1: str | None = None, if2: str | None = None
+) -> requests.Response:
     """
     The raw, still-open response for the live pcap stream - returned
     unread (stream=True) so app/main.py's endpoint can pipe it straight
@@ -161,7 +217,7 @@ def capture_stream(app: FastAPI, node1: str, node2: str) -> requests.Response:
         past _STREAM_CONNECT_TIMEOUT_SECONDS - see this module's own
         docstring on that endpoint's known flakiness.
     """
-    link = _live_link(app, node1, node2)
+    link = _live_link(app, node1, node2, if1, if2)
     GNS3Connection.ensure_project_open(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )

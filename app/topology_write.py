@@ -253,12 +253,25 @@ def add_link(app: FastAPI, node1: str, if1: str, node2: str, if2: str) -> None:
         logger.info(f"Link {node1}:{if1} <-> {node2}:{if2} added")
 
 
-def remove_link(app: FastAPI, node1: str, node2: str) -> None:
+def remove_link(
+    app: FastAPI,
+    node1: str,
+    node2: str,
+    if1: str | None = None,
+    if2: str | None = None,
+) -> None:
+    """``if1``/``if2`` pick one of several links between the same two nodes (see TopologyBackend.remove_link)."""
     with exclusive("Remove link"):
         if not Settings.TOPOLOGY_FILE:
             raise RuntimeError("Select a project before editing a live topology")
-        logger.warning(f"Removing link {node1} <-> {node2} live")
+        label = (
+            f"{node1}{':' + if1 if if1 else ''} <-> {node2}{':' + if2 if if2 else ''}"
+        )
+        logger.warning(f"Removing link {label} live")
         backend = get_or_create_backend(app)
-        backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2)
+        if if1 is None and if2 is None:
+            backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2)
+        else:
+            backend.remove_link(Settings.TOPOLOGY_FILE, node1, node2, if1, if2)
         app.state.graph = load_graph()
-        logger.info(f"Link {node1} <-> {node2} removed")
+        logger.info(f"Link {label} removed")

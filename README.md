@@ -119,6 +119,19 @@ against a real OVA import from the sister template API.
   `/design/nodes` and `/topology` name the service and the reason ("The ESXi
   template service (host) is not reachable: connection refused or host
   down.") instead of a raw connection error; design mode keeps working.
+- **Parallel links**: two nodes can be linked more than once, over
+  different interfaces (the only rule is that an interface carries one
+  link: "Interface Gi0/1 is used twice"). The canvas draws every link on
+  its own, side by side, each with its own port labels, and a link is
+  addressed by node *and interface* on both ends: `DELETE /links/{a}/{b}`,
+  `PUT /links/{a}/{b}/options`, the capture endpoints and
+  `DELETE /design/links/{a}/{b}` take optional `?if1=..&if2=..` (interface
+  on `a` / on `b`); without them the first link of the pair is meant, as
+  before. `GET /topology` and the design view list each node's `links` as
+  `{interface, peer, peer_interface}` next to the older `interfaces` map.
+  If the interfaces match no live link, the request fails instead of
+  hitting the link that does exist. `verify` checks each link by its ports,
+  and TopologyBuilder creates each one in GNS3 by its own interface pair.
 - **Wireshark-style packet capture** (`app/capture.py`): start/stop a
   capture on any live link and view it as a live, in-browser
   Wireshark-style packet table (click a link on the canvas) - a
@@ -491,7 +504,7 @@ same restart flow as host changes. Import and live edits require a selected proj
   `GET /nodes` (graph merged with live GNS3/ESXi state), `GET/POST
   /layout`.
 - `GET /templates`, `POST /nodes`, `DELETE /nodes/{name}`, `POST
-  /links`, `DELETE /links/{node1}/{node2}` - live add/remove.
+  /links`, `DELETE /links/{node1}/{node2}[?if1=..&if2=..]` - live add/remove.
 - `POST /nodes/{name}/start`, `.../stop`, `.../reload` - node lifecycle.
 - `GET /links` (every live link + capturing state), `POST
   /links/{node1}/{node2}/capture/start`, `.../capture/stop`, `GET

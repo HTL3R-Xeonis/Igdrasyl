@@ -9,6 +9,7 @@ import requests
 import yaml
 from src.settings import Settings
 
+import app.main as app_module
 from app.config_push import DeviceResult
 
 
@@ -196,6 +197,76 @@ def test_topology_returns_static_structure_regardless_of_live_state(client, app_
     assert by_name["R1"]["environment"] == "ON_GNS3"
     assert by_name["VM1"]["environment"] == "ON_ESXI"
     assert by_name["R1"]["interfaces"]["gi0/0"] == "SW1"
+
+
+def test_topology_lists_every_link_with_the_interface_on_the_far_side(
+    client, app_state
+):
+    resp = client.get("/topology")
+    by_name = {n["name"]: n for n in resp.json()}
+
+    assert by_name["R1"]["links"], "R1 has at least one link in the fixture topology"
+    for node in by_name.values():
+        for link in node["links"]:
+            assert {
+                "interface": link["peer_interface"],
+                "peer": node["name"],
+                "peer_interface": link["interface"],
+            } in by_name[link["peer"]]["links"]
+    assert {link["interface"] for link in by_name["R1"]["links"]} == set(
+        by_name["R1"]["interfaces"]
+    )
+
+
+def test_link_endpoints_pass_the_interfaces_on_to_capture_and_options(
+    client, app_state
+):
+    with patch(
+        "app.main.capture.start_capture", return_value={"status": "ok"}
+    ) as start:
+        assert (
+            client.post(
+                "/links/R1/SW1/capture/start", params={"if1": "Gi0/1", "if2": "Gi0/2"}
+            ).status_code
+            == 200
+        )
+    start.assert_called_once_with(app_module.app, "R1", "SW1", "Gi0/1", "Gi0/2")
+
+    with patch("app.main.capture.stop_capture") as stop:
+        assert (
+            client.post(
+                "/links/R1/SW1/capture/stop", params={"if1": "Gi0/1"}
+            ).status_code
+            == 200
+        )
+    stop.assert_called_once_with(app_module.app, "R1", "SW1", "Gi0/1", None)
+
+    with patch("app.main.link_options.set_options", return_value={}) as options:
+        assert (
+            client.put(
+                "/links/R1/SW1/options",
+                params={"if1": "Gi0/1", "if2": "Gi0/2"},
+                json={"delay_ms": 5},
+            ).status_code
+            == 200
+        )
+    assert (
+        options.call_args.kwargs["if1"] == "Gi0/1"
+        and options.call_args.kwargs["if2"] == "Gi0/2"
+    )
+
+
+def test_design_remove_link_takes_the_interfaces_to_remove_one_of_several(
+    client, app_state
+):
+    with patch("app.main.design.remove_link") as remove:
+        assert (
+            client.delete(
+                "/design/links/R1/R2", params={"if1": "Gi0/1", "if2": "Gi0/1"}
+            ).status_code
+            == 200
+        )
+    assert remove.call_args[0][1:] == ("R1", "R2", "Gi0/1", "Gi0/1")
 
 
 def test_nodes_merges_live_gns3_data_for_gns3_nodes(client, app_state):
@@ -816,6 +887,8 @@ def test_link_capture_start_stop_and_stream(client, app_state):
                 "if1": "eth0",
                 "node2": "SW1",
                 "if2": "Ethernet0",
+                "port1": None,
+                "port2": None,
                 "capturing": False,
                 "delay_ms": 0,
                 "jitter_ms": 0,

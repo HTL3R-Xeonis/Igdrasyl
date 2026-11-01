@@ -46,10 +46,23 @@ class _FakeBackend:
         data.setdefault("edges", []).append([node1, if1, node2, if2])
         self._write(topology_file, data)
 
-    def remove_link(self, topology_file, node1, node2):
-        self.calls.append(("remove_link", topology_file, node1, node2))
+    def remove_link(self, topology_file, node1, node2, if1=None, if2=None):
+        self.calls.append(
+            ("remove_link", topology_file, node1, node2)
+            + ((if1, if2) if if1 is not None or if2 is not None else ())
+        )
         data = self._read(topology_file)
-        data["edges"] = [e for e in data["edges"] if {e[0], e[2]} != {node1, node2}]
+
+        def matches(edge):
+            if (edge[0], edge[2]) == (node1, node2):
+                near, far = edge[1], edge[3]
+            elif (edge[0], edge[2]) == (node2, node1):
+                near, far = edge[3], edge[1]
+            else:
+                return False
+            return (if1 is None or near == if1) and (if2 is None or far == if2)
+
+        data["edges"] = [e for e in data["edges"] if not matches(e)]
         self._write(topology_file, data)
 
 
@@ -360,3 +373,32 @@ def test_a_failed_add_node_restores_the_topology_file(app_state, temp_topology_f
             topology_write.add_node(main_module.app, "VM9", "VM", "debian")
 
     assert temp_topology_file.read_text() == before
+
+
+def test_remove_link_passes_the_interfaces_so_one_of_several_links_goes(
+    client, app_state, temp_topology_file
+):
+    fake = _FakeBackend()
+    app_state.topology_backend = fake
+
+    resp = client.delete("/links/R1/SW1", params={"if1": "gi0/0", "if2": "gi0/1"})
+
+    assert resp.status_code == 200, resp.text
+    assert fake.calls == [
+        ("remove_link", str(temp_topology_file), "R1", "SW1", "gi0/0", "gi0/1")
+    ]
+
+
+def test_remove_link_with_ambiguous_interfaces_maps_to_404(
+    client, app_state, temp_topology_file
+):
+    fake = MagicMock()
+    fake.remove_link.side_effect = ValueError(
+        "2 live links match; cannot tell which one to delete"
+    )
+    app_state.topology_backend = fake
+
+    resp = client.delete("/links/R1/SW1", params={"if1": "gi0/0"})
+
+    assert resp.status_code == 404
+    assert "cannot tell which one" in resp.json()["detail"]

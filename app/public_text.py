@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_ABSOLUTE_PATH = re.compile(r"(?<![:/])/(?:[A-Za-z0-9_.@+ -]+/)+[A-Za-z0-9_.@+ -]+")
+_ABSOLUTE_PATH = re.compile(r"(?<![\w:/])/(?:[A-Za-z0-9_.@+ -]+/)+[A-Za-z0-9_.@+ -]+")
 
 
 # The URL of a logged request ("HTTP GET /maintenance/orphans", "WS

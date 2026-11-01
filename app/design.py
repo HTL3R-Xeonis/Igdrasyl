@@ -101,16 +101,38 @@ def add_link(state: DesignState, node1: str, if1: str, node2: str, if2: str) -> 
     state.links.append((node1, if1, node2, if2))
 
 
-def remove_link(state: DesignState, node1: str, node2: str) -> None:
-    match = next(
-        (link for link in state.links if {link[0], link[2]} == {node1, node2}), None
-    )
+def remove_link(
+    state: DesignState,
+    node1: str,
+    node2: str,
+    if1: str | None = None,
+    if2: str | None = None,
+) -> None:
+    """
+    Removes the link between two nodes. Two nodes can be linked more than
+    once over different interfaces: ``if1``/``if2`` (the interface on
+    node1/node2) pick the one to remove; without them the first link
+    between the two goes, as before.
+    :raises KeyError: no such link
+    """
+
+    def matches(link: tuple[str, str, str, str]) -> bool:
+        if (link[0], link[2]) == (node1, node2):
+            near, far = link[1], link[3]
+        elif (link[0], link[2]) == (node2, node1):
+            near, far = link[3], link[1]
+        else:
+            return False
+        return (if1 is None or near == if1) and (if2 is None or far == if2)
+
+    match = next((link for link in state.links if matches(link)), None)
     if match is None:
-        raise KeyError(f"no link between '{node1}' and '{node2}'")
+        wanted = f" using {if1 or '*'} and {if2 or '*'}" if (if1 or if2) else ""
+        raise KeyError(f"no link between '{node1}' and '{node2}'{wanted}")
     state.links.remove(match)
-    n1, if1, n2, if2 = match
-    state.nodes[n1].interfaces.pop(if1, None)
-    state.nodes[n2].interfaces.pop(if2, None)
+    n1, if_1, n2, if_2 = match
+    state.nodes[n1].interfaces.pop(if_1, None)
+    state.nodes[n2].interfaces.pop(if_2, None)
 
 
 def remove_many(
@@ -167,6 +189,21 @@ def paste(
         raise
 
 
+def node_links(links: Any, name: str) -> list[dict[str, str]]:
+    """
+    The links of one node as {interface, peer, peer_interface}, in the order of
+    the (node1, if1, node2, if2) list. Unlike the interfaces map (interface ->
+    neighbour node) this tells apart several links between the same two nodes.
+    """
+    result = []
+    for node1, if1, node2, if2 in links:
+        if node1 == name:
+            result.append({"interface": if1, "peer": node2, "peer_interface": if2})
+        elif node2 == name:
+            result.append({"interface": if2, "peer": node1, "peer_interface": if1})
+    return result
+
+
 def to_topology_view(state: DesignState) -> list[dict[str, Any]]:
     """Same shape as GET /topology, for the frontend's shared renderer."""
     return [
@@ -176,6 +213,7 @@ def to_topology_view(state: DesignState) -> list[dict[str, Any]]:
             "image": node.image,
             "environment": node.environment,
             "interfaces": dict(node.interfaces),
+            "links": node_links(state.links, node.name),
         }
         for node in state.nodes.values()
     ]

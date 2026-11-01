@@ -617,20 +617,36 @@ function edgePoint(from, to) {
   return { x: from.x + dx * scale, y: from.y + dy * scale };
 }
 
+// Two nodes can be linked more than once (over different interfaces). Their lines run side by side:
+// the k-th of n links between a pair is shifted by (k - (n-1)/2) * LINK_SPACING, perpendicular to the
+// line between the two icons, measured from the alphabetically first node of the pair so both ends
+// of a link, its line and its labels always agree on which side it is on.
+const LINK_SPACING = 16;
+
+function shiftedEdgePoint(near, far, offset, nearIsFirst) {
+  const p = edgePoint(near, far);
+  if (!offset) return p;
+  const dx = far.x - near.x;
+  const dy = far.y - near.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const sign = nearIsFirst ? 1 : -1;
+  return { x: p.x + (-dy / len) * offset * sign, y: p.y + (dx / len) * offset * sign };
+}
+
 // A little further out from the link-endpoint dot, in the same
 // direction away from the icon's own center - reads as "next to the
 // icon" instead of sitting on top of it. Shared by the initial render
 // and by onNodeDrag's own live repositioning, so both always agree.
-function portLabelPoint(nearNode, farNode) {
-  const p = edgePoint(nearNode, farNode);
+function portLabelPoint(nearNode, farNode, offset = 0, nearIsFirst = true) {
+  const p = shiftedEdgePoint(nearNode, farNode, offset, nearIsFirst);
   const dx = p.x - nearNode.x;
   const dy = p.y - nearNode.y;
   const len = Math.hypot(dx, dy) || 1;
   return { x: p.x + (dx / len) * 12, y: p.y + (dy / len) * 12 };
 }
 
-function appendLinkEndpointDot(layer, nearNode, farNode, ifName) {
-  const p = edgePoint(nearNode, farNode);
+function appendLinkEndpointDot(layer, nearNode, farNode, ifName, offset = 0, nearIsFirst = true) {
+  const p = shiftedEdgePoint(nearNode, farNode, offset, nearIsFirst);
   const dot = document.createElementNS(SVG_NS, "circle");
   dot.setAttribute("class", "link-endpoint");
   dot.setAttribute("r", 3);
@@ -638,16 +654,20 @@ function appendLinkEndpointDot(layer, nearNode, farNode, ifName) {
   dot.setAttribute("cy", p.y);
   dot.dataset.for = nearNode.name;
   dot.dataset.other = farNode.name;
+  dot.dataset.offset = offset;
+  dot.dataset.first = nearIsFirst ? "1" : "0";
   layer.appendChild(dot);
 
   if (!ifName || !showPortLabels) return;
-  const labelPoint = portLabelPoint(nearNode, farNode);
+  const labelPoint = portLabelPoint(nearNode, farNode, offset, nearIsFirst);
   const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("class", "port-label");
   label.setAttribute("x", labelPoint.x);
   label.setAttribute("y", labelPoint.y);
   label.dataset.for = nearNode.name;
   label.dataset.other = farNode.name;
+  label.dataset.offset = offset;
+  label.dataset.first = nearIsFirst ? "1" : "0";
   label.textContent = ifName;
   layer.appendChild(label);
 }
@@ -1333,42 +1353,48 @@ function renderCanvas() {
   linksLayer.innerHTML = "";
   nodesLayer.innerHTML = "";
 
-  const drawnPairs = new Set();
-  for (const node of Object.values(nodesData)) {
-    for (const [ifName, neighbourName] of Object.entries(node.interfaces)) {
-      if (!neighbourName || !nodesData[neighbourName]) continue;
-      const pairKey = [node.name, neighbourName].sort().join("|");
-      if (drawnPairs.has(pairKey)) continue;
-      drawnPairs.add(pairKey);
-      const neighbour = nodesData[neighbourName];
-      const neighbourIfEntry = Object.entries(neighbour.interfaces).find(([, n]) => n === node.name);
-      const neighbourIfName = neighbourIfEntry ? neighbourIfEntry[0] : "";
+  const links = topologyLinks();
+  const perPair = {};
+  for (const link of links) (perPair[linkPairKey(link.a, link.b)] ||= []).push(link);
+  for (const link of links) {
+    const pairKey = linkPairKey(link.a, link.b);
+    const siblings = perPair[pairKey];
+    const offset = (siblings.indexOf(link) - (siblings.length - 1) / 2) * LINK_SPACING;
+    const [first, second] = pairKey.split("|");
+    const flip = link.a !== first; // the offset is measured from the alphabetically first node
+    const node = nodesData[link.a];
+    const neighbour = nodesData[link.b];
+    const ifName = link.ifA;
+    const neighbourIfName = link.ifB;
+    const liveLink = liveLinkFor(link.a, link.ifA, link.b, link.ifB);
+    const isCapturing = !!(liveLink && liveLink.capturing);
+    const impaired = !!(liveLink && (liveLink.delay_ms || liveLink.loss_percent || liveLink.corrupt_percent));
 
-      const line = document.createElementNS(SVG_NS, "line");
-      const isCapturing = !!(liveLinksData[pairKey] && liveLinksData[pairKey].capturing);
-      const liveLink = liveLinksData[pairKey];
-      const impaired = !!(liveLink && (liveLink.delay_ms || liveLink.loss_percent || liveLink.corrupt_percent));
-      line.setAttribute("class", `link-line${isCapturing ? " link-line-capturing" : ""}${impaired ? " link-line-impaired" : ""}${liveLink && liveLink.suspended ? " link-line-suspended" : ""}`);
-      line.dataset.pair = pairKey;
-      setLineEndpoints(line, node, neighbour);
-      // The drawn line is only ~1.5 px wide, too thin to hit with a mouse: an invisible wide line
-      // right before it takes the click (and the hover highlight, see styles.css).
-      const hit = document.createElementNS(SVG_NS, "line");
-      hit.setAttribute("class", "link-hit");
-      hit.dataset.pair = pairKey;
-      setLineEndpoints(hit, node, neighbour);
-      const openLinkActions = (evt) => {
-        evt.stopPropagation();
-        if (linkMode) return;
-        showLinkActions(node.name, ifName, neighbourName, neighbourIfName, { x: evt.clientX, y: evt.clientY });
-      };
-      hit.addEventListener("pointerdown", openLinkActions);
-      line.addEventListener("pointerdown", openLinkActions);
-      linksLayer.appendChild(hit);
-      linksLayer.appendChild(line);
-      appendLinkEndpointDot(linksLayer, node, neighbour, ifName);
-      appendLinkEndpointDot(linksLayer, neighbour, node, neighbourIfName);
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("class", `link-line${isCapturing ? " link-line-capturing" : ""}${impaired ? " link-line-impaired" : ""}${liveLink && liveLink.suspended ? " link-line-suspended" : ""}`);
+    // The drawn line is only ~1.5 px wide, too thin to hit with a mouse: an invisible wide line
+    // right before it takes the click (and the hover highlight, see styles.css).
+    const hit = document.createElementNS(SVG_NS, "line");
+    hit.setAttribute("class", "link-hit");
+    for (const el of [line, hit]) {
+      el.dataset.pair = pairKey;
+      el.dataset.a = first;
+      el.dataset.b = second;
+      el.dataset.offset = offset;
+      el.dataset.link = linkKey(link.a, link.ifA, link.b, link.ifB);
+      setLineEndpoints(el, nodesData[first], nodesData[second], offset);
     }
+    const openLinkActions = (evt) => {
+      evt.stopPropagation();
+      if (linkMode) return;
+      showLinkActions(link.a, link.ifA, link.b, link.ifB, { x: evt.clientX, y: evt.clientY });
+    };
+    hit.addEventListener("pointerdown", openLinkActions);
+    line.addEventListener("pointerdown", openLinkActions);
+    linksLayer.appendChild(hit);
+    linksLayer.appendChild(line);
+    appendLinkEndpointDot(linksLayer, node, neighbour, ifName, offset, !flip);
+    appendLinkEndpointDot(linksLayer, neighbour, node, neighbourIfName, offset, flip);
   }
 
   for (const node of Object.values(nodesData)) {
@@ -1376,9 +1402,9 @@ function renderCanvas() {
   }
 }
 
-function setLineEndpoints(line, a, b) {
-  const pa = edgePoint(a, b);
-  const pb = edgePoint(b, a);
+function setLineEndpoints(line, a, b, offset = 0) {
+  const pa = shiftedEdgePoint(a, b, offset, true);
+  const pb = shiftedEdgePoint(b, a, offset, false);
   line.setAttribute("x1", pa.x);
   line.setAttribute("y1", pa.y);
   line.setAttribute("x2", pb.x);
@@ -1548,20 +1574,19 @@ function moveNodeShape(name) {
   const g = document.querySelector(`.node-shape[data-name="${name}"]`);
   if (g) g.setAttribute("transform", `translate(${node.x - NODE_W / 2}, ${node.y - NODE_ICON_SIZE / 2})`);
   document.querySelectorAll(".link-line, .link-hit").forEach((line) => {
-    const [a, b] = line.dataset.pair.split("|");
+    const { a, b } = line.dataset;
     if (a !== name && b !== name) return;
-    const other = a === name ? b : a;
-    setLineEndpoints(line, node, nodesData[other]);
+    setLineEndpoints(line, nodesData[a], nodesData[b], Number(line.dataset.offset) || 0);
   });
   document.querySelectorAll(".link-endpoint").forEach((dot) => {
     if (dot.dataset.for !== name && dot.dataset.other !== name) return;
-    const p2 = edgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other]);
+    const p2 = shiftedEdgePoint(nodesData[dot.dataset.for], nodesData[dot.dataset.other], Number(dot.dataset.offset) || 0, dot.dataset.first === "1");
     dot.setAttribute("cx", p2.x);
     dot.setAttribute("cy", p2.y);
   });
   document.querySelectorAll(".port-label").forEach((label) => {
     if (label.dataset.for !== name && label.dataset.other !== name) return;
-    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other]);
+    const labelPoint = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other], Number(label.dataset.offset) || 0, label.dataset.first === "1");
     label.setAttribute("x", labelPoint.x);
     label.setAttribute("y", labelPoint.y);
   });
@@ -2141,20 +2166,9 @@ function copySelection() {
   const names = [...selectedNames].filter((n) => nodesData[n]);
   if (!names.length) return false;
   const inSet = new Set(names);
-  const links = [];
-  const seen = new Set();
-  for (const name of names) {
-    for (const [ifName, neighbour] of Object.entries(nodesData[name].interfaces)) {
-      if (!neighbour || !inSet.has(neighbour)) continue;
-      const key = [name, ifName].join("|");
-      if (seen.has(key)) continue;
-      const other = Object.entries(nodesData[neighbour].interfaces).find(([otherIf, n]) => n === name && !seen.has([neighbour, otherIf].join("|")));
-      if (!other) continue;
-      seen.add(key);
-      seen.add([neighbour, other[0]].join("|"));
-      links.push({ node1: name, if1: ifName, node2: neighbour, if2: other[0] });
-    }
-  }
+  const links = topologyLinks()
+    .filter((l) => inSet.has(l.a) && inSet.has(l.b))
+    .map((l) => ({ node1: l.a, if1: l.ifA, node2: l.b, if2: l.ifB }));
   nodeClipboard = {
     nodes: names.map((n) => ({ name: n, role: nodesData[n].role, image: nodesData[n].image, x: nodesData[n].x, y: nodesData[n].y })),
     links,
@@ -2627,10 +2641,10 @@ async function createLink(node1, if1, node2, if2) {
   }
 }
 
-async function deleteLink(node1, node2) {
+async function deleteLink(node1, if1, node2, if2) {
   try {
     const resp = await fetch(
-      apiPath(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}`),
+      apiPath(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}${linkQuery(if1, if2)}`),
       { method: "DELETE" }
     );
     if (!resp.ok) {
@@ -2649,24 +2663,84 @@ async function deleteLink(node1, node2) {
 // to GNS3's own controller API for the real link this node-name pair
 // resolves to. ---
 
-let liveLinksData = {};
+let liveLinksData = {};     // linkKey -> live link (GNS3 port names)
+let liveLinksByPair = {};   // node pair -> [live links]
 let selectedLinkPair = null;
 
 function linkPairKey(a, b) {
   return [a, b].sort().join("|");
 }
 
+// One link = (node, interface) on both ends. Two nodes can be linked more than once, so a link is
+// never identified by the node pair alone.
+function linkKey(a, ifA, b, ifB) {
+  const x = `${a}:${ifA || ""}`;
+  const y = `${b}:${ifB || ""}`;
+  return x < y ? `${x}|${y}` : `${y}|${x}`;
+}
+
+// Every link of the topology once, as {a, ifA, b, ifB}.
+function topologyLinks() {
+  const links = [];
+  const seen = new Set();
+  const add = (a, ifA, b, ifB) => {
+    if (!nodesData[a] || !nodesData[b]) return;
+    const key = linkKey(a, ifA, b, ifB);
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ a, ifA, b, ifB });
+  };
+  for (const node of Object.values(nodesData)) {
+    if (Array.isArray(node.links)) {
+      for (const l of node.links) add(node.name, l.interface, l.peer, l.peer_interface);
+    } else {
+      // a server without per-link data: at most one link per neighbour can be told apart
+      for (const [ifName, neighbourName] of Object.entries(node.interfaces || {})) {
+        if (!neighbourName || !nodesData[neighbourName]) continue;
+        const back = Object.entries(nodesData[neighbourName].interfaces || {}).find(([, n]) => n === node.name);
+        add(node.name, ifName, neighbourName, back ? back[0] : "");
+      }
+    }
+  }
+  return links;
+}
+
+// The live GNS3 link behind a topology link: by both interfaces, or - when the two nodes have just one
+// live link between them (its port name may differ from the interface name, e.g. a VM's Cloud node) -
+// that one.
+function liveLinkFor(node1, if1, node2, if2) {
+  const exact = liveLinksData[linkKey(node1, if1, node2, if2)];
+  if (exact) return exact;
+  const sameNodes = liveLinksByPair[linkPairKey(node1, node2)] || [];
+  return sameNodes.length === 1 ? sameNodes[0] : null;
+}
+
+// ?if1=..&if2=.. for the endpoints that address one link of a pair
+function linkQuery(if1, if2) {
+  const params = new URLSearchParams();
+  if (if1) params.set("if1", if1);
+  if (if2) params.set("if2", if2);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
 async function refreshLiveLinks() {
   if (designMode) {
     liveLinksData = {};
+    liveLinksByPair = {};
     return;
   }
   try {
     const links = await fetch("/links").then((r) => (r.ok ? r.json() : []));
     liveLinksData = {};
-    for (const link of links) liveLinksData[linkPairKey(link.node1, link.node2)] = link;
+    liveLinksByPair = {};
+    for (const link of links) {
+      liveLinksData[linkKey(link.node1, link.port1 || link.if1, link.node2, link.port2 || link.if2)] = link;
+      (liveLinksByPair[linkPairKey(link.node1, link.node2)] ||= []).push(link);
+    }
   } catch (err) {
     liveLinksData = {};
+    liveLinksByPair = {};
   }
   updateStatusBar();
 }
@@ -2688,7 +2762,7 @@ function renderLinkActionsPopup(node1, if1, node2, if2) {
     return;
   }
 
-  const live = liveLinksData[linkPairKey(node1, node2)];
+  const live = liveLinkFor(node1, if1, node2, if2);
   optionsBox.hidden = !live;
   if (live) {
     document.getElementById("lo-delay").value = live.delay_ms || 0;
@@ -2709,8 +2783,8 @@ function renderLinkActionsPopup(node1, if1, node2, if2) {
   startBtn.title = live ? "Start a packet capture on this link" : "No live GNS3 link found for this pair";
   stopBtn.title = "Stop the running capture";
   wsBtn.title = capturing ? "Open a live, in-browser packet view" : "Start a capture first";
-  startBtn.onclick = () => callLinkCapture("start", node1, node2);
-  stopBtn.onclick = () => callLinkCapture("stop", node1, node2);
+  startBtn.onclick = () => callLinkCapture("start", node1, if1, node2, if2);
+  stopBtn.onclick = () => callLinkCapture("stop", node1, if1, node2, if2);
   wsBtn.onclick = () => openCaptureViewer(node1, if1, node2, if2);
 }
 
@@ -2724,9 +2798,9 @@ function showLinkActions(node1, if1, node2, if2, anchor) {
 
 async function applyLinkOptions(values) {
   if (!selectedLinkPair) return;
-  const { node1, node2 } = selectedLinkPair;
+  const { node1, if1, node2, if2 } = selectedLinkPair;
   try {
-    const resp = await fetch(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/options`, {
+    const resp = await fetch(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/options${linkQuery(if1, if2)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(values),
@@ -2759,10 +2833,10 @@ function deselectLink() {
   document.getElementById("link-actions").hidden = true;
 }
 
-async function callLinkCapture(action, node1, node2) {
+async function callLinkCapture(action, node1, if1, node2, if2) {
   try {
     const resp = await fetch(
-      `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/${action}`,
+      `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/${action}${linkQuery(if1, if2)}`,
       { method: "POST" }
     );
     if (!resp.ok) {
@@ -2770,7 +2844,7 @@ async function callLinkCapture(action, node1, node2) {
       return;
     }
     await refreshLiveLinks();
-    if (selectedLinkPair && selectedLinkPair.node1 === node1 && selectedLinkPair.node2 === node2) {
+    if (selectedLinkPair && linkKey(selectedLinkPair.node1, selectedLinkPair.if1, selectedLinkPair.node2, selectedLinkPair.if2) === linkKey(node1, if1, node2, if2)) {
       renderLinkActionsPopup(selectedLinkPair.node1, selectedLinkPair.if1, selectedLinkPair.node2, selectedLinkPair.if2);
     }
   } catch (err) {
@@ -2780,11 +2854,11 @@ async function callLinkCapture(action, node1, node2) {
 
 document.getElementById("link-delete-btn").addEventListener("click", async () => {
   if (!selectedLinkPair) return;
-  const { node1, node2 } = selectedLinkPair;
-  const deleteMsg = `Delete link between ${node1} and ${node2}?`;
+  const { node1, if1, node2, if2 } = selectedLinkPair;
+  const deleteMsg = `Delete link ${node1}:${if1 || "?"} ⇄ ${node2}:${if2 || "?"}?`;
   if (!(await showConfirm(deleteMsg, { danger: true, confirmLabel: "Delete" }))) return;
   deselectLink();
-  await deleteLink(node1, node2);
+  await deleteLink(node1, if1, node2, if2);
 });
 
 document.addEventListener("click", (evt) => {
@@ -3084,8 +3158,8 @@ async function openCaptureViewer(node1, if1, node2, if2) {
   selectedPacketRow = null;
   document.getElementById("capture-viewer-title").textContent =
     `${node1}:${if1 || "?"} ⇄ ${node2}:${if2 || "?"} — live capture`;
-  const streamPath = `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/stream`;
-  const wiresharkCmd = `curl -sN ${window.location.origin}${streamPath} | wireshark -k -i -`;
+  const streamPath = `/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}/capture/stream${linkQuery(if1, if2)}`;
+  const wiresharkCmd = `curl -sN '${window.location.origin}${streamPath}' | wireshark -k -i -`;
   document.getElementById("capture-viewer-wireshark-command").value = wiresharkCmd;
   document.getElementById("capture-viewer-wireshark-status").textContent = "";
   status.textContent = "Connecting…";

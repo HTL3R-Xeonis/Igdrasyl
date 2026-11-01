@@ -58,3 +58,26 @@ def test_a_traceback_after_a_request_line_is_redacted_line_by_line_content():
 
     assert result.startswith("HTTP GET /boom raised")
     assert "/srv/app" not in result
+
+
+def test_interface_names_with_slashes_are_not_taken_for_server_paths():
+    message = (
+        "no single live link between 'R1' and 'SW1' uses the interfaces Gi0/1 and Gi1/1"
+    )
+
+    assert redact_paths(message) == message
+    assert redact_paths("R1:Gi0/1 <-> SW1:Gi1/1: no matching GNS3 link found").endswith(
+        "found"
+    )
+    assert "[server file]" not in redact_paths(
+        "R1:Gi0/1 <-> SW1:Gi1/1: no matching GNS3 link found"
+    )
+
+
+def test_real_paths_are_still_redacted_after_spaces_quotes_and_brackets():
+    for text in (
+        "cannot read /home/junioradmin/app/settings.yml now",
+        "file '/etc/ssh/sshd_config' missing",
+        "(/var/lib/docker/x)",
+    ):
+        assert "[server file]" in redact_paths(text), text

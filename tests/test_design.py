@@ -351,3 +351,63 @@ def test_design_export_is_importable_against_any_active_host(
     app_state.topology_backend = _FakeBackend()
     project_bundle.apply_import(main_module.app, export_resp.content)
     assert "R1" in app_state.graph.nodes
+
+
+def _two_routers_with_two_links():
+    state = design.new_state()
+    design.add_node(state, "R1", "ROUTER", "Cisco IOSv 15.6(1)T")
+    design.add_node(state, "R2", "ROUTER", "Cisco IOSv 15.6(1)T")
+    design.add_link(state, "R1", "Gi0/0", "R2", "Gi0/0")
+    design.add_link(state, "R1", "Gi0/1", "R2", "Gi0/1")
+    return state
+
+
+def test_two_nodes_can_be_linked_twice_over_different_interfaces():
+    state = _two_routers_with_two_links()
+
+    assert state.links == [
+        ("R1", "Gi0/0", "R2", "Gi0/0"),
+        ("R1", "Gi0/1", "R2", "Gi0/1"),
+    ]
+    with pytest.raises(ValueError, match="already in use"):
+        design.add_link(state, "R1", "Gi0/1", "R2", "Gi0/2")
+
+
+def test_the_view_lists_every_link_with_the_far_interface():
+    view = {
+        n["name"]: n for n in design.to_topology_view(_two_routers_with_two_links())
+    }
+
+    assert view["R1"]["links"] == [
+        {"interface": "Gi0/0", "peer": "R2", "peer_interface": "Gi0/0"},
+        {"interface": "Gi0/1", "peer": "R2", "peer_interface": "Gi0/1"},
+    ]
+    assert view["R2"]["links"][1] == {
+        "interface": "Gi0/1",
+        "peer": "R1",
+        "peer_interface": "Gi0/1",
+    }
+
+
+def test_remove_link_with_interfaces_removes_only_that_link():
+    state = _two_routers_with_two_links()
+
+    design.remove_link(state, "R2", "R1", "Gi0/1", "Gi0/1")  # reversed order on purpose
+
+    assert state.links == [("R1", "Gi0/0", "R2", "Gi0/0")]
+    assert state.nodes["R1"].interfaces == {"Gi0/0": "R2"}
+
+
+def test_remove_link_without_interfaces_still_removes_the_first_link():
+    state = _two_routers_with_two_links()
+
+    design.remove_link(state, "R1", "R2")
+
+    assert state.links == [("R1", "Gi0/1", "R2", "Gi0/1")]
+
+
+def test_remove_link_with_unknown_interfaces_raises():
+    state = _two_routers_with_two_links()
+
+    with pytest.raises(KeyError, match="Gi9/9"):
+        design.remove_link(state, "R1", "R2", "Gi9/9", "Gi9/9")

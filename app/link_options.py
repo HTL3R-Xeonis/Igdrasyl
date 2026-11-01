@@ -74,6 +74,8 @@ def set_options(
     node1: str,
     node2: str,
     *,
+    if1: str | None = None,
+    if2: str | None = None,
     delay_ms: int,
     jitter_ms: int,
     loss_percent: int,
@@ -92,7 +94,7 @@ def set_options(
     from app.capture import _base_url, _live_link
 
     filters = filters_from_options(delay_ms, jitter_ms, loss_percent, corrupt_percent)
-    link = _live_link(app, node1, node2)
+    link = _live_link(app, node1, node2, if1, if2)
     for key, value in (link.get("filters") or {}).items():
         if key not in ("delay", "packet_loss", "corrupt"):
             filters[key] = value
