@@ -1,6 +1,8 @@
 """The ESXi session is opened on first use, so a host that is down or not set up yet does not stop the app starting."""
 
 import copy
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,8 +21,10 @@ class _Clock:
         return self.now
 
 
-def _lazy(connect, clock=None):
-    return LazyESXiConnection(connect, host="10.9.9.9", clock=clock or _Clock())
+def _lazy(connect, clock=None, wait=None):
+    return LazyESXiConnection(
+        connect, host="10.9.9.9", clock=clock or _Clock(), connect_wait_seconds=wait
+    )
 
 
 def test_nothing_is_connected_until_it_is_used():
@@ -157,3 +161,60 @@ def test_the_app_starts_although_the_esxi_host_is_down():
     finally:
         app.state._state.clear()
         app.state._state.update(saved)
+
+
+# ---------- a host that does not answer at all ----------
+
+
+def test_a_host_that_does_not_answer_makes_a_call_wait_only_a_little_and_the_connect_goes_on():
+    release = threading.Event()
+    real = MagicMock()
+
+    def slow_connect():
+        release.wait(10)
+        return real
+
+    lazy = _lazy(slow_connect, wait=0.2)
+    started = time.monotonic()
+    with pytest.raises(EsxiUnavailable, match="did not answer within"):
+        lazy.get_vm("VM1")
+    assert time.monotonic() - started < 2  # not the 10 s the connect would take
+    assert not lazy.connected
+    release.set()  # the host answers after all
+    for _ in range(50):
+        try:
+            lazy.get_vm("VM1")
+            break
+        except EsxiUnavailable:
+            time.sleep(0.05)
+    assert lazy.connected
+    real.get_vm.assert_called()
+
+
+def test_while_a_slow_connect_is_pending_no_second_one_is_started():
+    release = threading.Event()
+    connect = MagicMock(side_effect=lambda: release.wait(10))
+    lazy = _lazy(connect, wait=0.1)
+    for _ in range(3):
+        with pytest.raises(EsxiUnavailable):
+            lazy.get_vm("VM1")
+    assert connect.call_count == 1
+    release.set()
+
+
+def test_a_connect_that_fails_late_is_recorded_as_a_failure():
+    release = threading.Event()
+
+    def failing_connect():
+        release.wait(10)
+        raise OSError("timed out")
+
+    clock = _Clock()
+    lazy = _lazy(failing_connect, clock, wait=0.1)
+    with pytest.raises(EsxiUnavailable):
+        lazy.get_vm("VM1")
+    release.set()
+    time.sleep(0.2)
+    with pytest.raises(EsxiUnavailable, match="can't be reached"):
+        lazy.get_vm("VM1")
+    assert not lazy.connected

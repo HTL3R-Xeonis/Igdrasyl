@@ -38,7 +38,8 @@ function ensureSessionPanel(id, nodeName, title) {
   close.title = "Close";
   close.addEventListener("click", (evt) => { evt.stopPropagation(); closeSession(id); });
   tab.append(label, close);
-  tab.addEventListener("click", () => switchToSession(id));
+  tab.addEventListener("click", () => onSessionTabClick(id));
+  tab.addEventListener("pointerdown", (evt) => startTabDrag(evt, id));
   document.getElementById("session-tabbar").appendChild(tab);
   document.getElementById("session-tabbar").hidden = false;
 
@@ -57,7 +58,7 @@ function ensureSessionPanel(id, nodeName, title) {
   document.getElementById("console-placeholder").style.display = "none";
 
   session = {
-    id, nodeName, kind: null,
+    id, nodeName, title, kind: null, popout: null,
     tabEl: tab, panelEl: panel, statusEl, bodyEl: body,
     ws: null, term: null, rfb: null,
     screenWanted: false, reconnectAttempts: 0,
@@ -74,8 +75,10 @@ function setSessionStatus(session, text, dotClass) {
 function switchToSession(id) {
   activeSessionId = id;
   for (const s of sessions.values()) {
-    const active = s.id === id;
-    s.panelEl.classList.toggle("active", active);
+    // a session in its own window keeps its panel active (visible) there; its tab here just points to the window
+    const popped = isPopped(s);
+    const active = !popped && s.id === id;
+    s.panelEl.classList.toggle("active", popped || active);
     s.tabEl.classList.toggle("active", active);
   }
 }
@@ -86,19 +89,174 @@ function closeSession(id) {
   session.screenWanted = false;
   if (session.ws) session.ws.close();
   if (session.rfb) session.rfb.disconnect();
+  const popout = session.popout;
   session.tabEl.remove();
   session.panelEl.remove();
   sessions.delete(id);
+  if (popout && !popout.closed) popout.close();
   if (activeSessionId !== id) return;
-  const next = sessions.keys().next();
-  if (!next.done) {
-    switchToSession(next.value);
+  const next = [...sessions.values()].find((s) => !isPopped(s));
+  if (next) {
+    switchToSession(next.id);
   } else {
     activeSessionId = null;
-    document.getElementById("session-tabbar").hidden = true;
+    if (!sessions.size) document.getElementById("session-tabbar").hidden = true;
     document.getElementById("console-placeholder").style.display = "";
   }
 }
+
+// ---- tab drag-out (pure geometry, no DOM; tests/test_tab_dragout.py runs this block under node) ----
+// Pressing a session tab and moving the pointer at least TAB_DRAG_THRESHOLD px is a drag (less is a click); a drag that is
+// released more than TAB_DRAG_OUT_MARGIN px outside the Console/Screen area opens that session in its own window.
+const TAB_DRAG_THRESHOLD = 8;
+const TAB_DRAG_OUT_MARGIN = 24;
+function tabDragState(start, point, area) {
+  const dragging = Math.hypot(point.x - start.x, point.y - start.y) >= TAB_DRAG_THRESHOLD;
+  const outside =
+    point.x < area.left - TAB_DRAG_OUT_MARGIN ||
+    point.x > area.right + TAB_DRAG_OUT_MARGIN ||
+    point.y < area.top - TAB_DRAG_OUT_MARGIN ||
+    point.y > area.bottom + TAB_DRAG_OUT_MARGIN;
+  return { dragging, outside: dragging && outside };
+}
+// ---- end tab drag-out ----
+
+function isPopped(session) {
+  return !!(session.popout && !session.popout.closed);
+}
+
+let suppressTabClick = false; // the click that ends a drag must not also switch tabs
+
+function onSessionTabClick(id) {
+  if (suppressTabClick) return;
+  const session = sessions.get(id);
+  if (!session) return;
+  if (isPopped(session)) {
+    session.popout.focus();
+    return;
+  }
+  switchToSession(id);
+}
+
+// Drag a tab out of the panel with the left mouse button to open just that session in its own window (the Pop out
+// button does the same for the whole panel). Escape cancels the drag.
+function startTabDrag(evt, id) {
+  const session = sessions.get(id);
+  if (!session || evt.button !== 0 || evt.target.closest(".session-tab-close")) return;
+  if (isPopped(session) || (poppedOutWindow && !poppedOutWindow.closed)) return;
+  const start = { x: evt.clientX, y: evt.clientY };
+  const tab = session.tabEl;
+  let hint = null;
+  let state = { dragging: false, outside: false };
+  let finished = false;
+  const areaRect = () => document.getElementById("console-area").getBoundingClientRect();
+  try {
+    tab.setPointerCapture(evt.pointerId); // keeps the events coming while the pointer is outside the browser window
+  } catch (err) {
+    // not capturable: the window listeners below still work inside the page
+  }
+
+  const onMove = (e) => {
+    state = tabDragState(start, { x: e.clientX, y: e.clientY }, areaRect());
+    if (!state.dragging) return;
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.id = "tab-dragout-hint";
+      document.body.appendChild(hint);
+      tab.classList.add("dragging-out");
+    }
+    hint.textContent = state.outside ? "Release to open in its own window" : "Drag out of the panel to open in its own window";
+    hint.classList.toggle("will-pop", state.outside);
+    hint.style.left = `${Math.max(0, Math.min(e.clientX + 14, window.innerWidth - 300))}px`;
+    hint.style.top = `${Math.max(0, Math.min(e.clientY + 14, window.innerHeight - 30))}px`;
+  };
+  const finish = (e, cancelled) => {
+    if (finished) return;
+    finished = true;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("keydown", onKey, true);
+    if (hint) hint.remove();
+    tab.classList.remove("dragging-out");
+    try {
+      tab.releasePointerCapture(evt.pointerId);
+    } catch (err) {
+      // already released
+    }
+    if (!cancelled && e.clientX !== undefined) state = tabDragState(start, { x: e.clientX, y: e.clientY }, areaRect());
+    if (!state.dragging) return;
+    suppressTabClick = true;
+    setTimeout(() => { suppressTabClick = false; }, 0);
+    if (!cancelled && state.outside) popOutSession(id, e.screenX, e.screenY);
+  };
+  const onUp = (e) => finish(e, false);
+  const onCancel = (e) => finish(e, true);
+  const onKey = (e) => { if (e.key === "Escape") finish(e, true); };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onCancel);
+  window.addEventListener("keydown", onKey, true);
+}
+
+// Opens one session in its own browser window by moving its live panel there (not a copy), so the terminal or screen and
+// its connection keep running uninterrupted. Closing that window brings the session back into its tab.
+function popOutSession(id, screenX, screenY) {
+  const session = sessions.get(id);
+  if (!session) return;
+  if (isPopped(session)) {
+    session.popout.focus();
+    return;
+  }
+  const width = 900;
+  const height = 650;
+  const win = window.open(
+    "",
+    "_blank",
+    `popup=yes,width=${width},height=${height},left=${Math.max(0, Math.round((screenX || 0) - width / 2))},top=${Math.max(0, Math.round((screenY || 0) - 20))}`,
+  );
+  if (!win) {
+    showAlert("Couldn't open a new window - check your browser's popup blocker.");
+    return;
+  }
+  win.document.head.innerHTML = document.head.innerHTML; // first: it also carries this page's own <title>
+  win.document.title = `Ginnungagap - ${session.title}`;
+  // the same structure as in the panel, so every existing style applies to the moved session
+  const area = win.document.createElement("div");
+  area.id = "console-area";
+  const panels = win.document.createElement("div");
+  panels.id = "session-panels";
+  area.appendChild(panels);
+  win.document.body.appendChild(area);
+  panels.appendChild(session.panelEl);
+  session.panelEl.classList.add("active"); // visible in its own window, whichever tab was active here
+  session.popout = win;
+  session.tabEl.classList.add("popped");
+  win.addEventListener("beforeunload", () => restoreSession(session, win));
+  if (activeSessionId === id) {
+    // the panel shows another session now, or the placeholder when there is none left
+    const remaining = [...sessions.values()].find((s) => !isPopped(s));
+    if (remaining) {
+      switchToSession(remaining.id);
+    } else {
+      activeSessionId = null;
+      document.getElementById("console-placeholder").style.display = "";
+    }
+  }
+}
+
+function restoreSession(session, win) {
+  if (sessions.get(session.id) !== session || session.popout !== win) return;
+  session.popout = null;
+  session.tabEl.classList.remove("popped");
+  document.getElementById("session-panels").appendChild(session.panelEl);
+  document.getElementById("console-placeholder").style.display = "none";
+  switchToSession(session.id);
+}
+
+window.addEventListener("beforeunload", () => {
+  for (const s of sessions.values()) if (isPopped(s)) s.popout.close();
+});
 
 function closeSessionsForNode(nodeName) {
   for (const session of [...sessions.values()]) {
@@ -5495,8 +5653,8 @@ document.getElementById("popout-btn").addEventListener("click", () => {
     showAlert("Couldn't open a new window - check your browser's popup blocker.");
     return;
   }
+  win.document.head.innerHTML = document.head.innerHTML; // first: it also carries this page's own <title>
   win.document.title = "Ginnungagap - Console/Screen View";
-  win.document.head.innerHTML = document.head.innerHTML;
   win.document.body.appendChild(consoleArea);
   poppedOutWindow = win;
 
