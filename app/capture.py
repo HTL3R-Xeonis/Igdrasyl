@@ -32,6 +32,7 @@ note.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import requests
@@ -169,6 +170,61 @@ def list_live_links(app: FastAPI) -> list[dict[str, Any]]:
     return result
 
 
+def _refusal_parts(exc: requests.HTTPError) -> tuple[Any, str]:
+    """(status, GNS3's own explanation) of a refused call; the explanation is empty when the body has none."""
+    response = exc.response
+    if response is None:
+        return "error", ""
+    try:
+        body = response.json()
+        message = str(body.get("message") or "") if isinstance(body, dict) else ""
+    except ValueError:
+        message = (response.text or "").strip()[:300]
+    return response.status_code, message
+
+
+def _controller_refusal(exc: requests.HTTPError) -> RuntimeError:
+    """
+    GNS3 explains a refusal in the body of its answer ({"message": ...}); requests' own text only says "409 Conflict for
+    url ...", which hides the reason. The reason is what the person in front of the canvas needs.
+    """
+    status, message = _refusal_parts(exc)
+    return RuntimeError(f"GNS3 refused ({status}): {message}" if message else str(exc))
+
+
+# What GNS3 answers when its uBridge process has lost the bridge of a Cloud node (it was restarted, e.g. while a link was
+# added to the running project): the bridge module is "unknown" to the fresh process.
+_LOST_BRIDGE = re.compile(r"unknown module 'bridge'", re.IGNORECASE)
+
+
+def _restart_cloud_nodes(app: FastAPI, link: dict[str, Any]) -> list[str]:
+    """
+    Stops and starts the Cloud nodes at the ends of a link, which makes GNS3 build their bridges again. A Cloud node has no
+    state of its own (the machine behind it is on ESXi), so this only interrupts that one VM's connection for a moment -
+    unlike reloading the project, which restarts every router and loses what is not saved on it. Returns their names.
+    """
+    live = {n["node_id"]: n for n in list_live_nodes(app)}
+    clouds = [
+        live[end["node_id"]]
+        for end in link["nodes"]
+        if live.get(end["node_id"], {}).get("node_type") == "cloud"
+    ]
+    for node in clouds:
+        GNS3Connection.stop_node(
+            app.state.gns3_vm_ip,
+            Settings.GNS3.PORT,
+            app.state.project_id,
+            node["node_id"],
+        )
+        GNS3Connection.start_node(
+            app.state.gns3_vm_ip,
+            Settings.GNS3.PORT,
+            app.state.project_id,
+            node["node_id"],
+        )
+    return [node["name"] for node in clouds]
+
+
 def start_capture(
     app: FastAPI, node1: str, node2: str, if1: str | None = None, if2: str | None = None
 ) -> dict[str, Any]:
@@ -183,13 +239,32 @@ def start_capture(
     GNS3Connection.ensure_project_open(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )
-    return GNS3Connection.post(
-        f"{_base_url(app)}/links/{link['link_id']}/start_capture",
-        json={
-            "capture_file_name": _capture_file_name(node1, node2, if1, if2),
-            "data_link_type": "DLT_EN10MB",
-        },
-    )
+    url = f"{_base_url(app)}/links/{link['link_id']}/start_capture"
+    body = {
+        "capture_file_name": _capture_file_name(node1, node2, if1, if2),
+        "data_link_type": "DLT_EN10MB",
+    }
+    try:
+        return GNS3Connection.post(url, json=body)
+    except requests.HTTPError as exc:
+        _, message = _refusal_parts(exc)
+        if not _LOST_BRIDGE.search(message):
+            raise _controller_refusal(exc) from exc
+        # known, repairable state of GNS3: restart the Cloud node(s) of this link and try once more
+        restarted = _restart_cloud_nodes(app, link)
+        if not restarted:
+            raise _controller_refusal(exc) from exc
+        logger.warning(
+            f"GNS3 lost the bridge of {', '.join(restarted)}; restarted it and trying the capture again"
+        )
+    try:
+        return GNS3Connection.post(url, json=body)
+    except requests.HTTPError as exc:
+        refusal = _controller_refusal(exc)
+        raise RuntimeError(
+            f"{refusal} (the Cloud node {', '.join(restarted)} was restarted once and it still fails - "
+            "Reload project in the menu resets GNS3's bridges for the whole project)"
+        ) from exc
 
 
 def stop_capture(
@@ -200,7 +275,10 @@ def stop_capture(
     GNS3Connection.ensure_project_open(
         app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id
     )
-    GNS3Connection.post(f"{_base_url(app)}/links/{link['link_id']}/stop_capture")
+    try:
+        GNS3Connection.post(f"{_base_url(app)}/links/{link['link_id']}/stop_capture")
+    except requests.HTTPError as exc:
+        raise _controller_refusal(exc) from exc
 
 
 def capture_stream(

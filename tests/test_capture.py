@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 
 import app.main as main_module
 from app import capture
@@ -328,3 +329,123 @@ def test_start_capture_targets_only_the_chosen_parallel_link(app_state):
     assert (
         fake_post.call_args[1]["json"]["capture_file_name"] == "R1_Gi0-1_SW1_Gi0-1.pcap"
     )
+
+
+def _refused(status: int, body: str) -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = status
+    response._content = body.encode()
+    return requests.HTTPError(
+        f"{status} Client Error: Conflict for url: x", response=response
+    )
+
+
+def _start_with(app_state, error):
+    app = _app_state(app_state)
+    with (
+        patch(
+            "app.gns3_state.GNS3Connection.list_project_nodes", return_value=_LIVE_NODES
+        ),
+        patch(
+            "app.capture.GNS3Connection.list_project_links", return_value=_LIVE_LINKS
+        ),
+        patch("app.capture.GNS3Connection.ensure_project_open"),
+        patch("app.capture.GNS3Connection.post", side_effect=error),
+    ):
+        return capture.start_capture(app, "R1", "SW1")
+
+
+def test_a_refused_capture_names_the_reason_gns3_gave(app_state):
+    with pytest.raises(RuntimeError) as caught:
+        _start_with(
+            app_state, _refused(409, '{"message": "Capture is already activated"}')
+        )
+    assert str(caught.value) == "GNS3 refused (409): Capture is already activated"
+
+
+def test_a_refusal_without_a_readable_reason_keeps_the_original_text(app_state):
+    with pytest.raises(RuntimeError) as caught:
+        _start_with(app_state, _refused(409, ""))
+    assert "409 Client Error" in str(caught.value)
+    with pytest.raises(RuntimeError) as caught:
+        _start_with(app_state, _refused(409, "<html>not json</html>"))
+    assert "not json" in str(caught.value) or "409" in str(caught.value)
+
+
+# ---------- GNS3 lost the bridge of a Cloud node: restart that node and try once more ----------
+
+_LOST = '{"message": "Error while sending command \'bridge start_capture x-0 \\"[server file]\\"\': Unknown module \'bridge\': uBridge version 1.0.1"}'
+_CLOUD_NODES = [
+    {"name": "R1", "node_id": "n1", "node_type": "qemu"},
+    {"name": "PC1", "node_id": "n2", "node_type": "cloud"},
+]
+
+
+def _capture_with(app_state, nodes, post_side_effect):
+    app = _app_state(app_state)
+    with (
+        patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=nodes),
+        patch(
+            "app.capture.GNS3Connection.list_project_links", return_value=_LIVE_LINKS
+        ),
+        patch("app.capture.GNS3Connection.ensure_project_open"),
+        patch("app.capture.GNS3Connection.post", side_effect=post_side_effect) as post,
+        patch("app.capture.GNS3Connection.stop_node") as stop,
+        patch("app.capture.GNS3Connection.start_node") as start,
+    ):
+        try:
+            result = capture.start_capture(app, "R1", "PC1")
+            error = None
+        except RuntimeError as exc:
+            result, error = None, exc
+    return result, error, post, stop, start
+
+
+def test_a_lost_bridge_is_repaired_by_restarting_only_the_cloud_node_and_the_capture_then_starts(
+    app_state,
+):
+    result, error, post, stop, start = _capture_with(
+        app_state, _CLOUD_NODES, [_refused(409, _LOST), {"capturing": True}]
+    )
+    assert error is None and result == {"capturing": True}
+    assert post.call_count == 2
+    assert [c.args[3] for c in stop.call_args_list] == [
+        "n2"
+    ]  # PC1 only, never the router
+    assert [c.args[3] for c in start.call_args_list] == ["n2"]
+
+
+def test_when_the_restart_does_not_help_the_error_says_so_and_points_to_the_project_reload(
+    app_state,
+):
+    _, error, post, _, _ = _capture_with(
+        app_state, _CLOUD_NODES, [_refused(409, _LOST), _refused(409, _LOST)]
+    )
+    assert post.call_count == 2  # one retry, not a loop
+    assert (
+        "restarted once" in str(error)
+        and "Reload project" in str(error)
+        and "PC1" in str(error)
+    )
+
+
+def test_a_lost_bridge_between_two_routers_restarts_nothing(app_state):
+    nodes = [
+        {"name": "R1", "node_id": "n1", "node_type": "qemu"},
+        {"name": "PC1", "node_id": "n2", "node_type": "qemu"},
+    ]
+    _, error, post, stop, start = _capture_with(
+        app_state, nodes, [_refused(409, _LOST)]
+    )
+    assert post.call_count == 1 and stop.call_count == 0 and start.call_count == 0
+    assert "GNS3 refused (409)" in str(error)
+
+
+def test_any_other_refusal_is_not_answered_with_a_restart(app_state):
+    _, error, post, stop, _ = _capture_with(
+        app_state,
+        _CLOUD_NODES,
+        [_refused(409, '{"message": "Capture is already activated"}')],
+    )
+    assert post.call_count == 1 and stop.call_count == 0
+    assert "Capture is already activated" in str(error)
