@@ -45,7 +45,8 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   (`app/console.py`).
 - **Tabs out of the panel**: every console/screen tab can be dragged out of the Console/Screen panel with the left mouse
   button (move at least 8 px, release more than 24 px outside the panel, Escape cancels) to open just that session in its
-  own browser window; the **Pop out** button still moves the whole panel. The live terminal/screen is moved, not copied, so
+  own browser window; the **Pop out** button at the right end of the tab row still moves the whole panel. Each tab shows
+  the device name and, beside it, the connection state (a failure in red, the full text as tooltip). The live terminal/screen is moved, not copied, so
   the connection runs on; closing the window brings the session back into its tab, closing the session closes its window,
   and a popped-out tab is marked with an arrow and focuses its window when clicked. The browser must allow the pop-up
   (the drag release counts as the user gesture); otherwise a notice says so and nothing is moved.
