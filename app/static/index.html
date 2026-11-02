@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-11">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-15">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -171,10 +171,6 @@
     </div>
     <div id="panel-resize-handle" title="Drag to resize"></div>
     <div id="console-area">
-      <div id="console-area-header">
-        <span>Console/Screen View</span>
-        <button id="popout-btn" title="Pop this panel out into its own window">⧉ Pop out</button>
-      </div>
       <div id="node-actions" hidden>
         <div id="node-actions-header">
           <span class="env-tag" id="selected-role"></span>
@@ -221,7 +217,10 @@
         </div>
         <button class="console-btn" id="link-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
-      <div id="session-tabbar" hidden></div>
+      <div id="session-tabrow">
+        <div id="session-tabbar" hidden></div>
+        <button id="popout-btn" title="Pop this panel out into its own window">⧉ Pop out</button>
+      </div>
       <div id="console-placeholder">Click a node on the canvas, or in the Topology Summary above, then open its Console or Screen to see it here.</div>
       <div id="session-panels"></div>
     </div>
@@ -412,7 +411,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=ginnungagap-11"></script>
+<script src="/app.js?v=ginnungagap-15"></script>
 <script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

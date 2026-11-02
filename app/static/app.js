@@ -32,12 +32,15 @@ function ensureSessionPanel(id, nodeName, title) {
   const label = document.createElement("span");
   label.className = "session-tab-label";
   label.textContent = title;
+  // the connection state sits beside the name (a failure is coloured, the full text is the tooltip)
+  const statusEl = document.createElement("span");
+  statusEl.className = "session-tab-status";
   const close = document.createElement("span");
   close.className = "session-tab-close";
   close.textContent = "×";
   close.title = "Close";
   close.addEventListener("click", (evt) => { evt.stopPropagation(); closeSession(id); });
-  tab.append(label, close);
+  tab.append(label, statusEl, close);
   tab.addEventListener("click", () => onSessionTabClick(id));
   tab.addEventListener("pointerdown", (evt) => startTabDrag(evt, id));
   document.getElementById("session-tabbar").appendChild(tab);
@@ -45,14 +48,9 @@ function ensureSessionPanel(id, nodeName, title) {
 
   const panel = document.createElement("div");
   panel.className = "session-panel"; // starts inactive (see the CSS - default is the :not(.active) rule) until switchToSession adds .active
-  const header = document.createElement("div");
-  header.className = "session-panel-header";
-  // The tab already names the session, so the header only carries its status.
-  const statusEl = document.createElement("span");
-  header.append(statusEl);
   const body = document.createElement("div");
   body.className = "session-panel-body";
-  panel.append(header, body);
+  panel.append(body);
   document.getElementById("session-panels").appendChild(panel);
 
   document.getElementById("console-placeholder").style.display = "none";
@@ -69,7 +67,8 @@ function ensureSessionPanel(id, nodeName, title) {
 
 function setSessionStatus(session, text, dotClass) {
   session.statusEl.textContent = text;
-  session.statusEl.className = dotClass || "";
+  session.statusEl.title = text;
+  session.statusEl.className = `session-tab-status ${dotClass || ""}`.trim();
 }
 
 function switchToSession(id) {
@@ -3128,8 +3127,11 @@ async function handleLinkModeClick(name, anchor) {
   createLink(node1, if1, node2, if2);
 }
 
+// A live link takes several seconds (the topology is redeployed); until it is drawn the menubar says what is going on, so
+// the canvas not changing yet is not mistaken for "nothing happened".
 async function createLink(node1, if1, node2, if2) {
   exitLinkMode();
+  if (!designMode) setMenubarMessage(`Adding link ${node1}:${if1} <-> ${node2}:${if2}…`);
   try {
     const resp = await fetch(apiPath("/links"), {
       method: "POST",
@@ -3137,27 +3139,34 @@ async function createLink(node1, if1, node2, if2) {
       body: JSON.stringify({ node1, if1, node2, if2 }),
     });
     if (!resp.ok) {
+      clearMenubarStatus();
       await showAlert(`Failed to add link: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     await loadCanvas();
+    clearMenubarStatus();
   } catch (err) {
+    clearMenubarStatus();
     await showAlert(`Failed to add link: ${err}`);
   }
 }
 
 async function deleteLink(node1, if1, node2, if2) {
+  if (!designMode) setMenubarMessage(`Deleting link ${node1}:${if1} <-> ${node2}:${if2}…`);
   try {
     const resp = await fetch(
       apiPath(`/links/${encodeURIComponent(node1)}/${encodeURIComponent(node2)}${linkQuery(if1, if2)}`),
       { method: "DELETE" }
     );
     if (!resp.ok) {
+      clearMenubarStatus();
       await showAlert(`Failed to delete link: ${(await resp.json()).detail || resp.status}`);
       return;
     }
     await loadCanvas();
+    clearMenubarStatus();
   } catch (err) {
+    clearMenubarStatus();
     await showAlert(`Failed to delete link: ${err}`);
   }
 }

@@ -471,22 +471,22 @@
     background: var(--border);
   }
   #panel-resize-handle:hover, #panel-resize-handle.dragging { background: var(--accent); }
-  #console-area-header {
+  /* the tabs and, at the right end of the same row, the button that moves the whole panel into its own window; with no
+     session open there is nothing to pop out and the row is not shown */
+  #session-tabrow {
     flex-shrink: 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 12px;
+    align-items: flex-end;
+    gap: 8px;
+    padding-right: 6px;
+    background: var(--panel);
     border-bottom: 1px solid var(--border);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--dim);
   }
+  #session-tabrow:has(#session-tabbar[hidden]) { display: none; }
   #popout-btn {
+    flex-shrink: 0;
+    align-self: center;
     font-size: 11px;
-    text-transform: none;
-    letter-spacing: normal;
     background: none;
     color: var(--dim);
     border: 1px solid var(--border);
@@ -571,10 +571,10 @@
     display: flex;
     gap: 2px;
     padding: 4px 4px 0;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
     overflow-x: auto;
-    flex-shrink: 0;
+    scrollbar-width: thin;
+    flex: 1;
+    min-width: 0;
   }
   .session-tab {
     display: flex;
@@ -589,7 +589,7 @@
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
-    max-width: 180px;
+    max-width: 280px;
     flex-shrink: 0;
   }
   .session-tab.active { background: var(--panel-2); color: var(--text); }
@@ -609,9 +609,11 @@
     pointer-events: none;
   }
   #tab-dragout-hint.will-pop { color: var(--text); border-color: var(--accent); }
-  /* only a failure is coloured, in the status text under the tabs */
-  .session-panel-header .status-bad { color: var(--bad); }
-  .session-tab-label { overflow: hidden; text-overflow: ellipsis; }
+  /* the connection state beside the name; only a failure is coloured */
+  .session-tab-status { overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 11px; min-width: 0; }
+  .session-tab-status:empty { display: none; }
+  .session-tab-status.status-bad { color: var(--bad); }
+  .session-tab-label { overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 150px; }
   .session-tab-close {
     margin-left: 2px;
     color: var(--dim);
@@ -655,15 +657,6 @@
     visibility: hidden;
     pointer-events: none;
     z-index: -1;
-  }
-  .session-panel-header {
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--dim);
-    display: flex;
-    justify-content: space-between;
-    flex-shrink: 0;
   }
   .session-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .session-terminal { flex: 1; padding: 8px; min-height: 0; }
@@ -1451,7 +1444,7 @@ button.toolbar-btn.primary:hover:not(:disabled) {
   border-color: #191919;
   box-shadow: inset 0 1px #ffffff08;
 }
-#palette-header, #console-area-header {
+#palette-header {
   min-height: 36px;
   padding: 9px 12px;
   color: #b7c0ca;
