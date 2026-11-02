@@ -25,10 +25,10 @@ def _block() -> str:
     return js[start:end]
 
 
-def _place(items, obstacles):
+def _place(items, obstacles, segments=None):
     texts = {i["key"]: i["text"] for i in items}
     driver = f"""{_block()}
-const out = placePortLabels({json.dumps(items)}, {json.dumps(obstacles)});
+const out = placePortLabels({json.dumps(items)}, {json.dumps(obstacles)}, {json.dumps(segments or [])});
 const texts = {json.dumps(texts)};
 console.log(JSON.stringify([...out.entries()]));
 console.log(JSON.stringify([...out.entries()].map(([k, v]) => [k, labelRect(v, v.anchor, texts[k])])));
@@ -38,6 +38,20 @@ console.log(JSON.stringify([...out.entries()].map(([k, v]) => [k, labelRect(v, v
     )
     placed, rects = result.stdout.strip().splitlines()
     return dict(json.loads(placed)), dict(json.loads(rects))
+
+
+def _touches(segment, rect):
+    """Does the line segment pass through the rectangle (sampled densely - exact enough for a test)?"""
+    steps = 600
+    for i in range(steps + 1):
+        x = segment["x1"] + (segment["x2"] - segment["x1"]) * i / steps
+        y = segment["y1"] + (segment["y2"] - segment["y1"]) * i / steps
+        if (
+            rect["x"] <= x <= rect["x"] + rect["w"]
+            and rect["y"] <= y <= rect["y"] + rect["h"]
+        ):
+            return True
+    return False
 
 
 def _overlap(a, b):
@@ -82,6 +96,29 @@ def _crowded_switch():
     items.append(_item("SW1|Gi1/0", "SW1", "Gi1/0", centre, 70))
     name = {"x": 400 - 13, "y": 300 + 20, "w": 26.8, "h": 16}
     return items, [_icon(centre), name]
+
+
+def _spread_switch():
+    """Five links over about 100 degrees (25 degrees apart), like the mini office's switch."""
+    centre = (400, 300)
+    items = [
+        _item(f"SW1|Gi0/{i}", "SW1", f"Gi0/{i}", centre, 60 + i * 25) for i in range(5)
+    ]
+    return items, [_icon(centre), {"x": 387, "y": 320, "w": 26.8, "h": 16}]
+
+
+def _link_lines(items, centre=(400, 300), length=300):
+    """The links the items belong to: a line from the node's centre outward along each label's direction."""
+    return [
+        {
+            "x1": centre[0],
+            "y1": centre[1],
+            "x2": centre[0] + i["dir"]["x"] * length,
+            "y2": centre[1] + i["dir"]["y"] * length,
+            "ends": [i["key"]],
+        }
+        for i in items
+    ]
 
 
 def test_crowded_labels_no_longer_overlap_each_other_the_icon_or_the_name():
@@ -138,3 +175,49 @@ def test_when_nothing_is_free_the_label_still_gets_a_position():
     wall = {"x": -1000, "y": -1000, "w": 5000, "h": 5000}
     placed, _ = _place([item], [wall])
     assert placed["R1|Gi0/0"]["x"] == pytest.approx(item["base"]["x"])
+
+
+def test_labels_stay_off_the_lines_of_other_links():
+    items, obstacles = _spread_switch()
+    segments = _link_lines(items)
+    _, rects = _place(items, obstacles, segments)
+    for key, rect in rects.items():
+        for segment in segments:
+            if key in segment["ends"]:
+                continue  # its own line: allowed
+            assert not _touches(segment, rect), key
+    keys = list(rects)
+    for i, a in enumerate(keys):
+        for b in keys[i + 1 :]:
+            assert not _overlap(rects[a], rects[b]), (a, b)
+
+
+def test_a_label_may_stay_on_its_own_line():
+    item = _item("R1|Gi0/0", "R1", "Gi0/0", (100, 100), 0)
+    segments = _link_lines([item], centre=(100, 100))
+    placed, rects = _place([item], [_icon((100, 100))], segments)
+    # the default spot lies on its own link and is kept (nothing else is in the way)
+    assert placed["R1|Gi0/0"]["x"] == pytest.approx(item["base"]["x"])
+    assert _touches(segments[0], rects["R1|Gi0/0"])
+
+
+def test_a_foreign_line_through_the_default_spot_pushes_the_label_away():
+    item = _item("R1|Gi0/0", "R1", "Gi0/0", (100, 100), 0)
+    # another link's line running straight through where the label would sit
+    foreign = {
+        "x1": item["base"]["x"] + 8,
+        "y1": -500,
+        "x2": item["base"]["x"] + 8,
+        "y2": 700,
+        "ends": ["X|Gi0/9"],
+    }
+    _, rects = _place([item], [_icon((100, 100))], [foreign])
+    assert not _touches(foreign, rects["R1|Gi0/0"])
+
+
+def test_a_crowded_spot_still_gets_the_least_bad_position_not_a_crash():
+    items, obstacles = _crowded_switch()
+    # lines everywhere: no spot is free, every label must still get a position
+    fence = [{"x1": -2000, "y1": y, "x2": 3000, "y2": y} for y in range(-2000, 2000, 4)]
+    placed, _ = _place(items, obstacles, fence)
+    assert set(placed) == {i["key"] for i in items}
