@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-3">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-5">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -187,6 +187,7 @@
         <button class="console-btn" id="selected-action-btn"></button>
         <button class="console-btn" id="selected-screen-btn" hidden>Screen</button>
         <button class="console-btn" id="selected-serial-btn" hidden>Serial console</button>
+        <button class="console-btn" id="selected-note-btn">Note</button>
         <button class="console-btn" id="selected-delete-btn" style="background: var(--bad); color: #fff;">Delete</button>
       </div>
       <div id="multi-actions" hidden>
@@ -291,6 +292,16 @@
     <a id="landing-logs-link" href="/logs.html" target="_blank" rel="noopener">View Logs</a>
   </div>
 </div>
+<dialog id="note-dialog" aria-labelledby="note-title">
+  <h3 id="note-title">Note</h3>
+  <div id="note-logins" hidden></div>
+  <textarea id="note-text" rows="9" spellcheck="false" aria-label="Note" placeholder="Notes about this node"></textarea>
+  <p id="note-status" role="status"></p>
+  <div id="note-actions">
+    <button class="toolbar-btn" id="note-cancel" type="button">Cancel</button>
+    <button class="toolbar-btn primary" id="note-save" type="button">Save</button>
+  </div>
+</dialog>
 <dialog id="project-selection-dialog" aria-labelledby="project-selection-title">
   <h3 id="project-selection-title">Project library</h3>
   <p>Create or upload a topology, then select it for a host. Files are managed by Ginnungagap.</p>
@@ -401,7 +412,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=ginnungagap-3"></script>
+<script src="/app.js?v=ginnungagap-5"></script>
 <script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

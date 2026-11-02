@@ -31,6 +31,7 @@ def _make_bundle(
     omit=(),
     drawings=None,
     layout=None,
+    labels=None,
     auto_config_push=False,
 ) -> bytes:
     manifest = {
@@ -62,6 +63,8 @@ def _make_bundle(
         members["drawings.json"] = json.dumps({"drawings": drawings})
     if layout is not None:
         members["layout.json"] = json.dumps({"layout": layout})
+    if labels is not None:
+        members["labels.json"] = json.dumps({"labels": labels})
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, content in members.items():
@@ -99,6 +102,8 @@ def test_build_export_produces_expected_zip_members(
         "configs.json",
         "drawings.json",
         "layout.json",
+        "labels.json",
+        "notes.json",
     }
 
     manifest = json.loads(zf.read("manifest.json"))
@@ -216,6 +221,78 @@ def test_apply_import_restores_bundled_layout(
     # GHOST isn't a real node (post-deploy graph), so it's dropped rather
     # than saved as a position pointing at nothing.
     assert "GHOST" not in saved
+
+
+def test_build_export_carries_the_moved_labels_of_existing_nodes_only(
+    app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    from app import label_layout
+
+    label_layout.save_changes(
+        {
+            "R1|Gi0/0": {"dx": 5, "dy": 6},
+            "R1|": {"dx": 1, "dy": 2},
+            "GONE|": {"dx": 9, "dy": 9},
+        }
+    )
+
+    data = project_bundle.build_export(_app())
+
+    labels = json.loads(zipfile.ZipFile(io.BytesIO(data)).read("labels.json"))["labels"]
+    assert labels == {"R1|Gi0/0": {"dx": 5.0, "dy": 6.0}, "R1|": {"dx": 1.0, "dy": 2.0}}
+
+
+def test_apply_import_restores_bundled_labels_and_replaces_stale_ones(
+    app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    from app import label_layout
+
+    # left over from an earlier project that reused the name R1
+    label_layout.save_changes({"R1|Gi9/9": {"dx": 70, "dy": 70}})
+    app_state.topology_backend = _FakeBackend()
+    bundle = _make_bundle(
+        labels={
+            "R1|Gi0/0": {"dx": 12, "dy": -8},
+            "GHOST|Gi0/0": {"dx": 1, "dy": 2},
+            "R1|Gi0/1": {"dx": "not a number"},
+        }
+    )
+
+    project_bundle.apply_import(_app(), bundle)
+
+    # the bundle's usable entries replace everything; a ghost node and a broken entry are dropped
+    assert label_layout.load() == {"R1|Gi0/0": {"dx": 12.0, "dy": -8.0}}
+
+
+def test_a_bundle_without_labels_clears_the_saved_ones(
+    app_state, temp_topology_file, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_LAYOUT_FILE", str(tmp_path / "layout.json"))
+    from app import label_layout
+
+    label_layout.save_changes({"R1|": {"dx": 3, "dy": 3}})
+    app_state.topology_backend = _FakeBackend()
+
+    project_bundle.apply_import(_app(), _make_bundle())
+
+    assert label_layout.load() == {}
+
+
+def test_apply_import_rejects_invalid_labels_json(app_state, temp_topology_file):
+    app_state.topology_backend = _FakeBackend()
+    bundle = _make_bundle()
+    with zipfile.ZipFile(io.BytesIO(bundle)) as source:
+        members = {n: source.read(n) for n in source.namelist()}
+    members["labels.json"] = b"{nope"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in members.items():
+            zf.writestr(name, content)
+
+    with pytest.raises(project_bundle.BundleValidationError, match="labels.json"):
+        project_bundle.apply_import(_app(), buf.getvalue())
 
 
 def test_apply_import_re_resolves_a_project_id_the_deploy_changed(
@@ -365,3 +442,30 @@ def test_design_export_carries_configs_and_the_auto_push_switch():
     empty = project_bundle.build_design_export(state, "Lab", {}, auto_config_push=True)
     with zipfile.ZipFile(io.BytesIO(empty)) as zf:
         assert json.loads(zf.read("manifest.json"))["auto_config_push"] is False
+
+
+def test_design_export_carries_the_moved_labels_of_the_sketch():
+    from app import design
+
+    state = design.from_dict(
+        {
+            "nodes": [
+                {
+                    "name": "R1",
+                    "role": "ROUTER",
+                    "image": "VPCS",
+                    "environment": "ON_GNS3",
+                    "interfaces": {},
+                }
+            ],
+            "links": [],
+            "labels": {"R1|": {"dx": 4.0, "dy": 5.0}, "GONE|": {"dx": 1.0, "dy": 1.0}},
+        }
+    )
+
+    data = project_bundle.build_design_export(state, "Lab")
+
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert json.loads(zf.read("labels.json")) == {
+            "labels": {"R1|": {"dx": 4.0, "dy": 5.0}}
+        }

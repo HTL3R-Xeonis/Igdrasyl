@@ -11,6 +11,7 @@ host_defaults.yml
 logs/
 layout.json
 label_layout.json
+node_notes.json
 design_state.json
 settings_profiles/
 handoff/

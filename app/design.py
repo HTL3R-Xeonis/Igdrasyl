@@ -56,6 +56,8 @@ class DesignState:
     drawings: list[dict[str, Any]] = field(default_factory=list)
     # user-moved port/name labels, see app/label_layout.py
     labels: dict[str, dict[str, float]] = field(default_factory=dict)
+    # free-text notes per node name, see app/node_notes.py
+    notes: dict[str, str] = field(default_factory=dict)
 
 
 def new_state() -> DesignState:
@@ -88,6 +90,7 @@ def remove_node(state: DesignState, name: str) -> None:
                 del node.interfaces[if_name]
     state.layout.pop(name, None)
     label_layout.drop_node(state.labels, name)
+    state.notes.pop(name, None)
 
 
 def add_link(state: DesignState, node1: str, if1: str, node2: str, if2: str) -> None:
@@ -191,6 +194,8 @@ def paste(
         state.links = restored.links
         state.layout = restored.layout
         state.drawings = restored.drawings
+        state.labels = restored.labels
+        state.notes = restored.notes
         raise
 
 
@@ -301,6 +306,7 @@ def to_dict(state: DesignState) -> dict[str, Any]:
         "layout": {name: dict(pos) for name, pos in state.layout.items()},
         "drawings": list(state.drawings),
         "labels": {key: dict(offset) for key, offset in state.labels.items()},
+        "notes": dict(state.notes),
     }
 
 
@@ -327,6 +333,7 @@ def from_dict(data: dict[str, Any]) -> DesignState:
     state.layout = {name: dict(pos) for name, pos in data.get("layout", {}).items()}
     state.drawings = list(data.get("drawings", []))
     state.labels = {key: dict(offset) for key, offset in data.get("labels", {}).items()}
+    state.notes = dict(data.get("notes", {}))
     return state
 
 

@@ -79,6 +79,35 @@ def save_changes(changes: dict[str, dict[str, float] | None]) -> dict[str, Any]:
     return labels
 
 
+def restrict(labels: dict[str, Any], known_nodes: Any) -> dict[str, dict[str, float]]:
+    """
+    `labels` cleaned for a project: only entries of nodes in `known_nodes` and with a usable offset. Anything else
+    (a node that is gone, a hand-edited bundle's garbage) is dropped instead of failing the whole export or import.
+    """
+    clean: dict[str, dict[str, float]] = {}
+    for key, offset in (labels or {}).items():
+        if node_of(str(key)) not in known_nodes or not isinstance(offset, dict):
+            continue
+        try:
+            apply_changes(clean, {str(key): offset})
+        except (ValueError, KeyError, TypeError):
+            continue
+    return clean
+
+
+def replace_all(
+    labels: dict[str, Any], known_nodes: Any
+) -> dict[str, dict[str, float]]:
+    """
+    Makes `labels` (a bundle's) the whole saved set, for the nodes that exist after an import. Same reasoning as
+    app/layout.py's apply_imported_layout: an offset left over from an earlier project that happened to reuse a node
+    name must not survive into this one.
+    """
+    clean = restrict(labels, known_nodes)
+    _labels_path().write_text(json.dumps(clean))
+    return clean
+
+
 def drop_node(labels: dict[str, dict[str, float]], name: str) -> None:
     """Forgets every label of a node that is gone (a deleted node must not hand its offsets to a new one)."""
     for key in [k for k in labels if node_of(k) == name]:

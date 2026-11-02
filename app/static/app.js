@@ -29,8 +29,6 @@ function ensureSessionPanel(id, nodeName, title) {
   const tab = document.createElement("button");
   tab.className = "session-tab";
   tab.type = "button";
-  const dot = document.createElement("span");
-  dot.className = "session-tab-dot";
   const label = document.createElement("span");
   label.className = "session-tab-label";
   label.textContent = title;
@@ -39,7 +37,7 @@ function ensureSessionPanel(id, nodeName, title) {
   close.textContent = "×";
   close.title = "Close";
   close.addEventListener("click", (evt) => { evt.stopPropagation(); closeSession(id); });
-  tab.append(dot, label, close);
+  tab.append(label, close);
   tab.addEventListener("click", () => switchToSession(id));
   document.getElementById("session-tabbar").appendChild(tab);
   document.getElementById("session-tabbar").hidden = false;
@@ -48,11 +46,9 @@ function ensureSessionPanel(id, nodeName, title) {
   panel.className = "session-panel"; // starts inactive (see the CSS - default is the :not(.active) rule) until switchToSession adds .active
   const header = document.createElement("div");
   header.className = "session-panel-header";
-  const titleEl = document.createElement("span");
-  titleEl.className = "session-panel-title";
-  titleEl.textContent = title;
+  // The tab already names the session, so the header only carries its status.
   const statusEl = document.createElement("span");
-  header.append(titleEl, statusEl);
+  header.append(statusEl);
   const body = document.createElement("div");
   body.className = "session-panel-body";
   panel.append(header, body);
@@ -62,7 +58,7 @@ function ensureSessionPanel(id, nodeName, title) {
 
   session = {
     id, nodeName, kind: null,
-    tabEl: tab, dotEl: dot, panelEl: panel, statusEl, bodyEl: body,
+    tabEl: tab, panelEl: panel, statusEl, bodyEl: body,
     ws: null, term: null, rfb: null,
     screenWanted: false, reconnectAttempts: 0,
   };
@@ -72,7 +68,7 @@ function ensureSessionPanel(id, nodeName, title) {
 
 function setSessionStatus(session, text, dotClass) {
   session.statusEl.textContent = text;
-  session.dotEl.className = `session-tab-dot${dotClass ? " " + dotClass : ""}`;
+  session.statusEl.className = dotClass || "";
 }
 
 function switchToSession(id) {
@@ -325,6 +321,8 @@ let showPortLabels = true;
 // Offsets of the labels the user has moved, keyed "<node>|<interface>" (port label) or "<node>|" (the node's name);
 // a label without an entry sits at its default spot. Loaded with the canvas, see saveLabelOffsets.
 let labelOffsets = {};
+// Free-text notes per node name (and the sticky-note mark on the canvas), see openNodeNote.
+let nodeNotes = {};
 // Reflects the server's own Settings.INCREMENTAL_DEPLOY (see /health),
 // which only the server's settings.yml controls - not user-settable
 // from here. Defaults true (matches the server's own default) until
@@ -570,6 +568,7 @@ async function loadCanvas() {
     esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/` : "#";
 
     labelOffsets = await fetch(apiPath("/labels")).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    nodeNotes = await fetch(apiPath("/notes")).then(r => r.ok ? r.json() : {}).catch(() => ({}));
     const liveByName = new Map((nodesResult || []).map(n => [n.name, n]));
     nodesData = {};
     for (const node of topology) {
@@ -647,6 +646,103 @@ function portLabelPoint(nearNode, farNode, offset = 0, nearIsFirst = true) {
   const dy = p.y - nearNode.y;
   const len = Math.hypot(dx, dy) || 1;
   return { x: p.x + (dx / len) * 12, y: p.y + (dy / len) * 12 };
+}
+
+// The note dialog: the node's free-text note, plus the default login its template lists (read-only; the password
+// stays hidden until "Show" is clicked). Values go in through textContent only.
+function renderNodeLogins(container, info) {
+  container.replaceChildren();
+  const rows = [];
+  for (const login of info.logins || []) {
+    const row = document.createElement("div");
+    row.className = "note-login";
+    const label = document.createElement("span");
+    label.className = "note-login-label";
+    label.textContent = "Default login";
+    const user = document.createElement("span");
+    user.className = "note-login-user";
+    user.textContent = login.user || "(no user listed)";
+    row.append(label, user);
+    if (login.password) {
+      const secret = document.createElement("span");
+      secret.className = "note-login-secret";
+      secret.textContent = "••••••••";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "toolbar-btn";
+      toggle.textContent = "Show";
+      toggle.addEventListener("click", () => {
+        const hidden = toggle.textContent === "Show";
+        secret.textContent = hidden ? login.password : "••••••••";
+        toggle.textContent = hidden ? "Hide" : "Show";
+      });
+      row.append(secret, toggle);
+    }
+    rows.push(row);
+  }
+  if (info.usage) {
+    const usage = document.createElement("div");
+    usage.className = "note-login";
+    const label = document.createElement("span");
+    label.className = "note-login-label";
+    label.textContent = "Template says";
+    const text = document.createElement("span");
+    text.className = "note-login-user";
+    text.textContent = info.usage;
+    usage.append(label, text);
+    rows.push(usage);
+  }
+  if (info.error) {
+    const err = document.createElement("div");
+    err.className = "note-login note-login-error";
+    err.textContent = `Default login unavailable: ${info.error}.`;
+    rows.push(err);
+  }
+  container.append(...rows);
+  container.hidden = !rows.length;
+}
+
+async function openNodeNote(name) {
+  const dialog = document.getElementById("note-dialog");
+  const text = document.getElementById("note-text");
+  const status = document.getElementById("note-status");
+  const logins = document.getElementById("note-logins");
+  document.getElementById("note-title").textContent = `Note: ${name}`;
+  text.value = nodeNotes[name] || "";
+  status.textContent = "";
+  logins.hidden = true;
+  logins.replaceChildren();
+  if (!dialog.open) dialog.showModal();
+  text.focus();
+
+  fetch(apiPath(`/nodes/${encodeURIComponent(name)}/credentials`))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((info) => { if (info && dialog.open && document.getElementById("note-title").textContent === `Note: ${name}`) renderNodeLogins(logins, info); })
+    .catch(() => {});
+
+  const save = async () => {
+    status.textContent = "Saving…";
+    try {
+      const resp = await fetch(apiPath(`/notes/${encodeURIComponent(name)}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.value }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.status);
+      nodeNotes = await resp.json();
+      if (designMode) refreshHistoryState();
+      dialog.close();
+      renderCanvas();
+      if (selectedName === name) showNodeActions(name);
+    } catch (err) {
+      status.textContent = `Couldn't save the note: ${err.message || err}`;
+    }
+  };
+  document.getElementById("note-save").onclick = save;
+  document.getElementById("note-cancel").onclick = () => dialog.close();
+  text.onkeydown = (evt) => {
+    if ((evt.ctrlKey || evt.metaKey) && evt.key === "Enter") { evt.preventDefault(); save(); }
+  };
 }
 
 function labelKey(nodeName, ifName = "") {
@@ -1480,6 +1576,27 @@ function setLineEndpoints(line, a, b, offset = 0) {
   line.setAttribute("y2", pb.y);
 }
 
+// A small sticky note at the icon's top-left corner: this node has a note.
+function buildNoteMark(iconX, iconY) {
+  const mark = document.createElementNS(SVG_NS, "g");
+  mark.setAttribute("class", "node-note-mark");
+  mark.setAttribute("transform", `translate(${iconX - 7}, ${iconY - 5})`);
+  const page = document.createElementNS(SVG_NS, "rect");
+  page.setAttribute("width", 10);
+  page.setAttribute("height", 12);
+  page.setAttribute("rx", 1.5);
+  mark.appendChild(page);
+  for (const y of [4, 7]) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", 2);
+    line.setAttribute("x2", 8);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    mark.appendChild(line);
+  }
+  return mark;
+}
+
 function buildNodeShape(node) {
   const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("class", `node-shape${selectedNames.has(node.name) ? " selected" : ""}`);
@@ -1502,6 +1619,8 @@ function buildNodeShape(node) {
   icon.setAttribute("x", iconX);
   icon.setAttribute("y", iconY);
   g.appendChild(icon);
+
+  if (nodeNotes[node.name]) g.appendChild(buildNoteMark(iconX, iconY));
 
   const statusDot = document.createElementNS(SVG_NS, "circle");
   statusDot.setAttribute("class", `status-dot ${statusClassFor(node)}`);
@@ -2020,6 +2139,9 @@ function showNodeActions(name, anchor) {
   const startBtn = document.getElementById("selected-start-btn");
   const stopBtn = document.getElementById("selected-stop-btn");
   const reloadBtn = document.getElementById("selected-reload-btn");
+  const noteBtn = document.getElementById("selected-note-btn");
+  noteBtn.textContent = nodeNotes[name] ? "Edit note" : "Note";
+  noteBtn.onclick = () => openNodeNote(name);
   startBtn.disabled = !hasLive || running;
   stopBtn.disabled = !hasLive || stopped;
   reloadBtn.disabled = !hasLive || !running;

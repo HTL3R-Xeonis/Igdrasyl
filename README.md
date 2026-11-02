@@ -148,7 +148,16 @@ Design proposal for running everything as one VM with one config file: [docs/DES
   Reset Label Positions resets all). They sit in a layer above the nodes, so no icon hides one, and keep a halo so
   overlapping text stays readable. What is stored is the offset from the default spot (`app/label_layout.py`,
   `GET/POST /labels`, `label_layout.json`, git-ignored), so a label follows its node; the design sketch keeps its own
-  copy in the design state, which makes label moves undoable there. Not yet part of a `.topoproj` export.
+  copy in the design state, which makes label moves undoable there and keeps them in a saved library project. A
+  `.topoproj` export carries them as `labels.json`, and an import applies them (replacing the saved set, like the node positions).
+- **Node notes** (`app/node_notes.py`): click a node, then **Note** (the button reads *Edit note* once there is one) for a
+  free-text note per node (up to 20 000 characters, Ctrl+Enter saves); a node with a note shows a small sticky note at its
+  icon. The dialog also lists the node's **default login** read from its template - an ESXi template's `users` and
+  `passwords`, a GNS3 template's `usage` text - read-only, the password hidden until *Show*; nothing of it is stored or
+  logged (`GET /nodes/{name}/credentials`, `app/node_credentials.py`). Notes live in `node_notes.json` (git-ignored; the
+  design sketch keeps its own copy, which makes them undoable there and keeps them in a saved library project) and travel
+  in a `.topoproj` export as `notes.json` (an import replaces the saved set). Endpoints: `GET /notes`,
+  `PUT /notes/{name}` and the `/design/...` twins.
 - **Wireshark-style packet capture** (`app/capture.py`): start/stop a
   capture on any live link and view it as a live, in-browser
   Wireshark-style packet table (click a link on the canvas) - a

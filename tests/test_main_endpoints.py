@@ -463,6 +463,8 @@ def test_export_project_returns_zip_with_attachment_header(
         "configs.json",
         "drawings.json",
         "layout.json",
+        "labels.json",
+        "notes.json",
     }
 
 

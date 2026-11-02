@@ -52,6 +52,12 @@ def _label_layout_tmp_file(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _node_notes_tmp_file(tmp_path, monkeypatch):
+    """PUT /notes writes a local file (app/node_notes.py); never into the repo root."""
+    monkeypatch.setenv("TOPOLOGYOPERATOR_NOTES_FILE", str(tmp_path / "node_notes.json"))
+
+
 @pytest.fixture
 def temp_topology_file(tmp_path, app_state):
     """

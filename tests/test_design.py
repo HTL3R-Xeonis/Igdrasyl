@@ -313,6 +313,8 @@ def test_design_export_produces_host_agnostic_topoproj(client, app_state):
         "configs.json",
         "drawings.json",
         "layout.json",
+        "labels.json",
+        "notes.json",
     }
     manifest = json.loads(zf.read("manifest.json"))
     assert manifest["format_version"] == 1

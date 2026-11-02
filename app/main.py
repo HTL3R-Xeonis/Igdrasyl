@@ -49,6 +49,8 @@ from app import (
     logging_setup,
     logs,
     maintenance,
+    node_credentials,
+    node_notes,
     ova_templates,
     profile_secrets,
     project_bundle,
@@ -619,6 +621,37 @@ def update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
         raise HTTPException(422, str(exc))
 
 
+class NoteUpdate(BaseModel):
+    text: str = Field(max_length=node_notes.MAX_LENGTH)
+
+
+@app.get("/notes")
+def notes() -> dict[str, str]:
+    """The notes the user keeps on nodes, by node name. See app/node_notes.py."""
+    return node_notes.load()
+
+
+@app.put("/notes/{name}")
+def update_note(name: str, update: NoteUpdate) -> dict[str, str]:
+    """Sets a node's note; blank text removes it."""
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+    if name not in app.state.graph.nodes:
+        raise HTTPException(404, f"no node named {name!r}")
+    return node_notes.save_note(name, update.text)
+
+
+@app.get("/nodes/{name}/credentials")
+def node_default_credentials(name: str) -> dict[str, Any]:
+    """The default login its template lists (ESXi: users/passwords, GNS3: the usage text), see app/node_credentials.py."""
+    if app.state.graph is None:
+        raise HTTPException(503, app.state.startup_warning or "topology unavailable")
+    node = app.state.graph.nodes.get(name)
+    if node is None:
+        raise HTTPException(404, f"no node named {name!r}")
+    return node_credentials.for_image(node.image, str(node.env.name))
+
+
 @app.get("/templates")
 def templates() -> dict[str, Any]:
     """
@@ -1049,6 +1082,29 @@ def design_update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
     return app.state.design.labels
 
 
+@app.get("/design/notes")
+def design_notes() -> dict[str, str]:
+    return app.state.design.notes
+
+
+@app.put("/design/notes/{name}")
+def design_update_note(name: str, update: NoteUpdate) -> dict[str, str]:
+    if name not in app.state.design.nodes:
+        raise HTTPException(404, f"no node named {name!r}")
+    with design_history.step(app):
+        node_notes.apply_note(app.state.design.notes, name, update.text)
+    design_store.save(app.state.design)
+    return app.state.design.notes
+
+
+@app.get("/design/nodes/{name}/credentials")
+def design_node_default_credentials(name: str) -> dict[str, Any]:
+    node = app.state.design.nodes.get(name)
+    if node is None:
+        raise HTTPException(404, f"no node named {name!r}")
+    return node_credentials.for_image(node.image, node.environment)
+
+
 class DesignDelete(BaseModel):
     nodes: list[str] = []
     links: list[tuple[str, str]] = []
@@ -1250,7 +1306,7 @@ def export_project() -> Response:
     Downloads the current topology as a `.topoproj` bundle (a plain
     zip - topology.yaml, a sanitized settings.yml, configs.json from
     the last config-push, drawings.json, layout.json (node canvas
-    positions), and a manifest) - see app/project_bundle.py.
+    positions), labels.json (moved port/name labels), and a manifest) - see app/project_bundle.py.
     """
     if app.state.graph is None:
         raise HTTPException(503, app.state.startup_warning or "topology unavailable")

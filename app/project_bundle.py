@@ -3,7 +3,8 @@ Export/import a portable ".topoproj" project bundle - a plain zip
 (same idea as .docx/.pptx/.jar: a real archive under its own
 extension) holding the topology description, a sanitized settings
 snapshot, the last-pushed device configs, canvas drawings, and node
-canvas positions (layout.json - see app/layout.py). Import calls
+canvas positions (layout.json - see app/layout.py) the user-moved port/name label offsets (labels.json - see
+app/label_layout.py) and the node notes (notes.json - see app/node_notes.py). Import calls
 TopologyBackend.deploy_topology (TopologyBuilder) to actually deploy
 the bundled topology live, incrementally - see that method's own
 docstring for its validate-before-write guarantee. Kept in its own
@@ -32,6 +33,7 @@ import yaml
 from fastapi import FastAPI
 from src.settings import Settings
 
+from app import label_layout, node_notes
 from app.gns3_state import resolve_project_id
 from app.layout import apply_imported_layout, load_layout
 from app.topology import load_graph
@@ -52,6 +54,8 @@ def _write_bundle(
     configs: dict[str, Any],
     drawings: list[Any],
     layout: dict[str, Any],
+    labels: dict[str, Any],
+    notes: dict[str, Any],
 ) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -61,6 +65,8 @@ def _write_bundle(
         zf.writestr("configs.json", json.dumps({"devices": configs}, indent=2))
         zf.writestr("drawings.json", json.dumps({"drawings": drawings}, indent=2))
         zf.writestr("layout.json", json.dumps({"layout": layout}, indent=2))
+        zf.writestr("labels.json", json.dumps({"labels": labels}, indent=2))
+        zf.writestr("notes.json", json.dumps({"notes": notes}, indent=2))
     return buf.getvalue()
 
 
@@ -91,9 +97,19 @@ def build_export(app: FastAPI) -> bytes:
     configs = getattr(app.state, "last_config_push", {})
     drawings = getattr(app.state, "last_drawings", [])
     layout = load_layout(app.state.graph.nodes)
+    labels = label_layout.restrict(label_layout.load(), app.state.graph.nodes)
+
+    notes = node_notes.restrict(node_notes.load(), app.state.graph.nodes)
 
     return _write_bundle(
-        manifest, topology_yaml, settings_snapshot, configs, drawings, layout
+        manifest,
+        topology_yaml,
+        settings_snapshot,
+        configs,
+        drawings,
+        layout,
+        labels,
+        notes,
     )
 
 
@@ -129,6 +145,8 @@ def build_design_export(
         configs=configs or {},
         drawings=state.drawings,
         layout=state.layout,
+        labels=label_layout.restrict(state.labels, state.nodes),
+        notes=node_notes.restrict(state.notes, state.nodes),
     )
 
 
@@ -139,8 +157,9 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     :returns: {"manifest": ..., "configs": {name: [cmd, ...]}, "drawings": [...], "auto_config_push": bool}
         from the bundle - the caller (main.py's POST /project/import) is responsible for actually running
         config-push when auto_config_push is true, this function only deploys the topology itself. Node
-        canvas positions are applied as a side effect (written to the local layout file, same as a drag
-        via POST /layout) rather than returned - the caller reloads them via GET /layout.
+        canvas positions and label offsets are applied as a side effect (written to the local layout/label
+        files, same as a drag via POST /layout or /labels) rather than returned - the caller reloads them via
+        GET /layout and GET /labels.
     """
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -203,6 +222,20 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
         except json.JSONDecodeError as exc:
             raise BundleValidationError(f"layout.json isn't valid JSON: {exc}")
 
+    labels = {}
+    if "labels.json" in zf.namelist():
+        try:
+            labels = json.loads(zf.read("labels.json")).get("labels", {})
+        except json.JSONDecodeError as exc:
+            raise BundleValidationError(f"labels.json isn't valid JSON: {exc}")
+
+    notes = {}
+    if "notes.json" in zf.namelist():
+        try:
+            notes = json.loads(zf.read("notes.json")).get("notes", {})
+        except json.JSONDecodeError as exc:
+            raise BundleValidationError(f"notes.json isn't valid JSON: {exc}")
+
     backend = get_or_create_backend(app)
     backend.deploy_topology(Settings.TOPOLOGY_FILE, topology_yaml_text)
     app.state.graph = load_graph()
@@ -238,6 +271,8 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     # leave behind for a reused node name (see apply_imported_layout's
     # own docstring for the real bug this fixes).
     apply_imported_layout(app.state.graph.nodes, layout)
+    label_layout.replace_all(labels, app.state.graph.nodes)
+    node_notes.replace_all(notes, app.state.graph.nodes)
 
     return {
         "manifest": manifest,

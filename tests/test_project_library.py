@@ -115,12 +115,15 @@ def test_design_roundtrip_is_stored_per_project(client):
     state = design.new_state()
     state.nodes["R1"] = design.DesignNode("R1", "ROUTER", "VPCS", "ON_GNS3")
     state.layout["R1"] = {"x": 12.0, "y": 34.0}
+    state.labels["R1|"] = {"dx": 3.0, "dy": 4.0}
     state.drawings = [{"id": 1, "type": "text", "text": "First layout"}]
 
     project_library.save_design(first["id"], state)
 
     restored = project_library.load_design(first["id"])
     assert restored.layout == {"R1": {"x": 12.0, "y": 34.0}}
+    assert restored.labels == {"R1|": {"dx": 3.0, "dy": 4.0}}
+    assert project_library.load_design(second["id"]).labels == {}
     assert restored.drawings[0]["text"] == "First layout"
     assert project_library.load_design(second["id"]).layout == {}
 
