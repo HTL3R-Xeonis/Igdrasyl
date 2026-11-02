@@ -21,8 +21,6 @@ have all been exercised live, not just in the test suite. The GNS3 VM
 Deploy feature (below) is thoroughly unit-tested but not yet exercised
 against a real OVA import from the sister template API.
 
-Design proposal for running everything as one VM with one config file: [docs/DESIGN-single-vm.md](docs/DESIGN-single-vm.md).
-
 Start-up does not need the ESXi host: the session is opened on first use (`app/esxi_session.py`), so a host that is down
 or not set up yet still lets the app start (landing page, design mode, host settings); the host's calls answer 503 with the
 reason until it is reachable, and the app connects by itself afterwards (10 s between attempts).
