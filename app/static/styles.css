@@ -376,7 +376,7 @@
   .link-line-capturing { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
   .link-endpoint { fill: var(--canvas-link); pointer-events: none; }
   /* Labels can be dragged (and a double click puts one back); the halo keeps text readable where labels overlap. */
-  .port-label { fill: var(--canvas-link); font-size: 9px; cursor: grab; user-select: none; stroke: var(--canvas-bg); stroke-width: 3px; paint-order: stroke; }
+  .port-label { fill: var(--canvas-link); font-size: 9px; dominant-baseline: central; cursor: grab; user-select: none; stroke: var(--canvas-bg); stroke-width: 3px; paint-order: stroke; }
   #canvas-toolbar {
     position: absolute;
     top: 10px;

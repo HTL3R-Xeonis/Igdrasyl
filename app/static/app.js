@@ -750,10 +750,116 @@ function labelKey(nodeName, ifName = "") {
 }
 
 // A port label's place: the default spot next to its endpoint dot plus whatever the user dragged it by.
-function portLabelPosition(label) {
-  const base = portLabelPoint(nodesData[label.dataset.for], nodesData[label.dataset.other], Number(label.dataset.offset) || 0, label.dataset.first === "1");
-  const moved = labelOffsets[label.dataset.key];
-  return moved ? { x: base.x + moved.dx, y: base.y + moved.dy } : base;
+// ---- label placement (pure geometry, no DOM; tests/test_label_placement.py runs this block under node) ----
+// Port labels start next to their link endpoint. Labels the user has not moved are then nudged outward / sideways to the
+// first free spot, so crowded nodes (a switch with five links) do not stack their labels on top of each other or on the
+// icon and the name. A label's text is anchored away from its node (right-aligned on the left side, left-aligned on the
+// right), so it never grows back into the icon.
+const PORT_LABEL_CHAR_W = 5.1;
+const PORT_LABEL_H = 13; // measured text box (12) plus the halo
+const PORT_LABEL_STEP = 6;
+const PORT_LABEL_SIDE = 9;
+const PORT_LABEL_MAX_STEPS = 6;
+
+function labelAnchor(dir) {
+  return dir.x > 0.35 ? "start" : dir.x < -0.35 ? "end" : "middle";
+}
+
+function labelRect(pos, anchor, text) {
+  const w = text.length * PORT_LABEL_CHAR_W + 3;
+  const x = anchor === "start" ? pos.x : anchor === "end" ? pos.x - w : pos.x - w / 2;
+  return { x: x - 1, y: pos.y - PORT_LABEL_H / 2, w, h: PORT_LABEL_H };
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// items: [{key, node, text, base: {x, y}, dir: {x, y} (unit, from the node outward), fixed: {x, y} | null}]
+// obstacles: rects the labels must stay off (node icons, node names). Returns Map(key -> {x, y, anchor}).
+function placePortLabels(items, obstacles) {
+  const taken = [];
+  const out = new Map();
+  const put = (item, pos) => {
+    const anchor = labelAnchor(item.dir);
+    taken.push(labelRect(pos, anchor, item.text));
+    out.set(item.key, { x: pos.x, y: pos.y, anchor });
+  };
+  for (const item of items) if (item.fixed) put(item, item.fixed);
+  const free = items
+    .filter((item) => !item.fixed)
+    .sort((a, b) => (a.node < b.node ? -1 : a.node > b.node ? 1 : Math.atan2(a.dir.y, a.dir.x) - Math.atan2(b.dir.y, b.dir.x)));
+  for (const item of free) {
+    const anchor = labelAnchor(item.dir);
+    const normal = { x: -item.dir.y, y: item.dir.x };
+    let chosen = item.base;
+    search: for (let k = 0; k <= PORT_LABEL_MAX_STEPS; k++) {
+      for (const t of [0, 1, -1]) {
+        const pos = {
+          x: item.base.x + item.dir.x * k * PORT_LABEL_STEP + normal.x * t * PORT_LABEL_SIDE,
+          y: item.base.y + item.dir.y * k * PORT_LABEL_STEP + normal.y * t * PORT_LABEL_SIDE,
+        };
+        const rect = labelRect(pos, anchor, item.text);
+        if (!obstacles.some((o) => rectsOverlap(rect, o)) && !taken.some((o) => rectsOverlap(rect, o))) {
+          chosen = pos;
+          break search;
+        }
+      }
+    }
+    put(item, chosen);
+  }
+  return out;
+}
+// ---- end label placement ----
+
+function nodeObstacles() {
+  const rects = [];
+  for (const n of Object.values(nodesData)) {
+    const half = NODE_ICON_SIZE / 2;
+    rects.push({ x: n.x - half - 2, y: n.y - half - 2, w: NODE_ICON_SIZE + 4, h: NODE_ICON_SIZE + 4 });
+    const moved = labelOffsets[labelKey(n.name)] || { dx: 0, dy: 0 };
+    // the name is 11px text with its baseline NODE_ICON_SIZE below the node's centre (see buildNodeShape)
+    const w = n.name.length * 7.6 + 4;
+    rects.push({ x: n.x + moved.dx - w / 2, y: n.y + NODE_ICON_SIZE + moved.dy - 12, w, h: 16 });
+  }
+  return rects;
+}
+
+// Places every port label: moved ones at their saved spot, the rest on the first free spot (see placePortLabels).
+function layoutPortLabels() {
+  const labels = [...document.querySelectorAll("#labels-layer .port-label")];
+  if (!labels.length) return;
+  const items = labels.map((label) => {
+    const node = nodesData[label.dataset.for];
+    const base = portLabelPoint(node, nodesData[label.dataset.other], Number(label.dataset.offset) || 0, label.dataset.first === "1");
+    const len = Math.hypot(base.x - node.x, base.y - node.y) || 1;
+    const moved = labelOffsets[label.dataset.key];
+    return {
+      key: label.dataset.key,
+      node: node.name,
+      text: label.textContent,
+      base,
+      dir: { x: (base.x - node.x) / len, y: (base.y - node.y) / len },
+      fixed: moved ? { x: base.x + moved.dx, y: base.y + moved.dy } : null,
+    };
+  });
+  const placed = placePortLabels(items, nodeObstacles());
+  for (const label of labels) {
+    const at = placed.get(label.dataset.key);
+    label.setAttribute("x", at.x);
+    label.setAttribute("y", at.y);
+    label.setAttribute("text-anchor", at.anchor);
+  }
+}
+
+let labelLayoutQueued = false;
+function scheduleLabelLayout() {
+  if (labelLayoutQueued) return;
+  labelLayoutQueued = true;
+  requestAnimationFrame(() => {
+    labelLayoutQueued = false;
+    layoutPortLabels();
+  });
 }
 
 function applyNodeLabelOffset(textEl, nodeName) {
@@ -825,12 +931,7 @@ function appendLinkEndpointDot(layer, nearNode, farNode, ifName, offset = 0, nea
   label.dataset.first = nearIsFirst ? "1" : "0";
   label.dataset.key = labelKey(nearNode.name, ifName);
   label.textContent = ifName;
-  const reposition = () => {
-    const at = portLabelPosition(label);
-    label.setAttribute("x", at.x);
-    label.setAttribute("y", at.y);
-  };
-  reposition();
+  const reposition = scheduleLabelLayout;
   label.addEventListener("pointerdown", (evt) => startLabelDrag(evt, label.dataset.key, reposition));
   label.addEventListener("dblclick", () => resetLabel(label.dataset.key, reposition));
   document.getElementById("labels-layer").appendChild(label);
@@ -1565,6 +1666,7 @@ function renderCanvas() {
   for (const node of Object.values(nodesData)) {
     nodesLayer.appendChild(buildNodeShape(node));
   }
+  layoutPortLabels();
 }
 
 function setLineEndpoints(line, a, b, offset = 0) {
@@ -1636,8 +1738,12 @@ function buildNodeShape(node) {
   label.setAttribute("class", "node-name-label");
   label.textContent = node.name;
   applyNodeLabelOffset(label, node.name);
-  label.addEventListener("pointerdown", (evt) => startLabelDrag(evt, labelKey(node.name), () => applyNodeLabelOffset(label, node.name)));
-  label.addEventListener("dblclick", () => resetLabel(labelKey(node.name), () => applyNodeLabelOffset(label, node.name)));
+  const moveNameLabel = () => {
+    applyNodeLabelOffset(label, node.name);
+    scheduleLabelLayout(); // the name is an obstacle for the port labels
+  };
+  label.addEventListener("pointerdown", (evt) => startLabelDrag(evt, labelKey(node.name), moveNameLabel));
+  label.addEventListener("dblclick", () => resetLabel(labelKey(node.name), moveNameLabel));
   g.appendChild(label);
 
   g.addEventListener("pointerdown", (evt) => startNodeDrag(evt, node.name));
@@ -1778,9 +1884,7 @@ function moveNodeShape(name) {
   });
   document.querySelectorAll(".port-label").forEach((label) => {
     if (label.dataset.for !== name && label.dataset.other !== name) return;
-    const labelPoint = portLabelPosition(label);
-    label.setAttribute("x", labelPoint.x);
-    label.setAttribute("y", labelPoint.y);
+    scheduleLabelLayout();
   });
 }
 

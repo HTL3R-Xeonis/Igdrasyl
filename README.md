@@ -144,6 +144,10 @@ Design proposal for running everything as one VM with one config file: [docs/DES
   If the interfaces match no live link, the request fails instead of
   hitting the link that does exist. `verify` checks each link by its ports,
   and TopologyBuilder creates each one in GNS3 by its own interface pair.
+- **Automatic label placement**: port labels you have not moved are placed on the first free spot next to their link endpoint (text
+  grows away from the node; nudged outward/sideways around icons, names and other labels), so a switch with five links no longer
+  stacks them. Pure geometry in `app.js` (`placePortLabels`), run under `node` by `tests/test_label_placement.py`; moved labels stay
+  exactly where they were put and count as obstacles for the others.
 - **Movable labels**: port labels and node names are dragged with the mouse (double-click puts one back; View menu >
   Reset Label Positions resets all). They sit in a layer above the nodes, so no icon hides one, and keep a halo so
   overlapping text stays readable. What is stored is the offset from the default spot (`app/label_layout.py`,
