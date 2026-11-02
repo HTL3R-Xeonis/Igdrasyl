@@ -37,6 +37,7 @@ from app import (
     design_store,
     error_pages,
     esxi_serial,
+    esxi_session,
     generate_jobs,
     gns3_vm_deploy_jobs,
     holds,
@@ -206,14 +207,17 @@ async def lifespan(app: FastAPI):
         # Names only - never the values.
         logger.info(f"Using stored credentials for: {', '.join(stored_secrets)}")
 
-    # Opens a real, persistent pyvmomi session - done once here and
-    # reused for the app's lifetime rather than per-request, same
-    # reasoning as TopologyBuilder's own CLI commands.
-    app.state.esxi_connection = ESXiConnection(
+    # A real, persistent pyvmomi session, reused for the app's lifetime rather than opened per request (same reasoning
+    # as TopologyBuilder's own CLI commands) - but opened on first use, so a host that is down or not set up yet does
+    # not keep the app (landing page, design mode) from starting. See app/esxi_session.py.
+    esxi_args = (
         Settings.ESXI.IP,
         Settings.ESXI.PORT,
         Settings.ESXI.USERNAME,
         Settings.ESXI.PASSWORD,
+    )
+    app.state.esxi_connection = esxi_session.LazyESXiConnection(
+        lambda: ESXiConnection(*esxi_args), host=Settings.ESXI.IP
     )
 
     # Most recent /config-push request body - project_bundle.py's own
@@ -280,6 +284,14 @@ async def path_safe_http_error(request: Request, exc: StarletteHTTPException):
         content={"detail": public_text.redact_paths(exc.detail)},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(esxi_session.EsxiUnavailable)
+async def esxi_unavailable(request: Request, exc: esxi_session.EsxiUnavailable):
+    # Our own wording, no internals: the host can't be reached right now.
+    if error_pages.wants_html(request):
+        return error_pages.render(503, str(exc))
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.exception_handler(Exception)
