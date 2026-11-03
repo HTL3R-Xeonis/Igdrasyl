@@ -54,7 +54,7 @@ def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_versi
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/app.js?v=ginnungagap-16" in html
+    assert "/app.js?v=ginnungagap-18" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):
@@ -74,3 +74,11 @@ def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state
     assert seen and seen[0]["status"] == "running"
     assert seen[0]["waiting_for"] == ["SW-CORE", "SW-DMZ"]
     assert client.get(f"/config-push/jobs/{job.id}").json()["waiting_for"] == []
+
+
+def test_design_mode_has_a_clear_topology_menu_item():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'id="clear-design-btn"' in html
+    assert 'fetch("/design/reset", { method: "POST" })' in js
+    assert '"clear-design-btn").hidden = !designMode' in js

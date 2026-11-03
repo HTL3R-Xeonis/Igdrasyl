@@ -12,6 +12,17 @@ const VM_SCREEN_MAX_CONSECUTIVE_FAILURES = 8;
 let sessions = new Map();   // id -> session object, see ensureSessionPanel
 let activeSessionId = null;
 
+// The Console/Screen view can be popped out into its own window or tab (see the Pop out button below). Only these parts
+// move there; the context menus (#node-actions and friends) are position:fixed popups of THIS page and stay in it.
+const POP_OUT_PARTS = ["session-tabrow", "console-placeholder", "session-panels"];
+let poppedOutWindow = null;
+
+// An element of the console view, wherever it is right now: in this page, or in the pop-out's document.
+function consoleEl(id) {
+  const doc = poppedOutWindow && !poppedOutWindow.closed ? poppedOutWindow.document : document;
+  return doc.getElementById(id);
+}
+
 function sessionIdFor(nodeName, kind) {
   return `${kind}:${nodeName}`;
 }
@@ -43,17 +54,17 @@ function ensureSessionPanel(id, nodeName, title) {
   tab.append(label, statusEl, close);
   tab.addEventListener("click", () => onSessionTabClick(id));
   tab.addEventListener("pointerdown", (evt) => startTabDrag(evt, id));
-  document.getElementById("session-tabbar").appendChild(tab);
-  document.getElementById("session-tabbar").hidden = false;
+  consoleEl("session-tabbar").appendChild(tab);
+  consoleEl("session-tabbar").hidden = false;
 
   const panel = document.createElement("div");
   panel.className = "session-panel"; // starts inactive (see the CSS - default is the :not(.active) rule) until switchToSession adds .active
   const body = document.createElement("div");
   body.className = "session-panel-body";
   panel.append(body);
-  document.getElementById("session-panels").appendChild(panel);
+  consoleEl("session-panels").appendChild(panel);
 
-  document.getElementById("console-placeholder").style.display = "none";
+  consoleEl("console-placeholder").style.display = "none";
 
   session = {
     id, nodeName, title, kind: null, popout: null,
@@ -99,8 +110,8 @@ function closeSession(id) {
     switchToSession(next.id);
   } else {
     activeSessionId = null;
-    if (!sessions.size) document.getElementById("session-tabbar").hidden = true;
-    document.getElementById("console-placeholder").style.display = "";
+    if (!sessions.size) consoleEl("session-tabbar").hidden = true;
+    consoleEl("console-placeholder").style.display = "";
   }
 }
 
@@ -245,7 +256,7 @@ function popOutSession(id, screenX, screenY, asTab = false) {
       switchToSession(remaining.id);
     } else {
       activeSessionId = null;
-      document.getElementById("console-placeholder").style.display = "";
+      consoleEl("console-placeholder").style.display = "";
     }
   }
 }
@@ -254,8 +265,8 @@ function restoreSession(session, win) {
   if (sessions.get(session.id) !== session || session.popout !== win) return;
   session.popout = null;
   session.tabEl.classList.remove("popped");
-  document.getElementById("session-panels").appendChild(session.panelEl);
-  document.getElementById("console-placeholder").style.display = "none";
+  consoleEl("session-panels").appendChild(session.panelEl);
+  consoleEl("console-placeholder").style.display = "none";
   switchToSession(session.id);
 }
 
@@ -4345,6 +4356,7 @@ function applyDesignModeUI() {
   document.getElementById("open-library-project-btn").hidden = !designMode;
   document.getElementById("save-library-project-btn").hidden = !designMode;
   document.getElementById("deploy-library-project-btn").hidden = !designMode;
+  document.getElementById("clear-design-btn").hidden = !designMode;
   document.getElementById("design-project-separator").hidden = !designMode;
   document.getElementById("export-project-btn").href = designMode ? "/design/export" : "/project/export";
   document.getElementById("import-project-btn").hidden = designMode;
@@ -4357,6 +4369,24 @@ function applyDesignModeUI() {
   document.getElementById("nodes-menu").hidden = designMode;
   if (designMode) showTab("console");
 }
+
+document.getElementById("clear-design-btn").addEventListener("click", async () => {
+  const ok = await showConfirm("Remove every device, link and drawing from this sketch? Edit > Undo brings it back.", {
+    title: "Clear topology", danger: true, confirmLabel: "Clear",
+  });
+  if (!ok) return;
+  const resp = await fetch("/design/reset", { method: "POST" });
+  if (!resp.ok) {
+    await showAlert(`Clearing the topology failed: ${(await resp.json().catch(() => ({}))).detail || resp.status}`, { title: "Clear topology" });
+    return;
+  }
+  drawingsLoaded = false;
+  deselectNode();
+  if (typeof refreshCurrentDesignProject === "function") await refreshCurrentDesignProject();
+  await loadCanvas();
+  refreshHistoryState();
+  setMenubarMessage("Topology cleared.");
+});
 
 async function enterDesignMode() {
   designMode = true;
@@ -5656,13 +5686,11 @@ document.getElementById("push-btn").addEventListener("click", async () => {
 // open xterm.js terminal/VNC screen and its WebSocket keeps running
 // exactly as it was, uninterrupted. Moves it back into the right
 // panel automatically if that window is closed.
-let poppedOutWindow = null;
 document.getElementById("popout-btn").addEventListener("click", (evt) => {
   if (poppedOutWindow && !poppedOutWindow.closed) {
     poppedOutWindow.focus();
     return;
   }
-  const consoleArea = document.getElementById("console-area");
   const win = openPopOut(evt.shiftKey, "width=900,height=650");
   if (!win) {
     showAlert("Couldn't open a new window or tab - check your browser's popup blocker.");
@@ -5670,17 +5698,22 @@ document.getElementById("popout-btn").addEventListener("click", (evt) => {
   }
   win.document.head.innerHTML = document.head.innerHTML; // first: it also carries this page's own <title>
   win.document.title = "Ginnungagap - Console/Screen View";
-  win.document.body.appendChild(consoleArea);
+  // the same structure as in the panel, so every existing style applies
+  const area = win.document.createElement("div");
+  area.id = "console-area";
+  win.document.body.appendChild(area);
+  for (const id of POP_OUT_PARTS) area.appendChild(document.getElementById(id));
   poppedOutWindow = win;
-
-  const placeholder = document.createElement("div");
-  placeholder.id = "console-area-placeholder";
-  placeholder.textContent = "Console/Screen View is popped out into its own window or tab.";
-  document.getElementById("right-panel").appendChild(placeholder);
+  // the side panel is left with the device list only
+  document.getElementById("right-panel").classList.add("popped-out");
 
   win.addEventListener("beforeunload", () => {
-    document.getElementById("console-area-placeholder")?.remove();
-    document.getElementById("right-panel").appendChild(consoleArea);
+    const home = document.getElementById("console-area");
+    for (const id of POP_OUT_PARTS) {
+      const part = win.document.getElementById(id);
+      if (part) home.appendChild(part);
+    }
+    document.getElementById("right-panel").classList.remove("popped-out");
     poppedOutWindow = null;
   });
 });

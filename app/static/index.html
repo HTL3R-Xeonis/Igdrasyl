@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-16">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-18">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -20,6 +20,7 @@
         <button class="menu-item" id="open-library-project-btn" hidden>Open Library Project…</button>
         <button class="menu-item" id="save-library-project-btn" hidden>Save Project</button>
         <button class="menu-item" id="deploy-library-project-btn" hidden>Deploy to Host…</button>
+        <button class="menu-item" id="clear-design-btn" hidden title="Removes every device, link and drawing from the sketch and starts an empty one (Undo brings it back)">Clear Topology…</button>
         <div class="menu-separator" id="design-project-separator" hidden></div>
         <a class="menu-item" id="export-project-btn" href="/project/export" download title="Download the current topology + configs as a .topoproj bundle">Export Project</a>
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
@@ -411,7 +412,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=ginnungagap-16"></script>
+<script src="/app.js?v=ginnungagap-18"></script>
 <script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

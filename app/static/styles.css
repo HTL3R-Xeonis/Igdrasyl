@@ -495,16 +495,11 @@
     cursor: pointer;
   }
   #popout-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #console-area-placeholder {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    color: var(--dim);
-    font-size: 13px;
-    text-align: center;
-  }
+  /* Console/Screen view popped out into its own window or tab: the side panel keeps only the device list. #console-area stays
+     (it holds the position:fixed context menus) but takes no room. */
+  #right-panel.popped-out #panel-resize-handle { display: none; }
+  #right-panel.popped-out #console-area { flex: 0 0 0; min-height: 0; overflow: visible; }
+  #right-panel.popped-out #topology-summary { flex: 1 1 auto; height: auto; border-bottom: 0; }
   #topology-summary-list {
     list-style: none;
     margin: 0;

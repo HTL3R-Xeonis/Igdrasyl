@@ -45,7 +45,8 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   (`app/console.py`).
 - **Tabs out of the panel**: every console/screen tab can be dragged out of the Console/Screen panel with the left mouse
   button (move at least 8 px, release more than 24 px outside the panel, Escape cancels) to open just that session in its
-  own browser window; the **Pop out** button at the right end of the tab row still moves the whole panel. Holding **Shift**
+  own browser window; the **Pop out** button at the right end of the tab row still moves the whole panel (tabs and
+  sessions - the side panel then shows only the device list, and everything else keeps working while it is open). Holding **Shift**
   (when releasing the dragged tab, or clicking Pop out) opens a new browser *tab* instead of a window. Careful with the tab:
   the terminal and the screen draw with the opening page's animation frames, which a browser pauses while that page is a
   background tab, so a popped-out tab can show a frozen picture; a window does not have that problem. Each tab shows
@@ -495,7 +496,8 @@ The project controls live in the separate `app/static/projects.js` feature file.
 
 Open a library project in the design canvas to edit its topology, drawings, and
 node positions. **Save Project** writes those parts back to that project only;
-each library project therefore retains its own canvas layout. **Deploy to Host…**
+each library project therefore retains its own canvas layout. **Clear Topology…** (File menu, design
+mode only) empties the sketch after a confirmation; Edit > Undo brings it back. **Deploy to Host…**
 shows the target ESXi address, GNS3 VM, node/link totals, role totals, and whether
 the host uses incremental or full deployment. The preview is read-only. Starting
 deployment selects the project for that host; if the host or project is not active,

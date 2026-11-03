@@ -132,6 +132,13 @@ def _refresh_startup_state(app: FastAPI, allow_auto_deploy: bool = True) -> None
 
     app.state.gns3_vm_ip = None
     app.state.project_id = None
+    if _active_host_filename() is None:
+        # No host has been chosen (a fresh machine: no settings file, no activated host profile). The built-in lab address
+        # of TopologyBuilder's defaults is not a host anybody configured - it must neither be tried (a warning about a
+        # host the person never heard of) nor be the target of the GNS3 VM auto-recovery below.
+        logger.info("No host is active yet - not looking for a live GNS3 project")
+        app.state.startup_warning = "; ".join(warnings) or None
+        return
     try:
         # Auto-recovery: only when the configured GNS3 VM is genuinely
         # absent - never when one exists but just isn't reporting an IP
@@ -1906,4 +1913,18 @@ def get_license() -> Response:
 # registration order before falling through to a mount, so this catch-all
 # for "/" can't shadow the API/WS routes as long as it's registered after
 # them.
-app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="frontend")
+class _RevalidatedStaticFiles(StaticFiles):
+    """
+    The page and its scripts are checked with the server on every load (a cheap 304 when nothing changed). Without it a
+    browser may keep serving an old index.html for a while, and with it the old script, after the app was updated.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount(
+    "/", _RevalidatedStaticFiles(directory=_STATIC_DIR, html=True), name="frontend"
+)

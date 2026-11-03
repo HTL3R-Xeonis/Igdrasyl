@@ -976,3 +976,8 @@ def test_health_offers_nothing_without_a_selected_project(
     selection = {"project_id": None, "project_name": None}
     with patch("app.main.project_selection.get_selection", return_value=selection):
         assert client.get("/health").json()["deployable_project"] is None
+
+
+def test_the_page_and_scripts_are_revalidated_on_every_load(client):
+    for path in ("/", "/app.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"

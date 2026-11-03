@@ -152,3 +152,58 @@ def test_shift_chooses_the_tab_for_both_ways_to_pop_out():
         Path(__file__).resolve().parent.parent / "app" / "static" / "index.html"
     ).read_text(encoding="utf-8")
     assert "Shift-click: a new browser tab" in html
+
+
+# ---------- the whole Console/Screen view popped out: only its session parts move ----------
+
+
+def test_the_session_parts_are_looked_up_through_consoleEl_never_in_this_page_directly():
+    # once they live in the pop-out's document, document.getElementById(...) finds nothing there and the code throws
+    # (that made loadCanvas fail and the status bar say "Disconnected" while the pop-out was open)
+    for name in (
+        "session-tabbar",
+        "session-tabrow",
+        "session-panels",
+        "console-placeholder",
+    ):
+        direct = f'document.getElementById("{name}")'
+        uses = [line for line in APP_JS.splitlines() if direct in line]
+        assert all(
+            "POP_OUT_PARTS" in line or "appendChild(document" in line for line in uses
+        ), (name, uses)
+    assert (
+        'consoleEl("session-panels")' in APP_JS
+        and 'consoleEl("console-placeholder")' in APP_JS
+    )
+
+
+def test_the_context_menus_are_not_moved_into_the_pop_out():
+    assert (
+        'const POP_OUT_PARTS = ["session-tabrow", "console-placeholder", "session-panels"];'
+        in APP_JS
+    )
+    handler = APP_JS[
+        APP_JS.index('document.getElementById("popout-btn").addEventListener') :
+    ]
+    handler = handler[: handler.index("showLandingView();")]
+    assert 'getElementById("console-area")' in handler  # only to put the parts back
+    assert "appendChild(consoleArea)" not in handler
+    for menu in ("node-actions", "multi-actions", "link-actions"):
+        assert (
+            menu not in handler
+        )  # they are position:fixed popups of the main page and stay in it
+
+
+def test_the_side_panel_keeps_only_the_device_list_while_popped_out():
+    assert (
+        'classList.add("popped-out")' in APP_JS
+        and 'classList.remove("popped-out")' in APP_JS
+    )
+    assert (
+        "console-area-placeholder" not in APP_JS
+    )  # no note in the panel, just the list
+    for rule in (
+        "#right-panel.popped-out #panel-resize-handle { display: none; }",
+        "#right-panel.popped-out #topology-summary { flex: 1 1 auto; height: auto; border-bottom: 0; }",
+    ):
+        assert rule in CSS
