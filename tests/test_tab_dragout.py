@@ -5,6 +5,7 @@ node, skipped where node is not installed; the wiring is checked as text.
 """
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -182,9 +183,7 @@ def test_the_context_menus_are_not_moved_into_the_pop_out():
         'const POP_OUT_PARTS = ["session-tabrow", "console-placeholder", "session-panels"];'
         in APP_JS
     )
-    handler = APP_JS[
-        APP_JS.index('document.getElementById("popout-btn").addEventListener') :
-    ]
+    handler = APP_JS[APP_JS.index("function popInPanel") :]
     handler = handler[: handler.index("showLandingView();")]
     assert 'getElementById("console-area")' in handler  # only to put the parts back
     assert "appendChild(consoleArea)" not in handler
@@ -207,3 +206,59 @@ def test_the_side_panel_keeps_only_the_device_list_while_popped_out():
         "#right-panel.popped-out #topology-summary { flex: 1 1 auto; height: auto; border-bottom: 0; }",
     ):
         assert rule in CSS
+
+
+def _reorder(x, rects, start):
+    block = APP_JS[
+        APP_JS.index("// ---- tab drag-out") : APP_JS.index(
+            "// ---- end tab drag-out ----"
+        )
+    ]
+    script = (
+        f"{block}\nconsole.log(tabReorderIndex({x}, {json.dumps(rects)}, {start}));"
+    )
+    out = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True, timeout=30
+    )
+    return int(out.stdout)
+
+
+TABS = [
+    {"left": 0, "right": 100},
+    {"left": 100, "right": 200},
+    {"left": 200, "right": 300},
+]
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("x", "start", "expected"),
+    [
+        (150, 1, 1),  # on its own place
+        (40, 1, 0),  # before the middle of the tab on its left
+        (60, 1, 1),  # not yet past that middle
+        (260, 1, 2),  # past the middle of the tab on its right
+        (240, 1, 1),
+        (290, 0, 2),  # across two tabs at once
+        (5, 2, 0),
+    ],
+)
+def test_a_tab_takes_the_place_its_pointer_is_at(x, start, expected):
+    assert _reorder(x, TABS, start) == expected
+
+
+def test_the_tab_row_can_be_reordered_and_a_session_can_be_popped_back_in():
+    assert "reorder(e.clientX)" in APP_JS
+    # the pop-out window gets the events of its own tabs
+    assert "tab.ownerDocument.defaultView" in APP_JS
+    assert 'popIn.textContent = "Pop in"' in APP_JS
+    assert 'button.textContent = "Pop in"' in APP_JS
+    assert "function popInPanel" in APP_JS
+
+
+def test_a_new_console_can_open_straight_in_its_own_window():
+    assert 'id="settings-console-window"' in (
+        Path(__file__).resolve().parent.parent / "app" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    calls = re.findall(r"^\s+surfaceSession\(", APP_JS, flags=re.MULTILINE)
+    assert len(calls) == 3  # console, screen, serial

@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-18">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-19">
 </head>
 <body>
 <div id="template-banner" role="status" hidden></div>
@@ -100,6 +100,10 @@
           Port labels
         </label>
         <div class="menu-separator"></div>
+        <label class="menu-settings-checkbox" title="A console, screen or serial line opens straight in a window of its own instead of a tab in the side panel">
+          <input type="checkbox" id="settings-console-window">
+          Open consoles in their own window
+        </label>
         <label class="menu-settings-checkbox">
           <input type="checkbox" id="settings-disruption-warning" checked>
           Disruption warnings
@@ -412,7 +416,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=ginnungagap-18"></script>
+<script src="/app.js?v=ginnungagap-19"></script>
 <script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

@@ -129,6 +129,14 @@ function tabDragState(start, point, area) {
     point.y > area.bottom + TAB_DRAG_OUT_MARGIN;
   return { dragging, outside: dragging && outside };
 }
+// Dragging a tab along the tab row: the index it takes when the pointer is at x. `rects` are the tabs' {left, right} in their
+// current order and `from` is the dragged tab's index; a tab is passed when the pointer crosses the middle of its neighbour.
+function tabReorderIndex(x, rects, from) {
+  const middle = (r) => (r.left + r.right) / 2;
+  for (let i = 0; i < from; i++) if (x < middle(rects[i])) return i;
+  for (let i = rects.length - 1; i > from; i--) if (x > middle(rects[i])) return i;
+  return from;
+}
 // ---- end tab drag-out ----
 
 function isPopped(session) {
@@ -148,18 +156,28 @@ function onSessionTabClick(id) {
   switchToSession(id);
 }
 
-// Drag a tab out of the panel with the left mouse button to open just that session in its own window (the Pop out
-// button does the same for the whole panel). Escape cancels the drag.
+// Drag a tab sideways along the row to change the order of the sessions, or out of the panel with the left mouse button to open
+// just that session in its own window (the Pop out button does the same for the whole panel). Escape cancels the drag.
+// Works in the pop-out window as well: the events then arrive in that window, so the listeners go on the tab's own window.
 function startTabDrag(evt, id) {
   const session = sessions.get(id);
   if (!session || evt.button !== 0 || evt.target.closest(".session-tab-close")) return;
-  if (isPopped(session) || (poppedOutWindow && !poppedOutWindow.closed)) return;
-  const start = { x: evt.clientX, y: evt.clientY };
   const tab = session.tabEl;
+  const view = tab.ownerDocument.defaultView;
+  const canPopOut = !isPopped(session) && tab.ownerDocument === document && !(poppedOutWindow && !poppedOutWindow.closed);
+  const start = { x: evt.clientX, y: evt.clientY };
   let hint = null;
   let state = { dragging: false, outside: false };
   let finished = false;
-  const areaRect = () => document.getElementById("console-area").getBoundingClientRect();
+  const areaRect = () => tab.ownerDocument.getElementById("console-area").getBoundingClientRect();
+  const reorder = (x) => {
+    const bar = tab.parentElement;
+    const tabs = [...bar.children];
+    const from = tabs.indexOf(tab);
+    const to = tabReorderIndex(x, tabs.map((t) => t.getBoundingClientRect()), from);
+    if (to === from) return;
+    bar.insertBefore(tab, to < from ? tabs[to] : tabs[to].nextSibling);
+  };
   try {
     tab.setPointerCapture(evt.pointerId); // keeps the events coming while the pointer is outside the browser window
   } catch (err) {
@@ -169,6 +187,11 @@ function startTabDrag(evt, id) {
   const onMove = (e) => {
     state = tabDragState(start, { x: e.clientX, y: e.clientY }, areaRect());
     if (!state.dragging) return;
+    if (!canPopOut || !state.outside) reorder(e.clientX);
+    if (!canPopOut) {
+      tab.classList.add("dragging-out");
+      return;
+    }
     if (!hint) {
       hint = document.createElement("div");
       hint.id = "tab-dragout-hint";
@@ -183,10 +206,10 @@ function startTabDrag(evt, id) {
   const finish = (e, cancelled) => {
     if (finished) return;
     finished = true;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-    window.removeEventListener("pointercancel", onCancel);
-    window.removeEventListener("keydown", onKey, true);
+    view.removeEventListener("pointermove", onMove);
+    view.removeEventListener("pointerup", onUp);
+    view.removeEventListener("pointercancel", onCancel);
+    view.removeEventListener("keydown", onKey, true);
     if (hint) hint.remove();
     tab.classList.remove("dragging-out");
     try {
@@ -198,15 +221,15 @@ function startTabDrag(evt, id) {
     if (!state.dragging) return;
     suppressTabClick = true;
     setTimeout(() => { suppressTabClick = false; }, 0);
-    if (!cancelled && state.outside) popOutSession(id, e.screenX, e.screenY, e.shiftKey);
+    if (!cancelled && canPopOut && state.outside) popOutSession(id, e.screenX, e.screenY, e.shiftKey);
   };
   const onUp = (e) => finish(e, false);
   const onCancel = (e) => finish(e, true);
   const onKey = (e) => { if (e.key === "Escape") finish(e, true); };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-  window.addEventListener("pointercancel", onCancel);
-  window.addEventListener("keydown", onKey, true);
+  view.addEventListener("pointermove", onMove);
+  view.addEventListener("pointerup", onUp);
+  view.addEventListener("pointercancel", onCancel);
+  view.addEventListener("keydown", onKey, true);
 }
 
 // Opens one session in its own browser window by moving its live panel there (not a copy), so the terminal or screen and
@@ -240,9 +263,23 @@ function popOutSession(id, screenX, screenY, asTab = false) {
   // the same structure as in the panel, so every existing style applies to the moved session
   const area = win.document.createElement("div");
   area.id = "console-area";
+  const bar = win.document.createElement("div");
+  bar.className = "popout-bar";
+  const barTitle = win.document.createElement("span");
+  barTitle.textContent = session.title;
+  const popIn = win.document.createElement("button");
+  popIn.type = "button";
+  popIn.className = "popout-pop-in";
+  popIn.textContent = "Pop in";
+  popIn.title = "Put this session back into its tab";
+  popIn.addEventListener("click", () => {
+    restoreSession(session, win);
+    win.close();
+  });
+  bar.append(barTitle, popIn);
   const panels = win.document.createElement("div");
   panels.id = "session-panels";
-  area.appendChild(panels);
+  area.append(bar, panels);
   win.document.body.appendChild(area);
   panels.appendChild(session.panelEl);
   session.panelEl.classList.add("active"); // visible in its own window, whichever tab was active here
@@ -258,6 +295,24 @@ function popOutSession(id, screenX, screenY, asTab = false) {
       activeSessionId = null;
       consoleEl("console-placeholder").style.display = "";
     }
+  }
+}
+
+// A console that is opened (not just switched to): to the front when it is in its own window, or into a window of its own
+// when the setting asks for that. It runs inside the click that opened it, so the browser allows the new window.
+let openConsolesInWindow = false;
+try {
+  openConsolesInWindow = localStorage.getItem("ginnungagap.openConsolesInWindow") === "1";
+} catch (err) {
+  // no storage: the setting just starts off
+}
+function surfaceSession(session, wasNew) {
+  if (isPopped(session)) {
+    session.popout.focus();
+    return;
+  }
+  if (wasNew && openConsolesInWindow && !(poppedOutWindow && !poppedOutWindow.closed)) {
+    popOutSession(session.id, window.screenX + window.outerWidth / 2, window.screenY + 80);
   }
 }
 
@@ -5066,6 +5121,8 @@ function openSerialConsole(nodeName) {
   const id = sessionIdFor(nodeName, "serial");
   const session = ensureSessionPanel(id, nodeName, `${nodeName} (serial)`);
   switchToSession(id);
+  const wasNew = !session.kind;
+  surfaceSession(session, wasNew);
   if (session.kind && session.ws && session.ws.readyState !== WebSocket.CLOSED) return;
   session.kind = "terminal";
   setSessionStatus(session, "connecting…");
@@ -5079,6 +5136,7 @@ function openConsole(nodeName) {
   const id = sessionIdFor(nodeName, "console");
   const session = ensureSessionPanel(id, nodeName, nodeName);
   switchToSession(id);
+  surfaceSession(session, !session.kind);
   if (session.kind) return; // already open or opening - just switched to its tab
   session.kind = "terminal";
   setSessionStatus(session, "connecting…");
@@ -5097,6 +5155,7 @@ async function openVmScreen(nodeName, opts) {
   } else {
     session = ensureSessionPanel(id, nodeName, `${nodeName} (screen)`);
     switchToSession(id);
+    surfaceSession(session, !session.kind);
     if (session.kind) return;
     session.kind = "screen";
     session.screenWanted = true;
@@ -5237,6 +5296,17 @@ document.getElementById("reset-labels-btn").addEventListener("click", async () =
 document.getElementById("settings-port-labels").addEventListener("change", (evt) => {
   showPortLabels = evt.target.checked;
   renderCanvas();
+});
+
+const consoleWindowToggle = document.getElementById("settings-console-window");
+consoleWindowToggle.checked = openConsolesInWindow;
+consoleWindowToggle.addEventListener("change", (evt) => {
+  openConsolesInWindow = evt.target.checked;
+  try {
+    localStorage.setItem("ginnungagap.openConsolesInWindow", openConsolesInWindow ? "1" : "0");
+  } catch (err) {
+    // not remembered, still in effect until the page is reloaded
+  }
 });
 
 document.getElementById("settings-disruption-warning").addEventListener("change", (evt) => {
@@ -5686,9 +5756,26 @@ document.getElementById("push-btn").addEventListener("click", async () => {
 // open xterm.js terminal/VNC screen and its WebSocket keeps running
 // exactly as it was, uninterrupted. Moves it back into the right
 // panel automatically if that window is closed.
+function popInPanel() {
+  const win = poppedOutWindow;
+  if (!win) return;
+  const home = document.getElementById("console-area");
+  for (const id of POP_OUT_PARTS) {
+    const part = win.document.getElementById(id);
+    if (part) home.appendChild(part);
+  }
+  document.getElementById("right-panel").classList.remove("popped-out");
+  const button = document.getElementById("popout-btn");
+  button.textContent = "Pop out";
+  button.title = "Pop out (Shift-click: a new browser tab)";
+  poppedOutWindow = null;
+}
+
 document.getElementById("popout-btn").addEventListener("click", (evt) => {
   if (poppedOutWindow && !poppedOutWindow.closed) {
-    poppedOutWindow.focus();
+    const win = poppedOutWindow;
+    popInPanel();
+    win.close();
     return;
   }
   const win = openPopOut(evt.shiftKey, "width=900,height=650");
@@ -5706,15 +5793,12 @@ document.getElementById("popout-btn").addEventListener("click", (evt) => {
   poppedOutWindow = win;
   // the side panel is left with the device list only
   document.getElementById("right-panel").classList.add("popped-out");
+  const button = document.getElementById("popout-btn");
+  button.textContent = "Pop in";
+  button.title = "Put the Console/Screen view back into the side panel";
 
   win.addEventListener("beforeunload", () => {
-    const home = document.getElementById("console-area");
-    for (const id of POP_OUT_PARTS) {
-      const part = win.document.getElementById(id);
-      if (part) home.appendChild(part);
-    }
-    document.getElementById("right-panel").classList.remove("popped-out");
-    poppedOutWindow = null;
+    if (poppedOutWindow === win) popInPanel();
   });
 });
 

@@ -590,6 +590,24 @@
   .session-tab.active { background: var(--panel-2); color: var(--text); }
   .session-tab { touch-action: none; user-select: none; }
   .session-tab.dragging-out { opacity: 0.5; }
+  .popout-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px 5px 12px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .popout-pop-in, #popout-btn { cursor: pointer; }
+  .popout-pop-in {
+    background: none;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+  }
+  .popout-pop-in:hover { border-color: var(--accent); color: var(--accent); }
   .session-tab.popped { font-style: italic; }
   .session-tab.popped .session-tab-label::after { content: " \2197"; }
   #tab-dragout-hint {

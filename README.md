@@ -54,6 +54,11 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   the connection runs on; closing the window brings the session back into its tab, closing the session closes its window,
   and a popped-out tab is marked with an arrow and focuses its window when clicked. The browser must allow the pop-up
   (the drag release counts as the user gesture); otherwise a notice says so and nothing is moved.
+  Dragging a tab sideways along the row changes the order of the tabs (in the panel and in the pop-out window alike).
+  A popped-out session has a **Pop in** button in its window, and the whole-panel button reads **Pop in** while the panel
+  is out; both put the live view back (closing the window does the same). **Settings > Open consoles in their own window**
+  (remembered in the browser) makes a console, screen or serial line that is opened from a device's menu appear straight in a
+  window of its own instead of a tab.
 - **Serial console of an ESXi VM** (`app/serial_console.py`): once a VM has its network serial port (see "Serial console
   agent" below), its popup's **Serial console** entry opens the serial line in the same terminal panel
   (`/ws/serial/{name}`). The ESXi serial port takes one client at a time, so a second console of the same VM is refused,
