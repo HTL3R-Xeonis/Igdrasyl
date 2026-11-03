@@ -252,7 +252,9 @@ def test_the_tab_row_can_be_reordered_and_a_session_can_be_popped_back_in():
     # the pop-out window gets the events of its own tabs
     assert "tab.ownerDocument.defaultView" in APP_JS
     assert 'popIn.textContent = "Pop in"' in APP_JS
-    assert 'button.textContent = "Pop in"' in APP_JS
+    assert "showPopOutState(true)" in APP_JS and "showPopOutState(false)" in APP_JS
+    # the button moves into the pop-out window with the tab row, so it must not be looked up by id while it is out
+    assert 'const popOutButton = document.getElementById("popout-btn")' in APP_JS
     assert "function popInPanel" in APP_JS
 
 

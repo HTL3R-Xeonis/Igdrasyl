@@ -5756,6 +5756,15 @@ document.getElementById("push-btn").addEventListener("click", async () => {
 // open xterm.js terminal/VNC screen and its WebSocket keeps running
 // exactly as it was, uninterrupted. Moves it back into the right
 // panel automatically if that window is closed.
+// The button moves into the pop-out window with the tab row, so it is held here instead of looked up by id.
+const popOutButton = document.getElementById("popout-btn");
+function showPopOutState(out) {
+  popOutButton.textContent = out ? "\u29c9 Pop in" : "\u29c9 Pop out";
+  popOutButton.title = out
+    ? "Put the Console/Screen view back into the side panel"
+    : "Pop this panel out into its own window (Shift-click: a new browser tab)";
+}
+
 function popInPanel() {
   const win = poppedOutWindow;
   if (!win) return;
@@ -5765,13 +5774,11 @@ function popInPanel() {
     if (part) home.appendChild(part);
   }
   document.getElementById("right-panel").classList.remove("popped-out");
-  const button = document.getElementById("popout-btn");
-  button.textContent = "Pop out";
-  button.title = "Pop out (Shift-click: a new browser tab)";
+  showPopOutState(false);
   poppedOutWindow = null;
 }
 
-document.getElementById("popout-btn").addEventListener("click", (evt) => {
+popOutButton.addEventListener("click", (evt) => {
   if (poppedOutWindow && !poppedOutWindow.closed) {
     const win = poppedOutWindow;
     popInPanel();
@@ -5793,9 +5800,7 @@ document.getElementById("popout-btn").addEventListener("click", (evt) => {
   poppedOutWindow = win;
   // the side panel is left with the device list only
   document.getElementById("right-panel").classList.add("popped-out");
-  const button = document.getElementById("popout-btn");
-  button.textContent = "Pop in";
-  button.title = "Put the Console/Screen view back into the side panel";
+  showPopOutState(true);
 
   win.addEventListener("beforeunload", () => {
     if (poppedOutWindow === win) popInPanel();
