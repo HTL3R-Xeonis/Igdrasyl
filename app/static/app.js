@@ -164,7 +164,7 @@ function startTabDrag(evt, id) {
       document.body.appendChild(hint);
       tab.classList.add("dragging-out");
     }
-    hint.textContent = state.outside ? "Release to open in its own window" : "Drag out of the panel to open in its own window";
+    hint.textContent = state.outside ? "Release to open in its own window (Shift: new browser tab)" : "Drag out of the panel to open in its own window (Shift: new browser tab)";
     hint.classList.toggle("will-pop", state.outside);
     hint.style.left = `${Math.max(0, Math.min(e.clientX + 14, window.innerWidth - 300))}px`;
     hint.style.top = `${Math.max(0, Math.min(e.clientY + 14, window.innerHeight - 30))}px`;
@@ -187,7 +187,7 @@ function startTabDrag(evt, id) {
     if (!state.dragging) return;
     suppressTabClick = true;
     setTimeout(() => { suppressTabClick = false; }, 0);
-    if (!cancelled && state.outside) popOutSession(id, e.screenX, e.screenY);
+    if (!cancelled && state.outside) popOutSession(id, e.screenX, e.screenY, e.shiftKey);
   };
   const onUp = (e) => finish(e, false);
   const onCancel = (e) => finish(e, true);
@@ -200,7 +200,14 @@ function startTabDrag(evt, id) {
 
 // Opens one session in its own browser window by moving its live panel there (not a copy), so the terminal or screen and
 // its connection keep running uninterrupted. Closing that window brings the session back into its tab.
-function popOutSession(id, screenX, screenY) {
+// A pop-out opens as its own window; with `asTab` as a new browser tab instead (window.open without window features).
+// Careful with the tab: the terminal and the VNC screen draw with requestAnimationFrame of THIS page, which a browser pauses
+// while this page is a background tab - so a popped-out tab can show a frozen screen. A separate window has no such problem.
+function openPopOut(asTab, features) {
+  return asTab ? window.open("", "_blank") : window.open("", "_blank", features);
+}
+
+function popOutSession(id, screenX, screenY, asTab = false) {
   const session = sessions.get(id);
   if (!session) return;
   if (isPopped(session)) {
@@ -209,13 +216,12 @@ function popOutSession(id, screenX, screenY) {
   }
   const width = 900;
   const height = 650;
-  const win = window.open(
-    "",
-    "_blank",
+  const win = openPopOut(
+    asTab,
     `popup=yes,width=${width},height=${height},left=${Math.max(0, Math.round((screenX || 0) - width / 2))},top=${Math.max(0, Math.round((screenY || 0) - 20))}`,
   );
   if (!win) {
-    showAlert("Couldn't open a new window - check your browser's popup blocker.");
+    showAlert("Couldn't open a new window or tab - check your browser's popup blocker.");
     return;
   }
   win.document.head.innerHTML = document.head.innerHTML; // first: it also carries this page's own <title>
@@ -5651,15 +5657,15 @@ document.getElementById("push-btn").addEventListener("click", async () => {
 // exactly as it was, uninterrupted. Moves it back into the right
 // panel automatically if that window is closed.
 let poppedOutWindow = null;
-document.getElementById("popout-btn").addEventListener("click", () => {
+document.getElementById("popout-btn").addEventListener("click", (evt) => {
   if (poppedOutWindow && !poppedOutWindow.closed) {
     poppedOutWindow.focus();
     return;
   }
   const consoleArea = document.getElementById("console-area");
-  const win = window.open("", "_blank", "width=900,height=650");
+  const win = openPopOut(evt.shiftKey, "width=900,height=650");
   if (!win) {
-    showAlert("Couldn't open a new window - check your browser's popup blocker.");
+    showAlert("Couldn't open a new window or tab - check your browser's popup blocker.");
     return;
   }
   win.document.head.innerHTML = document.head.innerHTML; // first: it also carries this page's own <title>
@@ -5669,7 +5675,7 @@ document.getElementById("popout-btn").addEventListener("click", () => {
 
   const placeholder = document.createElement("div");
   placeholder.id = "console-area-placeholder";
-  placeholder.textContent = "Console/Screen View is popped out into its own window.";
+  placeholder.textContent = "Console/Screen View is popped out into its own window or tab.";
   document.getElementById("right-panel").appendChild(placeholder);
 
   win.addEventListener("beforeunload", () => {

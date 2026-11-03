@@ -120,3 +120,35 @@ def test_the_window_title_is_set_after_the_head_is_copied():
         at = APP_JS.index(marker)
         before = APP_JS[max(0, at - 220) : at]
         assert "head.innerHTML = document.head.innerHTML" in before, marker
+
+
+def _open_pop_out(as_tab):
+    """Runs app.js's openPopOut under node with a window.open that records its arguments."""
+    start = APP_JS.index("function openPopOut")
+    end = APP_JS.index("function popOutSession")
+    script = (
+        "const calls = [];\n"
+        "const window = { open: (...args) => { calls.push(args); return {}; } };\n"
+        + APP_JS[start:end]
+        + f"\nopenPopOut({json.dumps(as_tab)}, 'width=900,height=650');\nconsole.log(JSON.stringify(calls));"
+    )
+    result = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+@needs_node
+def test_a_pop_out_is_a_window_unless_a_browser_tab_is_asked_for():
+    assert _open_pop_out(False) == [["", "_blank", "width=900,height=650"]]
+    # no window features at all: that is how a browser is told to open a tab
+    assert _open_pop_out(True) == [["", "_blank"]]
+
+
+def test_shift_chooses_the_tab_for_both_ways_to_pop_out():
+    assert "popOutSession(id, e.screenX, e.screenY, e.shiftKey)" in APP_JS
+    assert 'openPopOut(evt.shiftKey, "width=900,height=650")' in APP_JS
+    html = (
+        Path(__file__).resolve().parent.parent / "app" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert "Shift-click: a new browser tab" in html
