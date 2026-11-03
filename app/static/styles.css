@@ -920,7 +920,6 @@
   }
   #landing-header { text-align: center; margin-bottom: 36px; }
   #landing-header h1 { margin: 0 0 6px; font-size: 22px; }
-  .landing-subtitle { margin: 0; font-size: 13px; color: var(--dim); }
   #landing-host-grid, #landing-actions-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -1537,7 +1536,6 @@ button.toolbar-btn.primary:hover:not(:disabled) {
   letter-spacing: -.02em;
   color: #f2f5f8;
 }
-.landing-subtitle { color: #9fa9b5; }
 #landing-host-grid { gap: 8px; }
 .landing-host-tile {
   border: 1px solid #454d57;
@@ -1726,3 +1724,17 @@ input:focus, select:focus, textarea:focus {
 .node-note-mark rect { fill: #f5d76e; stroke: #a8892a; stroke-width: 1; }
 .node-note-mark line { stroke: #7a6420; stroke-width: 1; }
 .node-note-mark { pointer-events: none; }
+
+/* Landing page: the page uses the height of the window instead of sitting at the top with an empty lower half. The buttons keep
+   their size; the space between the parts grows with the height of the window and the footer links sit at the bottom. */
+#landing-view {
+  box-sizing: border-box;
+  padding-top: clamp(24px, 7vh, 80px);
+  padding-bottom: clamp(20px, 4vh, 40px);
+}
+#landing-header { margin-bottom: clamp(26px, 8vh, 90px); }
+#landing-host-grid { gap: clamp(8px, 1.6vh, 16px); }
+#open-project-library { margin-top: clamp(12px, 3vh, 32px); }
+.landing-section-label { margin-top: clamp(24px, 9vh, 100px); }
+#landing-actions-grid { gap: clamp(10px, 2vh, 20px); }
+#landing-footer-links { margin-top: auto; padding-top: 20px; }

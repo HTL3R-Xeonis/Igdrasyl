@@ -31,8 +31,8 @@ def test_landing_header_shows_the_name_and_stays_minimal():
     markup = _landing_markup()
     assert "<h1>Ginnungagap</h1>" in markup
     assert "TopologyOperator" not in markup
-    # one short line under the name, no tagline or section descriptions
-    assert markup.count('class="landing-subtitle"') == 1
+    # only the name: no line under it, no tagline or section descriptions (removed on request)
+    assert "landing-subtitle" not in markup
     assert "landing-section-hint" not in markup and "landing-tagline" not in markup
 
 
