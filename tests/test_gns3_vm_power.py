@@ -242,3 +242,13 @@ def test_both_banners_say_what_the_start_is_doing_instead_of_the_old_problem_tex
     assert "text && gns3VmProgress ? gns3VmProgress : text" in js
     assert "gns3VmProgress || `Template service problem" in js
     assert "gns3VmProgress = null;" in js
+
+
+def test_check_again_stays_silent_when_a_service_cannot_be_asked():
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+    assert "could not be asked to read their sources again" not in js
+    assert "Could not ask the template services" not in js

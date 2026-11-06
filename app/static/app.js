@@ -683,11 +683,9 @@ document.getElementById("template-refresh-btn").addEventListener("click", async 
   btn.disabled = true;
   btn.textContent = "Checking…";
   try {
-    const result = await fetch("/templates/refresh", { method: "POST" }).then(r => r.json());
+    // Best effort: a service that cannot be asked (an older one) is simply checked again as it is - no message needed.
+    const result = await fetch("/templates/refresh", { method: "POST" }).then(r => r.json()).catch(() => ({}));
     if (result.requested) await refreshTemplateService(false);
-    else setMenubarMessage("The template services could not be asked to read their sources again - they do it on their own timer.");
-  } catch (err) {
-    setMenubarMessage(`Could not ask the template services: ${err}`, { error: true });
   } finally {
     btn.disabled = false;
     btn.textContent = "Check again";
