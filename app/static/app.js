@@ -614,7 +614,11 @@ async function refreshTemplateService(requestFirst = true) {
     if (attempt % 4 === 0 && (requestFirst || attempt > 0)) await fetch("/templates/refresh", { method: "POST" }).catch(() => {});
     await new Promise(resolve => setTimeout(resolve, 6000));
     const health = await fetch("/templates/health").then(r => r.json()).catch(() => null);
-    if (health && health.ok) return;
+    if (health && health.ok) {
+      // The startup warning of the app itself (e.g. "Image ... not found") was made while the list was empty: re-resolve it.
+      await fetch("/reload", { method: "POST" }).catch(() => {});
+      return;
+    }
   }
 }
 function gns3VmButtonLabel(action) {
