@@ -230,3 +230,15 @@ def test_template_health_says_whether_asking_for_a_refresh_can_help(monkeypatch)
     assert run(None, None)["refreshable"] is False  # nothing answered, nothing to ask
     healthy = run(3, 4)
     assert healthy["ok"] is True and healthy["refreshable"] is False
+
+
+def test_both_banners_say_what_the_start_is_doing_instead_of_the_old_problem_text():
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+    assert "setGns3VmProgress(" in js
+    assert "text && gns3VmProgress ? gns3VmProgress : text" in js
+    assert "gns3VmProgress || `Template service problem" in js
+    assert "gns3VmProgress = null;" in js

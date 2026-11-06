@@ -571,7 +571,7 @@ function apiPath(path) {
 function setWarningBanner(text, opts = {}) {
   const banner = document.getElementById("warning-banner");
   const retryBtn = document.getElementById("warning-retry-btn");
-  document.getElementById("warning-banner-text").textContent = text;
+  document.getElementById("warning-banner-text").textContent = text && gns3VmProgress ? gns3VmProgress : text;
   banner.hidden = !text;
   retryBtn.hidden = !text || !opts.retryable;
   // Offered when the selected library project isn't deployed to GNS3 yet.
@@ -621,6 +621,15 @@ async function refreshTemplateService(requestFirst = true) {
     }
   }
 }
+// While a GNS3 VM start runs, both banners say what is going on instead of the (by then outdated) problem text.
+let gns3VmProgress = null;
+function setGns3VmProgress(text) {
+  gns3VmProgress = text;
+  for (const id of ["warning-banner-text", "template-banner-text"]) {
+    const el = document.getElementById(id);
+    if (text && el && el.textContent) el.textContent = text;
+  }
+}
 function gns3VmButtonLabel(action) {
   return action === "restart" ? "Restart GNS3 VM" : action === "deploy" ? "Deploy GNS3 VM…" : "Start GNS3 VM";
 }
@@ -637,6 +646,9 @@ async function startGns3Vm(vm, btn) {
     { confirmLabel: "Restart", danger: true })) return;
   btn.disabled = true;
   btn.textContent = vm.action === "restart" ? "Restarting…" : "Starting…";
+  setGns3VmProgress(
+    `${vm.action === "restart" ? "Restarting" : "Starting"} the GNS3 VM "${vm.name}" - waiting for VMware Tools to report ` +
+    "its address (a minute or two)…");
   let note = null;
   let failed = false;
   try {
@@ -651,12 +663,16 @@ async function startGns3Vm(vm, btn) {
       resolved = !!state.gns3_vm_ip;
     }
     if (!resolved) note = "The GNS3 VM was started but has no address yet - use Retry in a moment.";
-    else await refreshTemplateService();
+    else {
+      setGns3VmProgress("The GNS3 VM is up - waiting for the template service to list its templates…");
+      await refreshTemplateService();
+    }
   } catch (err) {
     note = `Could not start the GNS3 VM: ${err.message || err}`;
     failed = true;
   } finally {
     btn.disabled = false;
+    gns3VmProgress = null;
   }
   if (!document.getElementById("app-view").hidden) await loadCanvas().catch(() => {});
   await refreshTemplateBanner();
@@ -5902,7 +5918,7 @@ async function refreshTemplateBanner() {
     const resp = await fetch("/templates/health");
     if (!resp.ok) return;
     const health = await resp.json();
-    document.getElementById("template-banner-text").textContent = health.ok ? "" : `Template service problem: ${health.problems.join(" ")}`;
+    document.getElementById("template-banner-text").textContent = health.ok ? "" : gns3VmProgress || `Template service problem: ${health.problems.join(" ")}`;
     banner.hidden = health.ok;
     // Offered while the GNS3 VM is switched off (see app/gns3_vm_power.py).
     const vmBtn = document.getElementById("template-gns3vm-btn");
