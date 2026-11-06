@@ -252,3 +252,13 @@ def test_check_again_stays_silent_when_a_service_cannot_be_asked():
     ).read_text(encoding="utf-8")
     assert "could not be asked to read their sources again" not in js
     assert "Could not ask the template services" not in js
+
+
+def test_the_status_line_reads_connected_colon_nodes_with_the_running_count_in_brackets():
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+    assert '${designMode ? "Design" : "Connected"}: ${parts.join(", ")}' in js
+    assert "` (${running} running)`" in js

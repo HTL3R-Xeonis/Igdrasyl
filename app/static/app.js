@@ -2165,8 +2165,8 @@ function updateStatusBar(connectionOk = statusConnectionOk) {
   const nodes = Object.values(nodesData);
   const running = nodes.filter(isNodeRunning).length;
   const text = document.getElementById("status-connection-text");
-  const parts = [`${nodes.length} node${nodes.length === 1 ? "" : "s"}`];
-  if (!designMode) parts.push(`${running} running`);
+  // "Connected: 6 nodes (4 running)" - the running count belongs to the node count, the rest follows after a comma
+  const parts = [`${nodes.length} node${nodes.length === 1 ? "" : "s"}${designMode ? "" : ` (${running} running)`}`];
   const links = Object.values(liveLinksData);
   const capturing = designMode ? 0 : links.filter((l) => l.capturing).length;
   const impaired = designMode ? 0 : links.filter((l) => l.suspended || l.delay_ms || l.loss_percent || l.corrupt_percent).length;
@@ -2174,7 +2174,7 @@ function updateStatusBar(connectionOk = statusConnectionOk) {
   if (impaired) parts.push(`${impaired} link${impaired === 1 ? "" : "s"} with conditions`);
   if (selectedNames.size > 1) parts.push(`${selectedNames.size} selected`);
   text.textContent = connectionOk
-    ? `${designMode ? "Design" : "Connected"} · ${parts.join(", ")}`
+    ? `${designMode ? "Design" : "Connected"}: ${parts.join(", ")}`
     : "Disconnected - failed to reach the server";
   const zoomPercent = Math.round((1600 / viewBoxState.w) * 100);
   document.getElementById("zoom-readout").textContent = `${zoomPercent}%`;
