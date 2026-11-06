@@ -58,6 +58,15 @@ def _require_configured() -> None:
         )
 
 
+def is_configured() -> bool:
+    """Whether a GNS3 VM template and a management network are selected, i.e. whether a deploy can start."""
+    try:
+        _require_configured()
+    except NotConfigured:
+        return False
+    return True
+
+
 def auto_deploy_if_missing(app: FastAPI) -> None:
     """
     Deploys the configured GNS3 VM from its OVA, but ONLY when it's

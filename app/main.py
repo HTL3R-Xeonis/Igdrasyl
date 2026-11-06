@@ -452,7 +452,22 @@ def templates_health() -> dict[str, Any]:
     exist) works - see app/template_health.py. Cheap and cached for a few
     seconds, the UI polls it.
     """
-    return public_text.redact_paths(template_health.check())
+    result = template_health.check()
+    if not result["ok"]:
+        # A switched-off GNS3 VM is the usual reason the GNS3 template list is empty - the banner offers to start it.
+        result = {**result, "gns3_vm": gns3_vm_power.status(app)}
+    return public_text.redact_paths(result)
+
+
+@app.post("/templates/refresh")
+def templates_refresh() -> dict[str, Any]:
+    """
+    Makes the template services read their sources again right now - the banner's "Check again" button and, once a started
+    GNS3 VM has an address, the page call this so the templates are listed again without waiting for the services' next
+    timer run. "requested" is true when at least one service took the request.
+    """
+    result = template_health.request_refresh()
+    return {"requested": any(value is True for value in result.values()), **result}
 
 
 @app.get("/topology")

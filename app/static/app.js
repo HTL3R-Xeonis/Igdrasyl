@@ -585,10 +585,11 @@ function setWarningBanner(text, opts = {}) {
   warningGns3Vm = text && opts.gns3Vm && opts.gns3Vm.action ? opts.gns3Vm : null;
   gns3VmBtn.hidden = !warningGns3Vm;
   if (warningGns3Vm && !gns3VmBtn.disabled) {
-    gns3VmBtn.textContent = warningGns3Vm.action === "restart" ? "Restart GNS3 VM" : "Start GNS3 VM";
+    gns3VmBtn.textContent = gns3VmButtonLabel(warningGns3Vm.action);
   }
 }
 let warningGns3Vm = null;        // {name, power_state, action}
+let templateGns3Vm = null;       // same, for the template-service banner
 let warningDeployProject = null; // {id, name, filename}
 let warningHeldProject = null;   // {id, name, host, held_at, ...}
 
@@ -606,10 +607,27 @@ document.getElementById("warning-retry-btn").addEventListener("click", async () 
     btn.textContent = "Retry";
   }
 });
-document.getElementById("warning-gns3vm-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("warning-gns3vm-btn");
-  const vm = warningGns3Vm;
+// Asks the template service to read the GNS3 servers again and waits (up to a minute) until it lists templates; the
+// GNS3 service inside a freshly started VM can need a few more seconds than its address, so the request is repeated.
+async function refreshTemplateService(requestFirst = true) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (attempt % 4 === 0 && (requestFirst || attempt > 0)) await fetch("/templates/refresh", { method: "POST" }).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 6000));
+    const health = await fetch("/templates/health").then(r => r.json()).catch(() => null);
+    if (health && health.ok) return;
+  }
+}
+function gns3VmButtonLabel(action) {
+  return action === "restart" ? "Restart GNS3 VM" : action === "deploy" ? "Deploy GNS3 VM…" : "Start GNS3 VM";
+}
+// Starts (or, for a running VM without an address, restarts) the GNS3 VM; `btn` is the clicked banner button.
+async function startGns3Vm(vm, btn) {
   if (!vm) return;
+  // A VM that does not exist is deployed from its template: the File menu's own flow (confirmations, progress) does it.
+  if (vm.action === "deploy") {
+    document.getElementById("deploy-gns3-vm-btn").click();
+    return;
+  }
   if (vm.action === "restart" && !await showConfirm(
     `Restart the GNS3 VM "${vm.name}"? It is on but reports no address. A reset stops everything running inside it.`,
     { confirmLabel: "Restart", danger: true })) return;
@@ -629,15 +647,35 @@ document.getElementById("warning-gns3vm-btn").addEventListener("click", async ()
       resolved = !!state.gns3_vm_ip;
     }
     if (!resolved) note = "The GNS3 VM was started but has no address yet - use Retry in a moment.";
+    else await refreshTemplateService();
   } catch (err) {
     note = `Could not start the GNS3 VM: ${err.message || err}`;
     failed = true;
   } finally {
     btn.disabled = false;
   }
-  await loadCanvas().catch(() => {});
+  if (!document.getElementById("app-view").hidden) await loadCanvas().catch(() => {});
+  await refreshTemplateBanner();
   if (note) setMenubarMessage(note, { error: failed });
+}
+document.getElementById("template-refresh-btn").addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const result = await fetch("/templates/refresh", { method: "POST" }).then(r => r.json());
+    if (result.requested) await refreshTemplateService(false);
+    else setMenubarMessage("The template services could not be asked to read their sources again - they do it on their own timer.");
+  } catch (err) {
+    setMenubarMessage(`Could not ask the template services: ${err}`, { error: true });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Check again";
+    await refreshTemplateBanner();
+  }
 });
+document.getElementById("warning-gns3vm-btn").addEventListener("click", (event) => startGns3Vm(warningGns3Vm, event.currentTarget));
+document.getElementById("template-gns3vm-btn").addEventListener("click", (event) => startGns3Vm(templateGns3Vm, event.currentTarget));
 function confirmDisruption(message, opts) {
   if (designMode || !showDisruptionWarnings) return Promise.resolve(true);
   return showConfirm(message, opts);
@@ -5860,8 +5898,18 @@ async function refreshTemplateBanner() {
     const resp = await fetch("/templates/health");
     if (!resp.ok) return;
     const health = await resp.json();
-    banner.textContent = health.ok ? "" : `Template service problem: ${health.problems.join(" ")}`;
+    document.getElementById("template-banner-text").textContent = health.ok ? "" : `Template service problem: ${health.problems.join(" ")}`;
     banner.hidden = health.ok;
+    // Offered while the GNS3 VM is switched off (see app/gns3_vm_power.py).
+    const vmBtn = document.getElementById("template-gns3vm-btn");
+    templateGns3Vm = !health.ok && health.gns3_vm && health.gns3_vm.action ? health.gns3_vm : null;
+    vmBtn.hidden = !templateGns3Vm;
+    if (templateGns3Vm && !vmBtn.disabled) {
+      vmBtn.textContent = gns3VmButtonLabel(templateGns3Vm.action);
+    }
+    // Offered while at least one template service answers: they read their sources only on a timer.
+    const refreshBtn = document.getElementById("template-refresh-btn");
+    refreshBtn.hidden = health.ok || !health.refreshable;
   } catch (err) {
     // Backend not reachable right now - the other screens already say so.
   }

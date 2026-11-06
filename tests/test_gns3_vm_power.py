@@ -52,10 +52,26 @@ def test_status_never_connects_to_esxi(app_state):
     esxi.get_vm.assert_not_called()
 
 
-def test_status_is_none_when_the_vm_is_missing_or_unreadable(app_state):
+def test_status_offers_deploy_for_a_missing_vm_only_when_a_template_is_selected(
+    app_state,
+):
+    from unittest.mock import patch
+
     esxi = _esxi(app_state, "poweredOff")
     esxi.get_vm.return_value = None
-    assert gns3_vm_power.status(_app()) is None
+    with patch("app.gns3_vm_deploy_jobs.is_configured", return_value=True):
+        result = gns3_vm_power.status(_app())
+    assert result == {
+        "name": Settings.ESXI.GNS3_VM_NAME,
+        "power_state": None,
+        "action": "deploy",
+    }
+    with patch("app.gns3_vm_deploy_jobs.is_configured", return_value=False):
+        assert gns3_vm_power.status(_app())["action"] is None
+
+
+def test_status_is_none_when_the_state_is_unreadable(app_state):
+    esxi = _esxi(app_state, "poweredOff")
     esxi.get_vm.side_effect = RuntimeError("session lost")
     assert gns3_vm_power.status(_app()) is None
 
@@ -133,3 +149,84 @@ def test_the_banner_offers_a_start_button_for_the_gns3_vm():
     assert 'id="warning-gns3vm-btn"' in html
     assert 'fetch("/gns3-vm/start", { method: "POST" })' in js
     assert "gns3Vm: designMode ? null : health.gns3_vm" in js
+
+
+def test_template_health_carries_the_power_state_only_when_unhealthy(client, app_state):
+    from unittest.mock import patch
+
+    _esxi(app_state, "poweredOff")
+    app_state.gns3_vm_ip = None
+    broken = {"ok": False, "problems": ["The GNS3 template service lists 0 templates."]}
+    with patch("app.main.template_health.check", return_value=broken):
+        body = client.get("/templates/health").json()
+    assert body["gns3_vm"]["action"] == "start"
+
+    healthy = {"ok": True, "problems": []}
+    with patch("app.main.template_health.check", return_value=healthy):
+        assert "gns3_vm" not in client.get("/templates/health").json()
+
+
+def test_the_template_banner_offers_the_same_button():
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parent.parent / "app" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "app.js").read_text(encoding="utf-8")
+    assert 'id="template-gns3vm-btn"' in html
+    assert "startGns3Vm(templateGns3Vm" in js
+    assert "health.gns3_vm" in js
+
+
+def test_template_refresh_asks_both_services_and_forgets_the_cached_health(client):
+    from unittest.mock import patch
+
+    response = MagicMock(status_code=202)
+    with (
+        patch("app.template_health.requests.post", return_value=response) as post,
+        patch("app.template_health.invalidate") as invalidate,
+    ):
+        body = client.post("/templates/refresh").json()
+    assert body == {"requested": True, "esxi": True, "gns3": True}
+    urls = [call.args[0] for call in post.call_args_list]
+    assert len(urls) == 2 and all(url.endswith("/api/refresh") for url in urls)
+    invalidate.assert_called_once()
+
+
+def test_template_refresh_tells_an_older_service_from_an_unreachable_one(client):
+    from unittest.mock import patch
+
+    import requests
+
+    with patch(
+        "app.template_health.requests.post", return_value=MagicMock(status_code=404)
+    ):
+        body = client.post("/templates/refresh").json()
+    assert body == {"requested": False, "esxi": False, "gns3": False}
+
+    answers = [MagicMock(status_code=202), requests.ConnectionError("down")]
+    with patch("app.template_health.requests.post", side_effect=answers):
+        body = client.post("/templates/refresh").json()
+    assert body == {"requested": True, "esxi": True, "gns3": None}
+
+
+def test_template_health_says_whether_asking_for_a_refresh_can_help(monkeypatch):
+    from app import template_health
+
+    def run(esxi, gns3):
+        answers = iter([esxi, gns3])
+
+        def fake_count(label, url, problems):
+            count = next(answers)
+            if not count:
+                problems.append(f"{label} problem")
+            return count
+
+        monkeypatch.setattr(Settings.API, "LITERAL_API_VALUES", False)
+        monkeypatch.setattr(template_health, "_template_count", fake_count)
+        monkeypatch.setattr(template_health, "_gns3_server_problems", lambda *a: None)
+        return template_health._run_check()
+
+    assert run(3, 0)["refreshable"] is True  # a service answered but lists nothing
+    assert run(None, None)["refreshable"] is False  # nothing answered, nothing to ask
+    healthy = run(3, 4)
+    assert healthy["ok"] is True and healthy["refreshable"] is False

@@ -1,8 +1,9 @@
 """
-Power state of the configured GNS3 VM, for the warning banner's Start / Restart button.
+State of the configured GNS3 VM, for the warning banners' Start / Restart / Deploy button.
 
 A GNS3 VM that is switched off (after an ESXi host restart nothing powers it on by itself) makes everything that needs
-GNS3 fail with a message that only says "start it". status() tells the page whether that is the case, start() does it.
+GNS3 fail with a message that only says "start it". status() tells the page whether that is the case (or that the VM is missing
+altogether and could be deployed from its template), start() powers it on or resets it.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ from typing import Any
 from fastapi import FastAPI
 from loguru import logger
 from src.settings import Settings
+
+from app import gns3_vm_deploy_jobs
 
 _OFF_STATES = ("poweredOff", "suspended")
 
@@ -34,14 +37,22 @@ def _action(power_state: str, has_ip: bool) -> str | None:
 def status(app: FastAPI) -> dict[str, Any] | None:
     """
     {"name", "power_state", "action"} for the configured GNS3 VM, where action is "start" (it is off), "restart" (it is on
-    but reports no address) or None (nothing to offer). None when ESXi is not connected (never waits for a connect: this
-    is read by the polled /health), the VM does not exist or the state can't be read.
+    but reports no address), "deploy" (it does not exist on the host and a template for a new one is selected) or None
+    (nothing to offer). None when ESXi is not connected (never waits for a connect: this is read by the polled /health) or
+    the state can't be read.
     """
-    connection = app.state.esxi_connection
+    connection = getattr(app.state, "esxi_connection", None)
     if not getattr(connection, "connected", False):
         return None
     try:
-        power_state = str(_vm(app).runtime.powerState)
+        vm = connection.get_vm(Settings.ESXI.GNS3_VM_NAME)
+        if vm is None:
+            return {
+                "name": Settings.ESXI.GNS3_VM_NAME,
+                "power_state": None,
+                "action": "deploy" if gns3_vm_deploy_jobs.is_configured() else None,
+            }
+        power_state = str(vm.runtime.powerState)
     except Exception as exc:
         logger.debug(f"GNS3 VM power state not readable: {exc}")
         return None
@@ -50,7 +61,7 @@ def status(app: FastAPI) -> dict[str, Any] | None:
     return {
         "name": Settings.ESXI.GNS3_VM_NAME,
         "power_state": power_state,
-        "action": _action(power_state, bool(app.state.gns3_vm_ip)),
+        "action": _action(power_state, bool(getattr(app.state, "gns3_vm_ip", None))),
     }
 
 

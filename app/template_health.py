@@ -89,6 +89,7 @@ def _run_check() -> dict[str, Any]:
         return {
             "ok": True,
             "problems": [],
+            "refreshable": False,
             "esxi_templates": None,
             "gns3_templates": None,
             "note": "literal template values are configured, the services are not asked",
@@ -103,6 +104,8 @@ def _run_check() -> dict[str, Any]:
     result = {
         "ok": not problems,
         "problems": problems,
+        # At least one service answered, so asking it to read its sources again can help
+        "refreshable": bool(problems) and (esxi is not None or gns3 is not None),
         "esxi_templates": esxi,
         "gns3_templates": gns3,
         "note": None,
@@ -122,6 +125,39 @@ def check(force: bool = False) -> dict[str, Any]:
         result = _run_check()
         _cache = (now, result)
         return result
+
+
+def invalidate() -> None:
+    """Forget the cached result, so the next check() asks the services again."""
+    global _cache
+    with _lock:
+        _cache = None
+
+
+def _request_refresh(base_url: str) -> bool | None:
+    """True when the service took the request, False when it has no such endpoint or is not set up for it, None when unreachable."""
+    try:
+        response = requests.post(
+            f"{base_url.rstrip('/')}/api/refresh", timeout=_TIMEOUT_SECONDS
+        )
+    except requests.RequestException:
+        return None
+    return response.status_code == 202
+
+
+def request_refresh() -> dict[str, bool | None]:
+    """
+    Asks both template services to read their sources again right now (POST /api/refresh) instead of at their next timer
+    run: the ESXi one re-reads the template share, the GNS3 one asks its GNS3 servers.
+    :returns: {"esxi", "gns3"} - True asked, False the service has no such endpoint (an older one) or is not set up for it,
+        None not reachable.
+    """
+    result = {
+        "esxi": _request_refresh(Settings.API.ESXI_TEMPLATE_SERVER_URL),
+        "gns3": _request_refresh(Settings.API.GNS3_TEMPLATE_SERVER_URL),
+    }
+    invalidate()
+    return result
 
 
 def explain(message: str) -> str:

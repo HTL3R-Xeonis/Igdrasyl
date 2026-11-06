@@ -373,8 +373,16 @@ and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 an address (up to 5 minutes) and reloads the canvas. A VM that is on but reports no address gets **Restart GNS3 VM**
 instead (a hard reset, behind a confirmation). `GET /health` reports the state as `gns3_vm` (`name`, `power_state`,
 `action`: `start`, `restart` or null; only asked while something is wrong, and never waits for an ESXi connect),
-`POST /gns3-vm/start` does the action. The template service lists the GNS3 templates again only when its own collector
-has run once more (every 15 minutes), so a "lists 0 templates" message can outlast the start for a while.
+`POST /gns3-vm/start` does the action. A GNS3 VM that does not exist on the host at all (and a template for a new one is
+selected) gets **Deploy GNS3 VM...** instead, which runs the File menu's deploy flow. The same buttons sit in the
+template-service banner at the top of every screen (`/templates/health` carries `gns3_vm` while that service has a
+problem), next to **Check again**: the template services read their sources only on a timer (GNS3 every 5 minutes, the
+ESXi share every 15), so that button - and, once a started GNS3 VM has an address, the page by itself - calls
+`POST /templates/refresh`, which asks both services' `POST /api/refresh` to run their collector right away (repeated
+after a few seconds because the GNS3 service inside a fresh VM needs a moment longer than its address) and waits up to a
+minute for them to list templates again. `/templates/health` reports `refreshable` (a service answered, so asking helps);
+a service without that endpoint, or not set up for it (the host needs the request folder and the `.path` unit from
+Docker-Server-Files), is simply left to its own timer - the answer says which one took the request.
 
 ## Device configs saved with the project
 
