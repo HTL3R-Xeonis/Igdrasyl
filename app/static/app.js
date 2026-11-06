@@ -580,7 +580,15 @@ function setWarningBanner(text, opts = {}) {
   // Offered while the selected project is parked (see app/holds.py).
   warningHeldProject = opts.held ? opts.held : null;
   document.getElementById("warning-resume-btn").hidden = !warningHeldProject;
+  // Offered while the GNS3 VM is switched off (Start) or on without an address (Restart), see app/gns3_vm_power.py.
+  const gns3VmBtn = document.getElementById("warning-gns3vm-btn");
+  warningGns3Vm = text && opts.gns3Vm && opts.gns3Vm.action ? opts.gns3Vm : null;
+  gns3VmBtn.hidden = !warningGns3Vm;
+  if (warningGns3Vm && !gns3VmBtn.disabled) {
+    gns3VmBtn.textContent = warningGns3Vm.action === "restart" ? "Restart GNS3 VM" : "Start GNS3 VM";
+  }
 }
+let warningGns3Vm = null;        // {name, power_state, action}
 let warningDeployProject = null; // {id, name, filename}
 let warningHeldProject = null;   // {id, name, host, held_at, ...}
 
@@ -597,6 +605,38 @@ document.getElementById("warning-retry-btn").addEventListener("click", async () 
     btn.disabled = false;
     btn.textContent = "Retry";
   }
+});
+document.getElementById("warning-gns3vm-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("warning-gns3vm-btn");
+  const vm = warningGns3Vm;
+  if (!vm) return;
+  if (vm.action === "restart" && !await showConfirm(
+    `Restart the GNS3 VM "${vm.name}"? It is on but reports no address. A reset stops everything running inside it.`,
+    { confirmLabel: "Restart", danger: true })) return;
+  btn.disabled = true;
+  btn.textContent = vm.action === "restart" ? "Restarting…" : "Starting…";
+  let note = null;
+  let failed = false;
+  try {
+    const resp = await fetch("/gns3-vm/start", { method: "POST" });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    // The VM needs a minute or two until VMware Tools report its address: ask the server to look again until it has one.
+    const deadline = Date.now() + 5 * 60 * 1000;
+    let resolved = false;
+    while (Date.now() < deadline && !resolved) {
+      await new Promise(resolve => setTimeout(resolve, 6000));
+      const state = await (await fetch("/reload", { method: "POST" })).json();
+      resolved = !!state.gns3_vm_ip;
+    }
+    if (!resolved) note = "The GNS3 VM was started but has no address yet - use Retry in a moment.";
+  } catch (err) {
+    note = `Could not start the GNS3 VM: ${err.message || err}`;
+    failed = true;
+  } finally {
+    btn.disabled = false;
+  }
+  await loadCanvas().catch(() => {});
+  if (note) setMenubarMessage(note, { error: failed });
 });
 function confirmDisruption(message, opts) {
   if (designMode || !showDisruptionWarnings) return Promise.resolve(true);
@@ -780,7 +820,7 @@ async function loadCanvas() {
       ? (typeof currentDesignProject !== "undefined" && currentDesignProject
         ? currentDesignProject.name : "Unsaved design")
       : `${health.gns3_project_name} @ ${health.esxi_ip}`;
-    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project });
+    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project, gns3Vm: designMode ? null : health.gns3_vm });
     incrementalDeploy = health.incremental_deploy !== false;
 
     const gns3Link = document.getElementById("gns3-webui-link");

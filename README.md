@@ -367,6 +367,15 @@ rebuilds everything - a full deployment can remove devices that are not in the p
 and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 `deployable_project`.
 
+**Start the GNS3 VM from the warning banner**: while the banner is shown and the configured GNS3 VM is switched off
+(or suspended) on the ESXi host - typically after the host restarted, nothing powers it on by itself - the banner offers
+**Start GNS3 VM**. It powers the VM on, then asks the server every few seconds (`POST /reload`) until VMware Tools report
+an address (up to 5 minutes) and reloads the canvas. A VM that is on but reports no address gets **Restart GNS3 VM**
+instead (a hard reset, behind a confirmation). `GET /health` reports the state as `gns3_vm` (`name`, `power_state`,
+`action`: `start`, `restart` or null; only asked while something is wrong, and never waits for an ESXi connect),
+`POST /gns3-vm/start` does the action. The template service lists the GNS3 templates again only when its own collector
+has run once more (every 15 minutes), so a "lists 0 templates" message can outlast the start for a while.
+
 ## Device configs saved with the project
 
 The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim; **up to 10 000

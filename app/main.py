@@ -40,6 +40,7 @@ from app import (
     esxi_session,
     generate_jobs,
     gns3_vm_deploy_jobs,
+    gns3_vm_power,
     holds,
     import_jobs,
     label_layout,
@@ -353,6 +354,13 @@ def _deployable_project() -> dict[str, str] | None:
     }
 
 
+def _gns3_vm_power_state() -> dict[str, Any] | None:
+    """The GNS3 VM's power state for the banner's Start/Restart button - only asked while something is wrong."""
+    if app.state.startup_warning is None and app.state.gns3_vm_ip:
+        return None
+    return gns3_vm_power.status(app)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
@@ -360,6 +368,7 @@ def health() -> dict[str, Any]:
         "held_project": _held_project(),
         "esxi_ip": Settings.ESXI.IP,
         "gns3_vm_ip": app.state.gns3_vm_ip,
+        "gns3_vm": _gns3_vm_power_state(),
         "gns3_port": Settings.GNS3.PORT,
         "gns3_project_name": app.state.project_name,
         "gns3_project_id": app.state.project_id,
@@ -1461,6 +1470,22 @@ def deploy_gns3_vm(request: DeployGns3VmRequest | None = None) -> dict[str, str]
     except gns3_vm_deploy_jobs.AlreadyRunning as exc:
         raise HTTPException(409, str(exc))
     return {"job_id": job.id}
+
+
+@app.post("/gns3-vm/start")
+def start_gns3_vm() -> dict[str, str]:
+    """
+    Powers the configured GNS3 VM on (the warning banner's Start button), or resets it when it is on but reports no
+    address (Restart). Returns at once; the page then polls POST /reload until the VM has an address.
+    """
+    try:
+        return {"result": gns3_vm_power.start(app)}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except RuntimeError as exc:
+        if isinstance(exc, esxi_session.EsxiUnavailable):
+            raise
+        raise HTTPException(502, f"ESXi could not start the GNS3 VM: {exc}")
 
 
 @app.get("/gns3-vm/deploy/{job_id}")
