@@ -4448,8 +4448,9 @@ document.getElementById("import-project-input").addEventListener("change", async
   const importMessage = `Import "${file.name}"?\n\n${importWarning}${autoPushNote}`;
   const confirmed = removed.length
     ? await showConfirm(
-      `Import "${file.name}"?\n\nThis host deploys everything anew. These devices of the current project are not in ` +
-      `the bundle and will be DELETED, together with their VMs: ${removed.join(", ")}.\n\n${importWarning}${autoPushNote}`,
+      `Import "${file.name}"?\n\nThis host deploys everything anew (full deploy: the ESXi vSwitch is reset and every ` +
+      `device is redeployed from scratch, which may take a while). These devices of the current project are not in ` +
+      `the bundle and will be DELETED, together with their VMs: ${removed.join(", ")}.\n\n${autoPushNote.trim()}`,
       { title: "Import project - deletes devices", confirmLabel: "Delete and import", danger: true })
     : await confirmDisruption(importMessage, { title: "Import project", confirmLabel: "Import" });
   if (!confirmed) {
