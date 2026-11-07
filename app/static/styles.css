@@ -323,6 +323,29 @@
     overflow: hidden;
   }
   #canvas { width: 100%; height: 100%; display: block; cursor: grab; background: var(--canvas-bg); }
+  /* Covers the canvas while an import runs: nothing under it can be clicked, dragged or deleted. */
+  #canvas-lock {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    background: rgba(0, 0, 0, 0.35);
+    cursor: progress;
+  }
+  #canvas-lock[hidden] { display: none; }
+  #canvas-lock span {
+    margin-top: 64px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 13px;
+  }
+  body.canvas-locked #palette-list,
+  body.canvas-locked #topology-summary-list { pointer-events: none; opacity: 0.55; }
   #canvas.panning { cursor: grabbing; }
   #canvas.placing, #canvas.drawing { cursor: crosshair; }
   /* Colors/widths for rect/ellipse/line/text are all set per-shape as

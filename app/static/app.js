@@ -3063,6 +3063,7 @@ function typingInside(el) {
 
 window.addEventListener("keydown", async (evt) => {
   if (document.getElementById("app-view").hidden) return;
+  if (canvasLocked) return; // an import is running: no undo, delete or select-all on the old picture
   if (typingInside(evt.target)) return;
   if (document.querySelector("dialog[open]") || !document.getElementById("modal-overlay").hidden) return;
   if (svg.getClientRects().length === 0) return; // canvas not shown (Config Push / Logs tab)
@@ -4265,6 +4266,26 @@ document.getElementById("take-screenshot-btn").addEventListener("click", () => {
 // the menu bar's own buttons rather than a full-page overlay, since
 // everything else (canvas, palette, topology list) stays usable while
 // an import or add-node deploy is running in the background.
+// Locks the canvas (and the palette / device list beside it) while something replaces the whole project: an import
+// deletes and redeploys devices, so clicking, dragging or deleting on the old picture would act on things that are
+// going away. unlockCanvas() runs in a finally - a failed import must never leave the page locked.
+let canvasLocked = false;
+function lockCanvas(text) {
+  canvasLocked = true;
+  if (linkMode) exitLinkMode();
+  if (placementImage) clearPlacementMode();
+  if (drawMode) { drawDraft = null; renderDrawings(); setDrawMode(null); }
+  deselectNode();
+  document.getElementById("canvas-lock-text").textContent = text;
+  document.getElementById("canvas-lock").hidden = false;
+  document.body.classList.add("canvas-locked");
+}
+function unlockCanvas() {
+  canvasLocked = false;
+  document.getElementById("canvas-lock").hidden = true;
+  document.body.classList.remove("canvas-locked");
+}
+
 function setMenubarBusy(text) {
   const el = document.getElementById("menubar-status");
   el.classList.remove("menubar-error");
@@ -4458,6 +4479,7 @@ document.getElementById("import-project-input").addEventListener("change", async
   }
 
   setMenubarBusy("Starting import…");
+  lockCanvas("Import running - the canvas is locked until it is done");
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -4510,6 +4532,8 @@ document.getElementById("import-project-input").addEventListener("change", async
     fitViewToNodes();
   } catch (err) {
     setMenubarMessage(`Import failed: ${err}`);
+  } finally {
+    unlockCanvas();
   }
 });
 
