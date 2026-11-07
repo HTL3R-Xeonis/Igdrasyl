@@ -4301,12 +4301,24 @@ function setMenubarProgress(text, completed, total) {
 const MENUBAR_ERROR_PATTERN = /\b(failed|failure|error|couldn't|can't|cannot|unavailable|refused|add a valid host|save this design)\b/i;
 function setMenubarMessage(text, opts = {}) {
   const el = document.getElementById("menubar-status");
-  el.textContent = text;
+  el.replaceChildren();
+  if (text) {
+    const label = document.createElement("span");
+    label.textContent = text;
+    // A small x clears the message - nothing else does, until the next one replaces it.
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "menubar-dismiss";
+    close.textContent = "\u00d7";
+    close.setAttribute("aria-label", "Dismiss message");
+    close.addEventListener("click", clearMenubarStatus);
+    el.append(label, close);
+  }
   el.classList.toggle("menubar-error", opts.error ?? MENUBAR_ERROR_PATTERN.test(text));
 }
 function clearMenubarStatus() {
   const el = document.getElementById("menubar-status");
-  el.textContent = "";
+  el.replaceChildren();
   el.classList.remove("menubar-error");
 }
 
@@ -4422,10 +4434,25 @@ document.getElementById("import-project-input").addEventListener("change", async
     `enabled, its device configs also get pushed automatically right ` +
     `after the deploy succeeds - you'll see the results in the Config ` +
     `Push panel afterward either way.`;
-  if (!await confirmDisruption(
-    `Import "${file.name}"?\n\n${importWarning}${autoPushNote}`,
-    { title: "Import project", confirmLabel: "Import" }
-  )) {
+  // On a host that deploys everything anew the import deletes what the bundle does not contain: name those devices,
+  // and ask even when the disruption warnings are switched off - this one cannot be undone.
+  let removed = [];
+  try {
+    const previewData = new FormData();
+    previewData.append("file", file);
+    const preview = await fetch("/project/import/preview", { method: "POST", body: previewData });
+    if (preview.ok) removed = (await preview.json()).removed || [];
+  } catch (err) {
+    // No preview - the generic warning below still applies.
+  }
+  const importMessage = `Import "${file.name}"?\n\n${importWarning}${autoPushNote}`;
+  const confirmed = removed.length
+    ? await showConfirm(
+      `Import "${file.name}"?\n\nThis host deploys everything anew. These devices of the current project are not in ` +
+      `the bundle and will be DELETED, together with their VMs: ${removed.join(", ")}.\n\n${importWarning}${autoPushNote}`,
+      { title: "Import project - deletes devices", confirmLabel: "Delete and import", danger: true })
+    : await confirmDisruption(importMessage, { title: "Import project", confirmLabel: "Import" });
+  if (!confirmed) {
     return;
   }
 

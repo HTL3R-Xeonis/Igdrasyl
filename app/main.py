@@ -1546,6 +1546,25 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
     return {"job_id": job.id, "total": job.total}
 
 
+@app.post("/project/import/preview")
+async def preview_project_import(file: UploadFile) -> dict[str, Any]:
+    """
+    What importing this bundle would take away, asked before the import starts. On a host that deploys non-incrementally
+    (`incremental_deploy: false`) the import removes every device of the current project that the bundle does not contain
+    - and the VMs this tool created earlier - so the page names them in its confirmation. Changes nothing.
+    """
+    names = import_jobs.peek_target_node_names(await file.read())
+    graph = app.state.graph
+    current = sorted(graph.nodes) if graph is not None else []
+    return {
+        "incremental": bool(Settings.INCREMENTAL_DEPLOY),
+        "bundle_nodes": sorted(names),
+        "removed": []
+        if Settings.INCREMENTAL_DEPLOY
+        else [name for name in current if name not in names],
+    }
+
+
 @app.get("/project/import/{job_id}")
 def import_job_status(job_id: str) -> dict[str, Any]:
     """
