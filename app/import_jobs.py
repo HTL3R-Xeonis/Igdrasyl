@@ -80,6 +80,25 @@ def create_job(app: FastAPI, target_names: set[str]) -> ImportJob:
     return job
 
 
+def _apply_import_healing_templates(app: FastAPI, zip_bytes: bytes) -> dict:
+    """
+    apply_import, repeated once when it was refused with "Image ... not found" because the template service listed too
+    little (a collector that hung, a restarted GNS3 VM): the service is asked to read again and, when it recovers, the
+    import is tried again. Safe, because that check runs before anything is deleted.
+    """
+    from app import project_bundle
+
+    try:
+        return project_bundle.apply_import(app, zip_bytes)
+    except ValueError as exc:
+        if not template_health.is_missing_image_error(str(exc)):
+            raise
+        if not template_health.heal():
+            raise
+        logger.info("Import: the template service recovered, trying the import again")
+        return project_bundle.apply_import(app, zip_bytes)
+
+
 def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
     """
     The actual deploy, run on a plain background thread (not an asyncio
@@ -89,7 +108,6 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
     this app, just made explicit here instead of tied to a single
     request's lifetime.
     """
-    from app import project_bundle
     from app.config_push import push_all_waiting
 
     started = time.monotonic()
@@ -98,7 +116,7 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
     )
     try:
         with exclusive("Project import"):
-            result = project_bundle.apply_import(app, zip_bytes)
+            result = _apply_import_healing_templates(app, zip_bytes)
         if result["auto_config_push"] and result["configs"]:
             app.state.last_config_push = result["configs"]
             result["push_results"] = push_all_waiting(result["configs"], app)

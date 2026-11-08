@@ -550,25 +550,46 @@ def _push_via_serial(
 DEFAULT_WAIT_SECONDS = 900
 
 
-def push_all_waiting(
-    devices: dict[str, Any],
+def _is_network_device(name: str, spec: DeviceSpec, app: Any) -> bool:
+    """
+    A router, switch or firewall: a GNS3 node, or an ESXi appliance that is configured over its serial console. The VMs
+    behind them (guest operations) can only be configured and checked once these carry traffic, so they come second.
+    """
+    try:
+        node = app.state.graph.nodes.get(name)
+        if node is None:
+            return False
+        if node.env == Environment.ON_GNS3:
+            return True
+        if node.env == Environment.ON_ESXI:
+            return spec.via == "serial" or (
+                spec.via == "auto" and _is_serial_appliance(node)
+            )
+    except Exception:
+        pass  # a push must not fail on its ordering
+    return False
+
+
+def _split_by_kind(devices: dict[str, Any], app: Any) -> tuple[dict, dict]:
+    """(network devices, everything else), each in the given order."""
+    specs = normalize(devices)
+    network = {
+        name: devices[name]
+        for name in devices
+        if _is_network_device(name, specs[name], app)
+    }
+    return network, {n: e for n, e in devices.items() if n not in network}
+
+
+def _wait_and_push(
+    pending: dict[str, Any],
     app: Any,
-    wait_seconds: int = DEFAULT_WAIT_SECONDS,
-    interval_seconds: int = 15,
-    sleep: Any = time.sleep,
-    on_progress: ProgressCallback | None = None,
-    on_waiting: Callable[[list[str]], None] | None = None,
-) -> list[DeviceResult]:
-    """
-    push_all that does not give up on devices that are still booting (after a deploy,
-    a resume or a power-on): a device that could not be reached at all and ran no
-    command (DeviceResult.not_ready) is tried again every `interval_seconds`, up
-    to `wait_seconds`. A device where a command already ran or failed is never
-    repeated - re-sending a half-applied config could do harm.
-    `on_waiting(names)` is told which devices are being waited for.
-    """
-    deadline = time.monotonic() + wait_seconds
-    pending = dict(devices)
+    deadline: float,
+    interval_seconds: int,
+    sleep: Any,
+    on_progress: ProgressCallback | None,
+    on_waiting: Callable[[list[str]], None] | None,
+) -> dict[str, DeviceResult]:
     final: dict[str, DeviceResult] = {}
     while pending:
         for result in push_all(pending, app, on_progress):
@@ -587,6 +608,46 @@ def push_all_waiting(
             f"(retrying in {interval_seconds}s)"
         )
         sleep(interval_seconds)
+    return final
+
+
+def push_all_waiting(
+    devices: dict[str, Any],
+    app: Any,
+    wait_seconds: int = DEFAULT_WAIT_SECONDS,
+    interval_seconds: int = 15,
+    sleep: Any = time.sleep,
+    on_progress: ProgressCallback | None = None,
+    on_waiting: Callable[[list[str]], None] | None = None,
+) -> list[DeviceResult]:
+    """
+    push_all that does not give up on devices that are still booting (after a deploy,
+    a resume or a power-on): a device that could not be reached at all and ran no
+    command (DeviceResult.not_ready) is tried again every `interval_seconds`, up
+    to `wait_seconds`. A device where a command already ran or failed is never
+    repeated - re-sending a half-applied config could do harm.
+    Routers, switches and firewalls go first and are waited for; the VMs follow
+    only then, because their commands (and the checks in them, e.g. a ping to the
+    internet) need the network to carry traffic - measured: VMs configured while the
+    switch was still booting failed their internet check and had to be repeated.
+    `on_waiting(names)` is told which devices are being waited for.
+    """
+    deadline = time.monotonic() + wait_seconds
+    network, guests = _split_by_kind(devices, app)
+    final: dict[str, DeviceResult] = {}
+    for group in (network, guests):
+        if group:
+            final.update(
+                _wait_and_push(
+                    group,
+                    app,
+                    deadline,
+                    interval_seconds,
+                    sleep,
+                    on_progress,
+                    on_waiting,
+                )
+            )
     return [final[name] for name in devices if name in final]
 
 
@@ -696,7 +757,11 @@ def push_all(
     except NoLiveProject as exc:
         live_error = str(exc)
 
-    for device_name, spec in specs.items():
+    # Network devices before VMs (see push_all_waiting); the results go back in the order asked for
+    ordered = sorted(
+        specs.items(), key=lambda item: not _is_network_device(item[0], item[1], app)
+    )
+    for device_name, spec in ordered:
         try:
             commands = spec.commands
 
@@ -798,6 +863,8 @@ def push_all(
                 )
             )
 
+    position = {name: index for index, name in enumerate(specs)}
+    results.sort(key=lambda result: position.get(result.device, len(position)))
     for result in results:
         _log_result(result)
     logger.info(

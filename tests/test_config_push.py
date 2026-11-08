@@ -492,3 +492,78 @@ def test_a_console_that_stops_answering_later_fails_that_command_and_is_not_repe
         )
     assert not result.ok and not result.not_ready and result.executed == 2
     assert result.commands[1].ok is False and "no answer" in result.commands[1].output
+
+
+def _app_with_nodes(**envs):
+    """An app whose graph has one node per keyword: name=Environment (+ image for the serial appliance check)."""
+    from src.graph.environment import Environment
+
+    app = MagicMock()
+    nodes = {}
+    for name, (env, image) in envs.items():
+        node = MagicMock()
+        node.env = getattr(Environment, env)
+        node.image = image
+        nodes[name] = node
+    app.state.graph.nodes = nodes
+    return app
+
+
+def test_network_devices_are_pushed_and_waited_for_before_the_vms():
+    app = _app_with_nodes(
+        VM1=("ON_ESXI", "debian"),
+        SW1=("ON_GNS3", "Cisco IOSvL2"),
+        MT1=("ON_ESXI", "MikroTik"),
+        VM2=("ON_ESXI", "Rocky 9.2"),
+    )
+    calls: list[list[str]] = []
+    scripted = {
+        1: [_result("SW1", not_ready=True), _result("MT1", ok=True)],
+        2: [_result("SW1", ok=True)],
+        3: [_result("VM1", ok=True), _result("VM2", ok=True)],
+    }
+
+    def fake_push_all(devices, app, on_progress=None):
+        calls.append(sorted(devices))
+        return scripted[len(calls)]
+
+    with patch.object(cp, "push_all", side_effect=fake_push_all):
+        results = cp.push_all_waiting(
+            {"VM1": ["a"], "SW1": ["b"], "MT1": ["c"], "VM2": ["d"]},
+            app,
+            sleep=lambda s: None,
+        )
+
+    # the switch was not ready at first: the VMs are not touched before it is
+    assert calls == [["MT1", "SW1"], ["SW1"], ["VM1", "VM2"]]
+    assert [r.device for r in results] == ["VM1", "SW1", "MT1", "VM2"]
+
+
+def test_push_all_processes_network_devices_first_but_returns_the_order_asked_for():
+    app = _app_with_nodes(VM1=("ON_ESXI", "debian"), SW1=("ON_GNS3", "Cisco IOSvL2"))
+    order: list[str] = []
+
+    def fake_guest(node, commands, esxi, progress):
+        order.append(node.name)
+        return _result(node.name, ok=True)
+
+    def fake_netmiko(node, commands, ip, port, progress):
+        order.append(node.name)
+        return _result(node.name, ok=True)
+
+    app.state.graph.nodes["VM1"].name = "VM1"
+    app.state.graph.nodes["SW1"].name = "SW1"
+    with (
+        patch.object(
+            cp,
+            "list_live_nodes",
+            return_value=[{"name": "SW1", "console": 5000, "console_type": "telnet"}],
+        ),
+        patch.object(cp, "_esxi_transport", return_value="guest_ops"),
+        patch.object(cp, "_push_via_guest_ops", side_effect=fake_guest),
+        patch.object(cp, "_push_via_netmiko", side_effect=fake_netmiko),
+    ):
+        results = cp.push_all({"VM1": ["a"], "SW1": ["b"]}, app)
+
+    assert order == ["SW1", "VM1"]
+    assert [r.device for r in results] == ["VM1", "SW1"]

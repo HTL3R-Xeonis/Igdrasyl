@@ -187,3 +187,63 @@ def test_describe_keeps_other_errors_and_survives_a_failing_check():
     assert template_health.describe(ValueError("nope")) == "nope"
     with patch.object(template_health, "check", side_effect=RuntimeError("boom")):
         assert template_health.describe(TimeoutError("slow")) == "slow"
+
+
+def _health(ok, refreshable=True):
+    return {
+        "ok": ok,
+        "problems": [] if ok else ["GNS3 template service lists 0 templates."],
+        "refreshable": refreshable,
+    }
+
+
+def test_heal_asks_for_a_refresh_and_reports_the_recovery():
+    answers = iter([_health(False), _health(False), _health(False), _health(True)])
+    with (
+        patch.object(
+            template_health, "check", side_effect=lambda force=False: next(answers)
+        ),
+        patch.object(template_health, "request_refresh") as refresh,
+    ):
+        assert template_health.heal(
+            wait_seconds=60, interval_seconds=5, sleep=lambda s: None
+        )
+    refresh.assert_called_once()
+
+
+def test_heal_does_nothing_when_the_services_were_healthy_all_along():
+    # then the missing image really is missing - repeating the lookup would not help
+    with (
+        patch.object(template_health, "check", return_value=_health(True)),
+        patch.object(template_health, "request_refresh") as refresh,
+    ):
+        assert template_health.heal(sleep=lambda s: None) is False
+    refresh.assert_not_called()
+
+
+def test_heal_does_not_wait_for_a_service_that_cannot_be_asked():
+    with (
+        patch.object(
+            template_health, "check", return_value=_health(False, refreshable=False)
+        ),
+        patch.object(template_health, "request_refresh") as refresh,
+    ):
+        assert template_health.heal(sleep=lambda s: None) is False
+    refresh.assert_not_called()
+
+
+def test_heal_gives_up_after_the_wait_time_and_never_raises():
+    sleeps: list[float] = []
+    with (
+        patch.object(template_health, "check", return_value=_health(False)),
+        patch.object(template_health, "request_refresh"),
+    ):
+        assert (
+            template_health.heal(
+                wait_seconds=20, interval_seconds=5, sleep=sleeps.append
+            )
+            is False
+        )
+    assert sleeps == [5, 5, 5, 5]
+    with patch.object(template_health, "check", side_effect=RuntimeError("boom")):
+        assert template_health.heal(sleep=lambda s: None) is False

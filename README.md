@@ -149,6 +149,15 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   `/design/nodes` and `/topology` name the service and the reason ("The ESXi
   template service (host) is not reachable: connection refused or host
   down.") instead of a raw connection error; design mode keeps working.
+  **Self-healing**: when a project import is refused with "Image ... not found"
+  because the service lists too little (a collector that hung, a GNS3 VM that
+  was just restarted), the import job asks both services to read again, waits up
+  to 150 s until they are healthy (`template_health.heal`) and repeats the import
+  once - the check runs before anything is deleted, so this is safe. A missing
+  image on a healthy service is reported at once. The collectors on the service
+  host stop a run after 120 s (`TimeoutStartSec`) and cut ESXi connections that
+  stop answering (60 s), so a host that goes down mid-run cannot block the
+  timer for hours (see Docker-Server-Files).
 - **Parallel links**: two nodes can be linked more than once, over
   different interfaces (the only rule is that an interface carries one
   link: "Interface Gi0/1 is used twice"). The canvas draws every link on
@@ -580,7 +589,9 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `POST /config-push` (one request, for short lists), `POST /config-push/jobs` (background job; body `devices` plus optional
   `wait_seconds`: how long devices that are still booting are retried - default 900, `0` = try once, max 3600) and
   `GET /config-push/jobs/{id}` (`status`, per-device progress, `waiting_for` = names of the devices the push is waiting for,
-  `results` once done), `GET/POST /drawings`.
+  `results` once done), `GET/POST /drawings`. A push configures **routers, switches and firewalls first** (GNS3 nodes and
+  serial-console appliances such as MikroTik) and waits for them; the VMs (guest operations) follow only afterwards, because
+  their commands and checks (e.g. a ping to the internet) need a network that carries traffic. Results keep the order asked for.
 - `GET /logs?lines=N` (the in-project panel), `GET /logs/entries?lines=N&level=L&search=S` (entries with
   tracebacks kept together, plus how full the log is), `GET /logs/download` (the whole retained log as text),
   `GET /templates/health` - see Architecture above.

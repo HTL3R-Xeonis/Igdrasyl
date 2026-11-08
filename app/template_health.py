@@ -160,13 +160,59 @@ def request_refresh() -> dict[str, bool | None]:
     return result
 
 
+def is_missing_image_error(message: str) -> bool:
+    """True for the 'Image ... not found on ESXi or GNS3' message a topology check raises."""
+    return _NOT_FOUND_MARKER in message
+
+
+# A template service whose collector hangs is freed by the collector's own start timeout (120 s, see the
+# collector units), so a wait has to be a bit longer than that to see the recovery.
+HEAL_WAIT_SECONDS = 150
+
+
+def heal(
+    wait_seconds: float = HEAL_WAIT_SECONDS,
+    interval_seconds: float = 5,
+    sleep: Any = time.sleep,
+) -> bool:
+    """
+    Tries to bring a template service that lists too little back: asks both services to read their sources again
+    and waits until check() is healthy.
+    :returns: True only when the services were unhealthy and are healthy now, i.e. a failed lookup is worth repeating.
+        False when they were healthy all along (the missing image really is missing), cannot be asked to refresh
+        (not reachable, an older service) or did not recover within `wait_seconds`. Never raises.
+    """
+    try:
+        if check(force=True)["ok"]:
+            return False
+        if not check()["refreshable"]:
+            return False
+        logger.warning(
+            "Template service lists too little - asking it to read its sources again"
+        )
+        request_refresh()
+        waited = 0.0
+        while waited < wait_seconds:
+            sleep(interval_seconds)
+            waited += interval_seconds
+            if check(force=True)["ok"]:
+                logger.info(f"Template service recovered after {waited:.0f} s")
+                return True
+            if waited % 30 == 0:
+                request_refresh()  # a run that was busy when asked has not seen the request
+        logger.warning(f"Template service did not recover within {wait_seconds:.0f} s")
+    except Exception as exc:
+        logger.debug(f"Template service heal failed: {exc}")
+    return False
+
+
 def explain(message: str) -> str:
     """
     `message` with the template service's problems (up to three) appended,
     if it is an "Image ... not found" error and the service is unhealthy.
     Never raises - a diagnostic must not turn into a second failure.
     """
-    if _NOT_FOUND_MARKER not in message:
+    if not is_missing_image_error(message):
         return message
     try:
         health = check()

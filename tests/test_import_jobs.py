@@ -184,3 +184,61 @@ def test_start_job_runs_in_the_background_and_completes(app_state, temp_topology
 
     assert job.status == "done"
     assert job.total == 3  # R1, SW1, VM1 from the fixture topology
+
+
+_MISSING = "Image 'NAT' not found on ESXi or GNS3"
+
+
+def test_run_import_job_repeats_the_import_once_the_template_service_recovered(
+    app_state,
+):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, set())
+    fake_result = {
+        "manifest": {},
+        "configs": {},
+        "drawings": [],
+        "auto_config_push": False,
+    }
+
+    with (
+        patch(
+            "app.project_bundle.apply_import",
+            side_effect=[ValueError(_MISSING), fake_result],
+        ) as apply,
+        patch("app.template_health.heal", return_value=True),
+    ):
+        import_jobs.run_import_job(app, job, b"irrelevant")
+
+    assert apply.call_count == 2
+    assert job.status == "done"
+
+
+def test_run_import_job_reports_a_really_missing_image_without_a_second_try(app_state):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, set())
+
+    with (
+        patch(
+            "app.project_bundle.apply_import", side_effect=ValueError(_MISSING)
+        ) as apply,
+        patch("app.template_health.heal", return_value=False),
+        patch("app.template_health.explain", side_effect=lambda text: text),
+    ):
+        import_jobs.run_import_job(app, job, b"irrelevant")
+
+    assert apply.call_count == 1
+    assert job.status == "error" and job.error_kind == "bad_bundle"
+
+
+def test_run_import_job_does_not_try_to_heal_other_bundle_errors(app_state):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, set())
+
+    with (
+        patch("app.project_bundle.apply_import", side_effect=ValueError("bad bundle")),
+        patch("app.template_health.heal") as heal,
+    ):
+        import_jobs.run_import_job(app, job, b"irrelevant")
+
+    heal.assert_not_called()
