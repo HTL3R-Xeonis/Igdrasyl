@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 import requests
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -84,6 +84,8 @@ from app.topology import load_graph, resolve_project_name
 # live /nodes and /links endpoints below - a template-service outage
 # surfaces as requests.exceptions.RequestException (e.g. ConnectionError,
 # which is NOT the builtin ConnectionError), not just the three above.
+_LIVE_READ_ERRORS = (OSError, RuntimeError, requests.exceptions.RequestException)
+
 _LIVE_WRITE_ERRORS = (
     RuntimeError,
     ConnectionError,
@@ -525,6 +527,9 @@ def nodes() -> list[dict[str, Any]]:
         live_by_name = {n["name"]: n for n in list_live_nodes(app)}
     except NoLiveProject:
         live_by_name = {}
+    except _LIVE_READ_ERRORS as exc:
+        # The GNS3 VM does not answer (powered off, still booting): the page polls this and falls back to "no live state"
+        raise HTTPException(503, f"The GNS3 VM could not be reached: {exc}") from exc
 
     result = []
     for node in app.state.graph.nodes.values():
@@ -537,7 +542,10 @@ def nodes() -> list[dict[str, Any]]:
         if node.env == Environment.ON_ESXI:
             if live is not None:
                 entry["gns3_node_id"] = live.get("node_id")
-            vm = app.state.esxi_connection.get_vm(node.name)
+            try:
+                vm = app.state.esxi_connection.get_vm(node.name)
+            except _LIVE_READ_ERRORS as exc:
+                raise HTTPException(503, f"ESXi could not be reached: {exc}") from exc
             entry["status"] = str(vm.runtime.powerState) if vm is not None else None
             entry["console_port"] = None
             entry["console_type"] = None
@@ -787,6 +795,8 @@ def live_links() -> list[dict[str, Any]]:
         return capture.list_live_links(app)
     except NoLiveProject:
         return []
+    except _LIVE_READ_ERRORS as exc:
+        raise HTTPException(503, f"The GNS3 VM could not be reached: {exc}") from exc
 
 
 class LinkOptions(BaseModel):
@@ -994,7 +1004,7 @@ def get_drawings() -> list[dict[str, Any]]:
     reload doesn't lose them. Not validated/interpreted server-side,
     and not synced with GNS3's own real drawings.
     """
-    return app.state.last_drawings
+    return getattr(app.state, "last_drawings", [])
 
 
 @app.post("/drawings")
@@ -1082,7 +1092,7 @@ def design_remove_link(
 
 @app.get("/design/layout")
 def design_layout() -> dict[str, dict[str, float]]:
-    return app.state.design.layout
+    return design.layout_with_defaults(app.state.design)
 
 
 @app.post("/design/layout")
@@ -1251,7 +1261,7 @@ def current_design_project() -> dict[str, Any]:
 @app.post("/design/project/{project_id}/open")
 def open_library_project(project_id: str) -> dict[str, Any]:
     try:
-        state = project_library.load_design(project_id)
+        state = _settings_call(project_library.load_design, project_id)
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
         raise HTTPException(503, f"Template service unavailable: {exc}") from exc
     with design_history.step(app):
@@ -1501,6 +1511,10 @@ def start_gns3_vm() -> dict[str, str]:
         if isinstance(exc, esxi_session.EsxiUnavailable):
             raise
         raise HTTPException(502, f"ESXi could not start the GNS3 VM: {exc}")
+    except (OSError, requests.exceptions.RequestException) as exc:
+        raise HTTPException(
+            502, f"ESXi could not be reached to start the GNS3 VM: {exc}"
+        )
 
 
 @app.get("/gns3-vm/deploy/{job_id}")
@@ -1966,6 +1980,14 @@ def get_license() -> Response:
     """
     with open(_LICENSE_PATH) as file:
         return Response(content=file.read(), media_type="text/plain")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """Browsers ask for /favicon.ico on pages without an icon link (the log page, error pages): answer with the mark."""
+    return FileResponse(
+        Path(_STATIC_DIR) / "ginnungagap-mark.svg", media_type="image/svg+xml"
+    )
 
 
 # Mounted last, deliberately - Starlette tries explicit routes (above) in

@@ -981,3 +981,9 @@ def test_health_offers_nothing_without_a_selected_project(
 def test_the_page_and_scripts_are_revalidated_on_every_load(client):
     for path in ("/", "/app.js"):
         assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_favicon_ico_is_answered_with_the_mark_instead_of_a_404(client):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")

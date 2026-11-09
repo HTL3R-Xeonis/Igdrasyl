@@ -33,7 +33,7 @@ import yaml
 from src.graph.environment import Environment
 from src.graph.layout import compute_node_positions
 
-from app import label_layout
+from app import label_layout, node_names
 
 _CANVAS_WIDTH = 1600.0
 _CANVAS_HEIGHT = 900.0
@@ -65,10 +65,7 @@ def new_state() -> DesignState:
 
 
 def add_node(state: DesignState, name: str, role: str, image: str) -> None:
-    if not name.strip():
-        raise ValueError("name must not be empty")
-    if name in state.nodes:
-        raise ValueError(f"a node named '{name}' already exists")
+    node_names.validate(name, state.nodes)
     environment = Environment.get_environment(image)
     if environment == Environment.ON_NOTHING:
         raise ValueError(
@@ -386,3 +383,22 @@ def auto_layout(state: DesignState) -> None:
     positions = compute_node_positions(views, _CANVAS_WIDTH, _CANVAS_HEIGHT)
     for name, (x, y) in positions.items():
         state.layout[name] = {"x": x, "y": y}
+
+
+def layout_with_defaults(state: DesignState) -> dict[str, dict[str, float]]:
+    """
+    The saved positions, plus a force-directed default for every node that has none (a design opened from a stored
+    project or created by a script, where nobody placed the nodes by clicking) - so they do not all pile up on one
+    spot. Changes nothing in `state`.
+    """
+    result = {
+        name: dict(pos) for name, pos in state.layout.items() if name in state.nodes
+    }
+    missing = [name for name in state.nodes if name not in result]
+    if missing:
+        views = {name: _NodeView(node, state) for name, node in state.nodes.items()}
+        positions = compute_node_positions(views, _CANVAS_WIDTH, _CANVAS_HEIGHT)
+        for name in missing:
+            x, y = positions[name]
+            result[name] = {"x": x, "y": y}
+    return result

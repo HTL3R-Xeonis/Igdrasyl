@@ -413,3 +413,22 @@ def test_remove_link_with_unknown_interfaces_raises():
 
     with pytest.raises(KeyError, match="Gi9/9"):
         design.remove_link(state, "R1", "R2", "Gi9/9", "Gi9/9")
+
+
+def test_layout_fills_in_positions_for_nodes_nobody_placed(client):
+    for name in ("A1", "A2", "A3"):
+        assert (
+            client.post(
+                "/design/nodes",
+                json={"name": name, "role": "server", "image": "debian"},
+            ).status_code
+            == 200
+        )
+    assert (
+        client.post("/design/layout", json={"name": "A1", "x": 5, "y": 6}).status_code
+        == 200
+    )
+    layout = client.get("/design/layout").json()
+    assert set(layout) == {"A1", "A2", "A3"}
+    assert layout["A1"] == {"x": 5, "y": 6}  # a saved position is never replaced
+    assert len({(p["x"], p["y"]) for p in layout.values()}) == 3  # not one pile

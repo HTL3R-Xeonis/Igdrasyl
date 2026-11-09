@@ -39,3 +39,12 @@ def test_the_lock_covers_the_canvas_and_blocks_palette_and_device_list():
     assert "#canvas-lock[hidden] { display: none; }" in css
     assert "body.canvas-locked #palette-list" in css
     assert "body.canvas-locked #topology-summary-list" in css
+
+
+def test_the_screenshot_reads_the_linked_style_sheet_not_a_style_element():
+    # the page's CSS lives in /styles.css; document.querySelector("style") is null there and broke the screenshot
+    js = (Path(__file__).parent.parent / "app" / "static" / "app.js").read_text()
+    body = js[js.index("async function takeCanvasScreenshot") :]
+    body = body[: body.index("\n}\n")]
+    assert 'document.querySelector("style")' not in body
+    assert "await pageCss()" in body

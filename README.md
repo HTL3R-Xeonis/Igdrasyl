@@ -158,6 +158,16 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   host stop a run after 120 s (`TimeoutStartSec`) and cut ESXi connections that
   stop answering (60 s), so a host that goes down mid-run cannot block the
   timer for hours (see Docker-Server-Files).
+- **Robustness** (`tests/test_route_robustness.py`): every route is called with garbage bodies and odd path values
+  while ESXi and GNS3 are unreachable, while no host is active, and while a fake GNS3 answers 500, 404 or non-JSON
+  everywhere; none may answer 500 (deliberate refusals are 4xx/502/503). A random sequence of design operations with
+  odd node names must not break either. Found and fixed this way: `GET /nodes` and `GET /links` answered 500 when the
+  GNS3 VM was down (now 503, the page already copes), `POST /design/project/{id}/open` with an unknown id,
+  `POST /gns3-vm/start` with ESXi unreachable. **Node names** typed in (design canvas and live Add node) must be 1-63
+  characters of letters, digits, `-` and `_`, starting with a letter or digit, and unique ignoring case
+  (`app/node_names.py`) - names like `../x`, `a b` or `r1` next to `R1` used to be accepted and broke the deploy or a
+  URL later. `GET /design/layout` gives nodes nobody placed (a design created by a script or opened from a stored project)
+  a force-directed default position instead of piling them on one spot.
 - **Parallel links**: two nodes can be linked more than once, over
   different interfaces (the only rule is that an interface carries one
   link: "Interface Gi0/1 is used twice"). The canvas draws every link on

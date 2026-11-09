@@ -4181,6 +4181,21 @@ function unionBBox(boxes) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+// All CSS of the page: inline <style> blocks plus the linked style sheets (the page's CSS lives in /styles.css, so
+// there is no <style> element to copy any more).
+async function pageCss() {
+  const parts = [...document.querySelectorAll("style")].map((el) => el.textContent);
+  for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+    try {
+      const response = await fetch(link.href);
+      if (response.ok) parts.push(await response.text());
+    } catch {
+      // a style sheet that cannot be read only costs the picture some styling
+    }
+  }
+  return parts.join("\n");
+}
+
 async function takeCanvasScreenshot() {
   const layerIds = ["drawings-layer", "links-layer", "nodes-layer"];
   const layers = layerIds.map((id) => document.getElementById(id));
@@ -4204,7 +4219,7 @@ async function takeCanvasScreenshot() {
   exportSvg.setAttribute("height", Math.round(vh * pixelScale));
 
   const styleEl = document.createElementNS(SVG_NS, "style");
-  styleEl.textContent = document.querySelector("style").textContent;
+  styleEl.textContent = await pageCss();
   exportSvg.appendChild(styleEl);
 
   const bg = document.createElementNS(SVG_NS, "rect");

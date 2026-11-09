@@ -10,7 +10,13 @@ from unittest.mock import patch
 import pytest
 from src.graph.environment import Environment
 
+import app.main as main_module
 from app import design, design_history
+
+
+def _saved_layout():
+    """The positions really stored; GET /design/layout also invents defaults for nodes nobody placed."""
+    return main_module.app.state.design.layout
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +97,7 @@ def test_undo_restores_links_layout_and_drawings(client):
     client.post("/design/undo")
     assert client.get("/design/drawings").json() == []
     client.post("/design/undo")
-    assert client.get("/design/layout").json().get("PC1") is None
+    assert _saved_layout().get("PC1") is None
     client.post("/design/undo")
     nodes = {n["name"]: n for n in client.get("/design/topology").json()}
     assert nodes["PC1"]["interfaces"] == {}
@@ -137,7 +143,7 @@ def test_group_move_is_one_undo_step(client):
     layout = client.get("/design/layout").json()
     assert layout["PC2"] == {"x": 3, "y": 4}
     client.post("/design/undo")
-    assert client.get("/design/layout").json().get("PC2") is None
+    assert _saved_layout().get("PC2") is None
 
 
 def test_group_move_rejects_unknown_node_without_changes(client):
@@ -147,7 +153,7 @@ def test_group_move_rejects_unknown_node_without_changes(client):
         json={"positions": {"PC1": {"x": 1, "y": 2}, "NOPE": {"x": 3, "y": 4}}},
     )
     assert response.status_code == 404
-    assert client.get("/design/layout").json().get("PC1") is None
+    assert _saved_layout().get("PC1") is None
 
 
 def test_delete_selection_is_atomic_and_one_step(client):
@@ -200,7 +206,7 @@ def test_failed_paste_changes_nothing(client):
     response = client.post("/design/paste", json=payload)
     assert response.status_code == 400
     assert _names(client) == ["PC1"]
-    assert client.get("/design/layout").json() == {}
+    assert _saved_layout() == {}
     client.post("/design/undo")
     assert _names(client) == []
 

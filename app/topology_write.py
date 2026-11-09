@@ -28,6 +28,7 @@ from src.backend import TopologyBackend
 from src.connections.api_handler import APIHandler
 from src.settings import Settings
 
+from app import node_names
 from app.live_lock import exclusive
 from app.topology import load_graph
 
@@ -217,6 +218,8 @@ def _restore_on_failure(app: FastAPI, what: str) -> Iterator[None]:
 
 
 def add_node(app: FastAPI, name: str, role: str, image: str) -> None:
+    existing = app.state.graph.nodes if app.state.graph is not None else ()
+    node_names.validate(name, existing)
     with _reserved_name(app, name), exclusive("Add node"):
         if not Settings.TOPOLOGY_FILE:
             raise RuntimeError("Select a project before editing a live topology")
