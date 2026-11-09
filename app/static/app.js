@@ -4316,7 +4316,7 @@ function setMenubarBusy(text) {
 // best-effort approximation from live-polling ESXi/GNS3 state, not a
 // real callback from the deploy itself, so it can legitimately dip
 // before climbing (a non-incremental deploy resets everything first).
-function setMenubarProgress(text, completed, total) {
+function setMenubarProgress(text, completed, total, detail = "") {
   const el = document.getElementById("menubar-status");
   el.classList.remove("menubar-error");
   el.innerHTML = "";
@@ -4324,11 +4324,12 @@ function setMenubarProgress(text, completed, total) {
   track.className = "menubar-progress-track";
   const fill = document.createElement("span");
   fill.className = "menubar-progress-fill";
-  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  // Never 100 % while the job still runs: the last devices are created, the rest (links, VLANs, checks) is not done.
+  const pct = total > 0 ? Math.min(detail ? 99 : 100, Math.round((completed / total) * 100)) : 0;
   fill.style.width = `${pct}%`;
   track.appendChild(fill);
   const label = document.createElement("span");
-  label.textContent = total > 0 ? `${text} ${completed}/${total} (${pct}%)` : text;
+  label.textContent = total > 0 ? `${text} ${completed}/${total} (${pct}%)${detail ? " - " + detail : ""}` : text;
   el.appendChild(track);
   el.appendChild(label);
 }
@@ -4360,6 +4361,19 @@ function clearMenubarStatus() {
 
 const IMPORT_POLL_INTERVAL_MS = 1200;
 
+// "3:05 - creating WINSRV" / "3:05 - finishing (...)": the elapsed time and what the deploy is busy with, so a bar that
+// stands still (a big Windows image takes minutes) does not look hung.
+function importProgressDetail(body) {
+  const seconds = body.elapsed_seconds || 0;
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const pending = body.pending || [];
+  if (pending.length) {
+    const shown = pending.slice(0, 3).join(", ") + (pending.length > 3 ? ` +${pending.length - 3}` : "");
+    return `${clock}, still to create: ${shown}`;
+  }
+  return `${clock}, ${body.phase || "working"}`;
+}
+
 // Polls GET /project/import/{jobId} (see app/import_jobs.py) until it
 // leaves "running", updating the menubar progress bar on every tick.
 // Resolves with the final job body either way ("done" or "error") -
@@ -4369,7 +4383,7 @@ async function pollImportJob(jobId) {
   while (true) {
     const body = await fetch(`/project/import/${jobId}`).then((r) => r.json());
     if (body.status !== "running") return body;
-    setMenubarProgress("Importing project…", body.completed, body.total);
+    setMenubarProgress("Importing project…", body.completed, body.total, importProgressDetail(body));
     await new Promise((resolve) => setTimeout(resolve, IMPORT_POLL_INTERVAL_MS));
   }
 }

@@ -987,3 +987,17 @@ def test_favicon_ico_is_answered_with_the_mark_instead_of_a_404(client):
     response = client.get("/favicon.ico")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
+
+
+def test_import_status_reports_elapsed_time_phase_and_pending_devices(client):
+    from app import import_jobs
+
+    job = import_jobs.create_job(client.app, {"ghost-device-1"})
+    client.app.state.esxi_connection.get_vm.return_value = None
+
+    body = client.get(f"/project/import/{job.id}").json()
+
+    assert body["status"] == "running"
+    assert body["pending"] == ["ghost-device-1"]
+    assert body["phase"] == "creating devices"
+    assert body["elapsed_seconds"] >= 0

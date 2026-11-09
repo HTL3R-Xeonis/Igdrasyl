@@ -50,6 +50,22 @@ class ImportJob:
         None  # "bad_bundle" | "deploy_failed", mirrors the old 400 vs 502 split
     )
     result: dict[str, Any] | None = None
+    started_at: float = field(default_factory=time.time)
+    # Target names not seen live yet at the last poll - the devices the deploy is still working on.
+    pending: list[str] = field(default_factory=list)
+
+    @property
+    def elapsed_seconds(self) -> int:
+        return int(time.time() - self.started_at)
+
+    @property
+    def phase(self) -> str:
+        """What the deploy is doing now, so a bar that stands still still says why (a Windows image takes minutes)."""
+        if self.status != "running":
+            return ""
+        if self.pending:
+            return "creating devices"
+        return "finishing (network links, VLAN setup, checks)"
 
 
 def peek_target_node_names(zip_bytes: bytes) -> set[str]:
@@ -184,6 +200,7 @@ def poll_progress(app: FastAPI, job: ImportJob) -> int:
             pass
 
     job.completed = min(len(live_names), job.total)
+    job.pending = sorted(job.target_names - live_names)
     return job.completed
 
 

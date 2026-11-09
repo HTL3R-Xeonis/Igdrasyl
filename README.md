@@ -82,7 +82,12 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   and node canvas positions. Import runs as a background job
   (`app/import_jobs.py`) with an approximate live-polled progress
   percentage, since a deploy can take minutes and TopologyBuilder's own
-  deploy has no progress-callback hook. A bundle can opt itself into
+  deploy has no progress-callback hook. The status also carries
+  `elapsed_seconds`, `phase` ("creating devices", then "finishing (network
+  links, VLAN setup, checks)") and `pending` (the devices not created yet),
+  so the menubar shows e.g. "3:05, still to create: WINSRV" and never reads
+  100 % while the job still runs - a big Windows image makes the bar stand
+  still for minutes. A bundle can opt itself into
   running its own config-push automatically right after the deploy
   succeeds (`manifest.json`'s `auto_config_push`).
 - Node canvas positions (`app/layout.py`) are a TopologyOperator-owned

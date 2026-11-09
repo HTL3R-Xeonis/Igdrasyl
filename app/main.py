@@ -1604,6 +1604,9 @@ def import_job_status(job_id: str) -> dict[str, Any]:
         "status": job.status,
         "total": job.total,
         "completed": completed,
+        "elapsed_seconds": job.elapsed_seconds,
+        "phase": job.phase,
+        "pending": job.pending if job.status == "running" else [],
     }
     if job.status == "error":
         response["error"] = public_text.redact_paths(job.error)

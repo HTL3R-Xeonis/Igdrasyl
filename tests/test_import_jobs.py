@@ -242,3 +242,41 @@ def test_run_import_job_does_not_try_to_heal_other_bundle_errors(app_state):
         import_jobs.run_import_job(app, job, b"irrelevant")
 
     heal.assert_not_called()
+
+
+def test_poll_progress_names_the_devices_still_to_create(app_state):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, {"VM1", "VM2", "VM3"})
+    app_state.esxi_connection.get_vm.side_effect = lambda name: (
+        object() if name == "VM1" else None
+    )
+
+    import_jobs.poll_progress(app, job)
+
+    assert job.pending == ["VM2", "VM3"]
+    assert job.phase == "creating devices"
+
+
+def test_phase_says_finishing_once_every_device_exists(app_state):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, {"VM1"})
+    app_state.esxi_connection.get_vm.side_effect = lambda name: object()
+
+    import_jobs.poll_progress(app, job)
+
+    assert job.pending == []
+    assert job.phase.startswith("finishing")
+
+
+def test_phase_is_empty_once_the_job_is_over(app_state):
+    job = import_jobs.create_job(_fake_app(app_state), {"VM1"})
+    job.status = "done"
+
+    assert job.phase == ""
+
+
+def test_elapsed_seconds_counts_from_the_start(app_state):
+    job = import_jobs.create_job(_fake_app(app_state), {"VM1"})
+    job.started_at -= 90
+
+    assert 90 <= job.elapsed_seconds < 95
