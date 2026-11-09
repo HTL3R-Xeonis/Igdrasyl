@@ -112,6 +112,20 @@ def test_run_commands_stops_at_the_first_failure(fake_tcp_server):
     assert [(c, code) for c, code, _ in results] == [("hostname", 0), ("false", 1)]
 
 
+def test_run_commands_can_carry_on_after_a_failing_command(fake_tcp_server):
+    port = fake_tcp_server(_linux_console)
+    with _agent(port) as agent:
+        agent.login()
+        results = sa.run_commands(
+            agent, ["hostname", "false", "hostname"], continue_on_error=True
+        )
+    assert [(c, code) for c, code, _ in results] == [
+        ("hostname", 0),
+        ("false", 1),
+        ("hostname", 0),
+    ]
+
+
 def test_progress_is_reported_per_command(fake_tcp_server):
     port = fake_tcp_server(_linux_console)
     seen = []

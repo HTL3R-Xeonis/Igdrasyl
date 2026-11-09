@@ -31,6 +31,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import (
     capture,
     connection_settings,
+    connectivity_test,
     console,
     design,
     design_history,
@@ -1435,6 +1436,43 @@ def maintenance_verify(request: VerifyRequest | None = None) -> dict[str, Any]:
         raise HTTPException(400, str(exc))
     except _LIVE_WRITE_ERRORS as exc:
         raise HTTPException(502, str(exc))
+
+
+class ConnectivityRequest(BaseModel):
+    nodes: list[str] | None = None
+    count: int = 10
+    size: int = 56
+
+
+@app.post("/maintenance/connectivity-test", status_code=202)
+def start_connectivity_test(
+    request: ConnectivityRequest | None = None,
+) -> dict[str, Any]:
+    """
+    Puts real traffic on the lab network: the VMs that share a switch (or a direct link) get
+    temporary addresses, every one pings every other, the addresses are removed again.
+    Runs in the background (see app/connectivity_test.py); poll
+    GET /maintenance/connectivity-test/{job_id}.
+    """
+    _require_live_topology()
+    request = request or ConnectivityRequest()
+    try:
+        job = connectivity_test.start_job(
+            app, request.nodes, count=request.count, size=request.size
+        )
+    except connectivity_test.AlreadyRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (connectivity_test.NothingToTest, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"job_id": job.id, "segments": job.segments, "skipped": job.skipped}
+
+
+@app.get("/maintenance/connectivity-test/{job_id}")
+def connectivity_test_status(job_id: str) -> dict[str, Any]:
+    job = connectivity_test.get_job(app, job_id)
+    if job is None:
+        raise HTTPException(404, f"no connectivity test {job_id!r}")
+    return job.snapshot()
 
 
 @app.get("/maintenance/orphans")

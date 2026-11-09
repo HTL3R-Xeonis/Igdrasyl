@@ -5235,6 +5235,66 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
   }
 });
 
+// Text report of a finished connectivity test: one line per segment with the pairs that lost
+// packets spelled out, then what was skipped and what went wrong.
+function formatConnectivityReport(result) {
+  const lines = [];
+  for (const segment of result.segments) {
+    const hosts = Object.entries(segment.hosts).map(([name, address]) => `${name} (${address})`);
+    lines.push(`Segment ${segment.segment + 1}: ${hosts.join(", ")}`);
+    const pairs = result.pairs.filter((p) => p.source in segment.hosts);
+    const received = pairs.reduce((sum, p) => sum + p.received, 0);
+    const sent = pairs.reduce((sum, p) => sum + p.sent, 0);
+    lines.push(`  ${received}/${sent} pings answered`);
+    const rtts = pairs.map((p) => p.rtt_avg_ms).filter((v) => v !== null);
+    if (rtts.length) {
+      lines.push(`  average round trip ${(rtts.reduce((a, b) => a + b, 0) / rtts.length).toFixed(1)} ms`);
+    }
+    for (const p of pairs.filter((p) => p.received < p.sent)) {
+      lines.push(`  [FAIL] ${p.source} -> ${p.target}: ${p.loss_percent}% lost`);
+    }
+  }
+  for (const [name, reason] of Object.entries(result.skipped)) lines.push(`Skipped ${name}: ${reason}`);
+  for (const [name, reason] of Object.entries(result.problems)) lines.push(`[PROBLEM] ${name}: ${reason}`);
+  if (result.error) lines.push(`[ERROR] ${result.error}`);
+  lines.push("", result.all_ok ? "All pings answered." : "Not every ping was answered.");
+  return lines.join("\n");
+}
+
+document.getElementById("connectivity-test-btn").addEventListener("click", async () => {
+  const confirmed = await showConfirm(
+    "The VMs that share a switch get a temporary address (198.18.x.x) each, every one pings every " +
+    "other, and the addresses are removed again - also when something fails on the way. VMs " +
+    "behind a router are not tested against each other.\n\nThis takes a few minutes. Start it?",
+    { title: "Connectivity Test", confirmLabel: "Start" }
+  );
+  if (!confirmed) return;
+  setMenubarBusy("Starting connectivity test…");
+  try {
+    const { job_id: jobId } = await maintenanceRequest("/maintenance/connectivity-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const status = await maintenanceRequest(`/maintenance/connectivity-test/${jobId}`);
+      if (status.status === "running") {
+        setMenubarBusy(`Connectivity test: ${status.phase || "working"}… (${Math.round(status.elapsed_seconds)} s)`);
+        continue;
+      }
+      setMenubarMessage(
+        status.all_ok ? "Connectivity test: every ping answered." : "Connectivity test: not every ping was answered.",
+        { error: !status.all_ok }
+      );
+      await showAlert(formatConnectivityReport(status), { title: "Connectivity Test" });
+      return;
+    }
+  } catch (err) {
+    setMenubarMessage(`Connectivity test failed: ${err.message || err}`);
+  }
+});
+
 document.getElementById("find-orphans-btn").addEventListener("click", async () => {
   setMenubarBusy("Looking for orphans…");
   try {

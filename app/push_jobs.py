@@ -106,6 +106,11 @@ def start_job(
     existing: PushJob | None = getattr(app.state, "push_job", None)
     if existing is not None and existing.status == "running":
         raise AlreadyRunning(f"push job {existing.id} is still running")
+    connectivity = getattr(app.state, "connectivity_job", None)
+    if connectivity is not None and connectivity.status == "running":
+        raise AlreadyRunning(
+            f"connectivity test {connectivity.id} is still running (it pushes too)"
+        )
     specs = normalize(devices)
     job = PushJob(
         id=uuid.uuid4().hex,

@@ -54,7 +54,7 @@ def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_versi
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/app.js?v=ginnungagap-33" in html
+    assert "/app.js?v=ginnungagap-34" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):
@@ -88,3 +88,12 @@ def test_import_progress_shows_elapsed_time_and_what_is_pending():
     js = (STATIC / "app.js").read_text()
     assert "function importProgressDetail(body)" in js
     assert "importProgressDetail(body)" in js.split("async function pollImportJob")[1]
+
+
+def test_connectivity_test_has_a_menu_item_and_a_report():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert 'id="connectivity-test-btn"' in html
+    assert "function formatConnectivityReport(result)" in js
+    assert '"/maintenance/connectivity-test"' in js
+    assert "/maintenance/connectivity-test/${jobId}" in js

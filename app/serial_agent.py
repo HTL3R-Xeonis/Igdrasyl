@@ -525,10 +525,13 @@ def run_commands(
     commands: list[str],
     on_progress: Callable[[int, int], None] | None = None,
     results: list[tuple[str, int | None, str]] | None = None,
+    continue_on_error: bool = False,
 ) -> list[tuple[str, int | None, str]]:
     """
     Runs the commands in order on a logged-in agent and stops at the first failing
-    one (a non-zero status, or no completion in time). Returns one
+    one (a non-zero status, or no completion in time). With continue_on_error a plain
+    non-zero status no longer stops the run; a command that did not complete in time
+    (code None) and a failed @reboot still do. Returns one
     (command, exit_code, output) per command that was executed. Pass your own `results`
     list to keep what already ran when the connection breaks half way.
     """
@@ -543,7 +546,9 @@ def run_commands(
         results.append((command, code, output))
         if on_progress is not None:
             on_progress(number, total)
-        if code != 0:
+        if code != 0 and (
+            code is None or directive is not None or not continue_on_error
+        ):
             break
     logger.debug(f"Serial agent ran {len(results)} of {total} command(s)")
     return results

@@ -135,7 +135,7 @@ def _fake_agent_run(outcomes, login_error=None):
             if login_error:
                 raise login_error
 
-    def run_commands(agent, commands, on_progress=None, results=None):
+    def run_commands(agent, commands, on_progress=None, results=None, **_):
         for i, (command, code, output) in enumerate(outcomes, 1):
             results.append((command, code, output))
             if on_progress:

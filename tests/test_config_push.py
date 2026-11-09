@@ -99,6 +99,58 @@ def test_push_via_guest_ops_stops_on_first_failure(graph):
     assert len(result.commands) == 2
 
 
+def test_push_via_guest_ops_carries_on_after_a_failure_when_asked(graph):
+    node = graph.nodes["VM1"]
+    fake_esxi = MagicMock()
+    fake_esxi.get_vm.return_value = MagicMock()
+    process_manager = fake_esxi.content.guestOperationsManager.processManager
+    process_manager.StartProgramInGuest.return_value = 1
+    ok_proc = MagicMock(endTime="t", exitCode=0)
+    fail_proc = MagicMock(endTime="t", exitCode=1)
+    process_manager.ListProcessesInGuest.side_effect = [
+        [ok_proc],
+        [fail_proc],
+        [ok_proc],
+    ]
+
+    with patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")):
+        result = cp._push_via_guest_ops(
+            node, ["ok", "bad", "after"], fake_esxi, continue_on_error=True
+        )
+
+    assert result.ok is False  # the device still counts as failed
+    assert [c.ok for c in result.commands] == [True, False, True]
+    assert result.executed == 3
+
+
+def test_push_via_netmiko_carries_on_after_a_failure_when_asked(graph, fake_tcp_server):
+    handler = lambda r, w: _fake_ios("bad command", r, w)
+    port = fake_tcp_server(handler)
+    node = graph.nodes["R1"]
+
+    result = cp._push_via_netmiko(
+        node,
+        ["show version", "bad command", "still runs"],
+        "127.0.0.1",
+        port,
+        continue_on_error=True,
+    )
+
+    assert result.ok is False
+    assert [c.command for c in result.commands] == [
+        "show version",
+        "bad command",
+        "still runs",
+    ]
+    assert [c.ok for c in result.commands] == [True, False, True]
+
+
+def test_device_spec_continues_on_error_only_when_asked():
+    assert cp.DeviceSpec(commands=["a"]).continue_on_error is False
+    spec = cp.normalize({"X": {"commands": ["a"], "continue_on_error": True}})["X"]
+    assert spec.continue_on_error is True
+
+
 def test_push_via_guest_ops_no_credentials_found(graph):
     node = graph.nodes["VM1"]
     fake_esxi = MagicMock()
@@ -446,7 +498,7 @@ def test_one_device_that_raises_does_not_take_the_others_down(graph):
     app.state.esxi_connection.get_vm.return_value = MagicMock()
     boom = {"VM1": RuntimeError("kaboom")}
 
-    def fake_guest_ops(node, commands, esxi, progress=None):
+    def fake_guest_ops(node, commands, esxi, progress=None, continue_on_error=False):
         if node.name in boom:
             raise boom[node.name]
         return cp.DeviceResult(device=node.name, transport="guest_ops", ok=True)
@@ -543,11 +595,11 @@ def test_push_all_processes_network_devices_first_but_returns_the_order_asked_fo
     app = _app_with_nodes(VM1=("ON_ESXI", "debian"), SW1=("ON_GNS3", "Cisco IOSvL2"))
     order: list[str] = []
 
-    def fake_guest(node, commands, esxi, progress):
+    def fake_guest(node, commands, esxi, progress, continue_on_error=False):
         order.append(node.name)
         return _result(node.name, ok=True)
 
-    def fake_netmiko(node, commands, ip, port, progress):
+    def fake_netmiko(node, commands, ip, port, progress, continue_on_error=False):
         order.append(node.name)
         return _result(node.name, ok=True)
 

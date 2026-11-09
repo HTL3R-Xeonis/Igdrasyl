@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-33">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-34">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -28,6 +28,7 @@
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
         <button class="menu-item" id="hold-project-btn" title="Parks the live project: powers off its VMs, closes its GNS3 project and protects everything from later deployments. Resume it later - nothing is deleted.">Hold Project…</button>
         <button class="menu-item" id="health-check-btn" title="Checks the live lab against the topology file (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups, links) and offers low-risk automatic repairs - never redeploys anything">Health Check…</button>
+        <button class="menu-item" id="connectivity-test-btn" title="Puts real traffic on the lab network: the VMs that share a switch get temporary addresses (198.18.x.x), every one pings every other, then the addresses are removed again. VMs behind a router are not tested against each other.">Connectivity Test…</button>
         <button class="menu-item" id="find-orphans-btn" title="Lists live GNS3 nodes and ESXi VMs that no node in the topology file describes anymore (what a partially failed delete leaves behind) and can delete them">Find Orphans…</button>
         <button class="menu-item" id="deploy-gns3-vm-btn" title="Replaces the GNS3 VM with a freshly imported one from its OVA - powers off and renames any existing one as a timestamped backup, with an option to permanently delete it once the new VM is confirmed working">Deploy Fresh GNS3 VM…</button>
       </div>
@@ -416,7 +417,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=ginnungagap-33"></script>
+<script src="/app.js?v=ginnungagap-34"></script>
 <script src="/projects.js?v=serial-1"></script>
 </body>
 </html>

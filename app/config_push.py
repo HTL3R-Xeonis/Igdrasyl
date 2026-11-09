@@ -75,9 +75,14 @@ class DeviceSpec(BaseModel):
     via: "auto" (guest operations when VMware Tools runs, else the serial console if the
     VM has one), "guest_ops" or "serial". profile/username/password only matter for the
     serial console (default: by image, and the template catalog's account).
+    continue_on_error: keep running the remaining commands after one that failed (a ping
+    without answer, a grep without hit); the device still counts as failed. Default: stop at
+    the first failing command. A command that could not even be started, a lost connection
+    and a failed @reboot always stop the device.
     """
 
     commands: list[str]
+    continue_on_error: bool = False
     via: Literal["auto", "guest_ops", "serial"] = "auto"
     profile: str | None = None
     username: str | None = None
@@ -176,6 +181,7 @@ def _push_via_netmiko(
     gns3_vm_ip: str,
     console_port: int,
     progress: Callable[[int, int], None] | None = None,
+    continue_on_error: bool = False,
 ) -> DeviceResult:
     from netmiko import ConnectHandler
     from netmiko.exceptions import (
@@ -254,7 +260,8 @@ def _push_via_netmiko(
                 progress(len(results), len(commands))
             if failed:
                 overall_ok = False
-                break
+                if not continue_on_error:
+                    break
     finally:
         conn.disconnect()
 
@@ -387,6 +394,7 @@ def _push_via_guest_ops(
     commands: list[str],
     esxi_connection: Any,
     progress: Callable[[int, int], None] | None = None,
+    continue_on_error: bool = False,
 ) -> DeviceResult:
     from pyVmomi import vim
 
@@ -447,7 +455,9 @@ def _push_via_guest_ops(
             not_ready = directive is None and exit_code is None and len(results) == 1
             if not_ready:
                 results[0].output = _guest_not_reachable_text(vm, output)
-            break
+            # Only a command that ran and returned non-zero may be skipped over.
+            if not (continue_on_error and directive is None and exit_code is not None):
+                break
 
     return _finish(
         node.name,
@@ -524,7 +534,11 @@ def _push_via_serial(
         with agent:
             agent.login()
             serial_agent.run_commands(
-                agent, spec.commands, on_progress=progress, results=outcomes
+                agent,
+                spec.commands,
+                on_progress=progress,
+                results=outcomes,
+                continue_on_error=spec.continue_on_error,
             )
     except serial_agent.LoginFailed as exc:
         return failed(str(exc))
@@ -808,7 +822,12 @@ def push_all(
                     )
                     continue
                 result = _push_via_netmiko(
-                    node, commands, app.state.gns3_vm_ip, console_port, progress
+                    node,
+                    commands,
+                    app.state.gns3_vm_ip,
+                    console_port,
+                    progress,
+                    spec.continue_on_error,
                 )
                 if result.not_ready:
                     result.error = _with_load_hint(result.error, app)
@@ -835,7 +854,11 @@ def push_all(
                 else:
                     results.append(
                         _push_via_guest_ops(
-                            node, commands, app.state.esxi_connection, progress
+                            node,
+                            commands,
+                            app.state.esxi_connection,
+                            progress,
+                            spec.continue_on_error,
                         )
                     )
             else:

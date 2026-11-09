@@ -243,6 +243,18 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   live GNS3 nodes and tool-created ESXi VMs that no node in the topology
   file describes anymore - what a partially failed live delete leaves behind
   - and can delete them after a second, explicit confirmation (irreversible).
+- **Connectivity test** (`app/connectivity_test.py`): File menu > "Connectivity Test…" puts real traffic on the lab
+  network, which the structural health check does not. The VMs that share one layer-2 segment (a switch or a direct link)
+  get a temporary address each from 198.18.0.0/15 (one /24 per segment), every one pings every other, and the addresses
+  are removed again - also when something fails on the way. VMs behind a router are not tested against each other (they
+  would fail for lack of routes, not because of the wiring) and are listed as skipped. It runs through the config-push
+  engine, so it needs VMware Tools; on Linux the interface is taken away from NetworkManager for the test (it removes
+  hand-set addresses otherwise), on Windows an ICMP firewall rule is added and removed. API:
+  `POST /maintenance/connectivity-test` (`{"nodes": [...], "count": 10, "size": 56}`, all optional) returns a `job_id`;
+  `GET /maintenance/connectivity-test/{job_id}` shows `phase`, then the `pairs` (sent, received, loss, average round trip),
+  `skipped`, `problems` and `all_ok`. Only one such test or config push runs at a time. Measured on the `big-lab-13`
+  lab: no loss at a few pings per second, but a single stream above about 40 packets per second loses packets (the
+  emulated path, not the ESXi host, is the limit).
 
 ## GNS3 VM Deploy
 
@@ -300,6 +312,10 @@ cp .env.example .env                    # fill in ESXI_PASSWORD/GNS3_PASSWORD
 export TOPOLOGYOPERATOR_SETTINGS=settings.yml
 uvicorn app.main:app --reload
 ```
+
+For a long-running instance add `--timeout-graceful-shutdown 10`: without it an old process that is still holding open
+console WebSockets can hang in its shutdown and survive a restart for days (seen on the test box, where `kill` had no effect
+and only `kill -9` helped).
 
 Open `http://localhost:8000/` (or wherever it's bound) - the landing
 page lists whatever settings.yml profiles have been uploaded via the
@@ -460,6 +476,9 @@ Windows is not supported. A device stops at its first failing command, the other
   `{"commands": [...], "via": "serial", "profile": "routeros", "username": "...", "password": "..."}` - `via` is `auto`,
   `guest_ops` or `serial`; the login defaults to the template catalog's account. (An explicit password in the object is
   stored in the project's `configs.json` on the server - prefer the catalog.)
+- **Carrying on after an error**: by default a device stops at its first failing command. `"continue_on_error": true` in the
+  object keeps running the remaining commands (useful for a ping without answer or a `grep` without hit); the device still
+  counts as failed. A command that could not even be started, a lost connection and a failed `@reboot` always stop it.
 
 **Restarting a device in the middle of a push.** Two lines in a device's command list are not sent but steer the push:
 `@reboot [seconds]` restarts the device, waits until it is back and then carries on with the next commands;
@@ -627,6 +646,8 @@ same restart flow as host changes. Import and live edits require a selected proj
   and every check's result), `GET /maintenance/orphans`, `POST
   /maintenance/orphans/delete` (`{"orphans": [{"type": "gns3_node" |
   "esxi_vm", "name": ...}]}`, permanent) - see Architecture above.
+- `POST /maintenance/connectivity-test`, `GET
+  /maintenance/connectivity-test/{job_id}` (see Architecture above).
 - `POST /gns3-vm/deploy`, `GET /gns3-vm/deploy/{job_id}` (see GNS3 VM
   Deploy above).
 - `WS /ws/console/{node}`, `WS /ws/vm-screen/{node}`.
