@@ -249,7 +249,9 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   are removed again - also when something fails on the way. VMs behind a router are not tested against each other (they
   would fail for lack of routes, not because of the wiring) and are listed as skipped. It runs through the config-push
   engine, so it needs VMware Tools; on Linux the interface is taken away from NetworkManager for the test (it removes
-  hand-set addresses otherwise), on Windows an ICMP firewall rule is added and removed. API:
+  hand-set addresses otherwise), on Windows an ICMP firewall rule is added and removed. The clean-up puts back only what the setup changed (a state file in the VM records
+  it): a Windows adapter that was on DHCP goes back to DHCP, one with a fixed address keeps it, and a Linux interface that was down is
+  switched off again. API:
   `POST /maintenance/connectivity-test` (`{"nodes": [...], "count": 10, "size": 56}`, all optional) returns a `job_id`;
   `GET /maintenance/connectivity-test/{job_id}` shows `phase`, then the `pairs` (sent, received, loss, average round trip),
   `skipped`, `problems` and `all_ok`. Only one such test or config push runs at a time. Measured on the `big-lab-13`

@@ -4595,6 +4595,7 @@ function applyDesignModeUI() {
   document.getElementById("reload-gns3-btn").hidden = designMode;
   document.getElementById("deploy-gns3-vm-btn").hidden = designMode;
   document.getElementById("health-check-btn").hidden = designMode;
+  document.getElementById("connectivity-test-btn").hidden = designMode;
   document.getElementById("hold-project-btn").hidden = designMode;
   document.getElementById("find-orphans-btn").hidden = designMode;
   document.getElementById("tab-push").hidden = designMode;

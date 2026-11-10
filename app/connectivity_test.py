@@ -159,11 +159,20 @@ def plan(
         unknown = [name for name in wanted if name not in graph.nodes]
         if unknown:
             raise ValueError(f"not in the topology: {', '.join(unknown)}")
+        not_vms = [name for name in wanted if graph.nodes[name].role not in HOST_ROLES]
+        if not_vms:
+            raise ValueError(
+                f"not a VM or PC (only those can be tested): {', '.join(not_vms)}"
+            )
     segments, skipped = _segments(graph, wanted)
     if not segments:
         raise NothingToTest(
             "no two VMs share a switch or a direct link - nothing to ping "
             "(VMs behind a router are not tested against each other)"
+        )
+    if len(segments) > 255 - FIRST_SEGMENT_OCTET:
+        raise NothingToTest(
+            f"too many separate segments ({len(segments)}): test a subset with 'nodes'"
         )
     hosts: list[Host] = []
     for index, members in enumerate(segments):
@@ -182,12 +191,24 @@ def plan(
 # ---------------------------------------------------------------- commands
 
 
+STATE_FILE_LINUX = "/tmp/xeonis-connectivity.state"
+STATE_FILE_WINDOWS = "C:\\Windows\\Temp\\xeonis-connectivity.state"
+
+
 def setup_commands(host: Host) -> list[str]:
+    """
+    Gives the VM its test address. Whatever the setup changes besides the address (a Windows
+    adapter's DHCP mode, a Linux interface that was down) is written to a state file first, so
+    the clean-up puts back exactly that and nothing more - a VM that was configured statically
+    must stay configured statically.
+    """
     if host.windows:
         return [
             (
                 f'powershell -NoProfile -Command "{_WINDOWS_FIND_ADAPTER}'
-                f"Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Disabled; "
+                f"$d = (Get-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily IPv4).Dhcp; "
+                f"Set-Content -Path {STATE_FILE_WINDOWS} -Value ('dhcp=' + $d); "
+                f"if ($d -eq 'Enabled') {{ Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Disabled }}; "
                 f"New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress {host.address} "
                 f"-PrefixLength {PREFIX_LENGTH} | Out-Null; "
                 f"New-NetFirewallRule -DisplayName {FIREWALL_RULE_NAME} -Direction Inbound "
@@ -197,6 +218,8 @@ def setup_commands(host: Host) -> list[str]:
         ]
     return [
         _LINUX_FIND_INTERFACE
+        + 'if [ $(( $(cat "/sys/class/net/$IF/flags") & 1 )) -eq 0 ]; '
+        + f"then echo link-was-down > {STATE_FILE_LINUX}; fi; "
         + 'ip link set "$IF" up; '
         + 'if command -v nmcli >/dev/null 2>&1; then nmcli device set "$IF" managed no || true; fi; '
         + f'ip addr add {host.address}/{PREFIX_LENGTH} dev "$IF" && echo "$IF {host.address}"'
@@ -204,13 +227,17 @@ def setup_commands(host: Host) -> list[str]:
 
 
 def cleanup_commands(host: Host) -> list[str]:
+    """Undoes setup_commands - safe to run when the setup failed half way or never ran."""
     if host.windows:
         return [
             (
                 f'powershell -NoProfile -Command "{_WINDOWS_FIND_ADAPTER}'
                 f"Remove-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress {host.address} "
                 f"-Confirm:$false -ErrorAction SilentlyContinue; "
-                f"Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Enabled; "
+                f"if ((Test-Path {STATE_FILE_WINDOWS}) -and "
+                f"((Get-Content {STATE_FILE_WINDOWS}) -eq 'dhcp=Enabled')) "
+                f"{{ Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Enabled }}; "
+                f"Remove-Item {STATE_FILE_WINDOWS} -ErrorAction SilentlyContinue; "
                 f"Remove-NetFirewallRule -DisplayName {FIREWALL_RULE_NAME} -ErrorAction SilentlyContinue; "
                 f'Write-Output done"'
             )
@@ -219,6 +246,7 @@ def cleanup_commands(host: Host) -> list[str]:
         _LINUX_FIND_INTERFACE
         + f'ip addr del {host.address}/{PREFIX_LENGTH} dev "$IF" 2>/dev/null; '
         + 'if command -v nmcli >/dev/null 2>&1; then nmcli device set "$IF" managed yes || true; fi; '
+        + f'if [ -f {STATE_FILE_LINUX} ]; then ip link set "$IF" down; rm -f {STATE_FILE_LINUX}; fi; '
         + "echo done"
     ]
 
@@ -276,12 +304,11 @@ def run(
     attempted: list[Host] = []
     try:
         job.phase = "setting temporary addresses"
+        # Before the push: even a setup that dies half way may have left an address behind.
+        attempted = list(hosts)
         setup = push(
             {host.name: setup_commands(host) for host in hosts}, app, on_progress=None
         )
-        attempted = list(
-            hosts
-        )  # even a half-done setup may have left an address behind
         job.problems.update({f"{n} (setup)": r for n, r in _failed(setup).items()})
         ready = {r.device for r in setup if r.ok}
 

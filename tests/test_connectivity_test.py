@@ -293,3 +293,46 @@ def test_a_config_push_waits_while_a_connectivity_test_runs(client, app_state):
     assert response.status_code == 409
     assert "connectivity test" in response.json()["detail"]
     app_state.connectivity_job = None
+
+
+def test_the_cleanup_only_puts_back_what_the_setup_changed():
+    linux = ct.Host("LXA", "198.18.200.1", windows=False, segment=0)
+    windows = ct.Host("WIN", "198.18.200.3", windows=True, segment=0)
+    # a Windows adapter that was configured statically must not be switched to DHCP
+    win_setup = ct.setup_commands(windows)[0]
+    win_cleanup = ct.cleanup_commands(windows)[0]
+    assert "dhcp=" in win_setup and "-Dhcp Disabled" in win_setup
+    assert "'dhcp=Enabled'" in win_cleanup  # DHCP comes back only if it was on before
+    assert "Remove-Item" in win_cleanup
+    # a Linux interface that was down goes down again, one that was up stays up
+    assert "link-was-down" in ct.setup_commands(linux)[0]
+    assert 'ip link set "$IF" down' in ct.cleanup_commands(linux)[0]
+    assert f"-f {ct.STATE_FILE_LINUX}" in ct.cleanup_commands(linux)[0]
+
+
+def test_the_cleanup_runs_even_when_the_setup_push_itself_blows_up():
+    calls = []
+
+    def push(devices, app, on_progress=None):
+        calls.append(devices)
+        if len(calls) == 1:
+            raise RuntimeError("ESXi dropped the connection")
+        return [result(name) for name in devices]
+
+    job = run_with(push)
+
+    assert job.status == "error" and "dropped" in job.error
+    assert len(calls) == 2 and set(calls[1]) == {"LXA", "LXB", "WIN"}
+
+
+def test_only_vms_can_be_named_and_too_many_segments_are_refused():
+    with pytest.raises(ValueError, match="R1"):
+        ct.plan(lab(), ["R1"])
+    graph = SimpleNamespace(nodes={})
+    for number in range(60):
+        a, b = FakeNode(f"A{number}", "VM"), FakeNode(f"B{number}", "VM")
+        connect(a, b)
+        graph.nodes[a.name] = a
+        graph.nodes[b.name] = b
+    with pytest.raises(ct.NothingToTest, match="too many"):
+        ct.plan(graph)

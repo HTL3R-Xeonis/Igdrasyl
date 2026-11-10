@@ -97,3 +97,4 @@ def test_connectivity_test_has_a_menu_item_and_a_report():
     assert "function formatConnectivityReport(result)" in js
     assert '"/maintenance/connectivity-test"' in js
     assert "/maintenance/connectivity-test/${jobId}" in js
+    assert 'getElementById("connectivity-test-btn").hidden = designMode' in js
