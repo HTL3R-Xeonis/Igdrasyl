@@ -71,7 +71,7 @@ def reload_gns3_project() -> dict[str, str]:
     try:
         reload_project(app.state.gns3_vm_ip, Settings.GNS3.PORT, app.state.project_id)
     except (requests.RequestException, TimeoutError) as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 

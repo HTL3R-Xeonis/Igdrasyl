@@ -146,7 +146,7 @@ def node_ports(name: str) -> list[dict[str, Any]]:
     try:
         return list_node_ports(app, name)
     except (ValueError, NoLiveProject) as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/layout")
@@ -198,7 +198,7 @@ def update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
     try:
         return label_layout.save_changes(changes)
     except ValueError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/notes")
@@ -240,7 +240,7 @@ def templates() -> dict[str, Any]:
     try:
         return topology_write.list_templates()
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
-        raise HTTPException(503, template_health.describe(exc))
+        raise HTTPException(503, template_health.describe(exc)) from exc
 
 
 @app.post("/nodes")
@@ -255,9 +255,9 @@ def add_node(request: AddNodeRequest) -> dict[str, str]:
     try:
         topology_write.add_node(app, request.name, request.role, request.image)
     except ValueError as exc:
-        raise HTTPException(400, template_health.explain(str(exc)))
+        raise HTTPException(400, template_health.explain(str(exc))) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -266,9 +266,9 @@ def remove_node(name: str) -> dict[str, str]:
     try:
         topology_write.remove_node(app, name)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -280,9 +280,9 @@ def add_link(request: AddLinkRequest) -> dict[str, str]:
             app, request.node1, request.if1, request.node2, request.if2
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -294,9 +294,9 @@ def remove_link(
     try:
         topology_write.remove_link(app, node1, node2, if1, if2)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -336,15 +336,15 @@ def set_link_options(
             options.corrupt_percent,
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     try:
         return link_options.set_options(
             app, node1, node2, if1=if1, if2=if2, **options.model_dump()
         )
     except (NoLiveProject, ValueError) as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/links/{node1}/{node2}/capture/start")
@@ -354,9 +354,9 @@ def start_link_capture(
     try:
         return capture.start_capture(app, node1, node2, if1, if2) or {"status": "ok"}
     except (NoLiveProject, ValueError) as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/links/{node1}/{node2}/capture/stop")
@@ -366,9 +366,9 @@ def stop_link_capture(
     try:
         capture.stop_capture(app, node1, node2, if1, if2)
     except (NoLiveProject, ValueError) as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -385,9 +385,9 @@ def stream_link_capture(
     try:
         upstream = capture.capture_stream(app, node1, node2, if1, if2)
     except (NoLiveProject, ValueError) as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return StreamingResponse(
         upstream.iter_content(chunk_size=4096),
         media_type="application/vnd.tcpdump.pcap",
@@ -425,9 +425,9 @@ def start_node(name: str) -> dict[str, str]:
     try:
         lifecycle.start_node(app, name)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -436,9 +436,9 @@ def stop_node(name: str) -> dict[str, str]:
     try:
         lifecycle.stop_node(app, name)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -447,9 +447,9 @@ def reload_node(name: str) -> dict[str, str]:
     try:
         lifecycle.reload_node(app, name)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"status": "ok"}
 
 

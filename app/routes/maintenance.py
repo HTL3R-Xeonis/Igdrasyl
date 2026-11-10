@@ -55,9 +55,9 @@ def maintenance_verify(request: VerifyRequest | None = None) -> dict[str, Any]:
     try:
         return maintenance.run_verify(app, fix, fix_subinterfaces)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
 
 
 class ConnectivityRequest(BaseModel):
@@ -108,9 +108,9 @@ def maintenance_orphans() -> dict[str, Any]:
     try:
         return {"orphans": maintenance.find_orphans(app)}
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
 
 
 @app.post("/maintenance/orphans/delete")
@@ -122,9 +122,9 @@ def maintenance_delete_orphans(request: DeleteOrphansRequest) -> dict[str, int]:
             app, [orphan.model_dump() for orphan in request.orphans]
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except LIVE_WRITE_ERRORS as exc:
-        raise HTTPException(502, str(exc))
+        raise HTTPException(502, str(exc)) from exc
     return {"deleted": deleted}
 
 
@@ -151,9 +151,9 @@ def deploy_gns3_vm(request: DeployGns3VmRequest | None = None) -> dict[str, str]
     try:
         job = gns3_vm_deploy_jobs.start_job(app, delete_old_vm=delete_old_vm)
     except gns3_vm_deploy_jobs.NotConfigured as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except gns3_vm_deploy_jobs.AlreadyRunning as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     return {"job_id": job.id}
 
 
@@ -166,15 +166,15 @@ def start_gns3_vm() -> dict[str, str]:
     try:
         return {"result": gns3_vm_power.start(app)}
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     except RuntimeError as exc:
         if isinstance(exc, esxi_session.EsxiUnavailable):
             raise
-        raise HTTPException(502, f"ESXi could not start the GNS3 VM: {exc}")
+        raise HTTPException(502, f"ESXi could not start the GNS3 VM: {exc}") from exc
     except (OSError, requests.exceptions.RequestException) as exc:
         raise HTTPException(
             502, f"ESXi could not be reached to start the GNS3 VM: {exc}"
-        )
+        ) from exc
 
 
 @app.get("/gns3-vm/deploy/{job_id}")

@@ -48,7 +48,7 @@ def design_templates() -> dict[str, Any]:
     try:
         return topology_write.list_templates()
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
-        raise HTTPException(503, template_health.describe(exc))
+        raise HTTPException(503, template_health.describe(exc)) from exc
 
 
 @app.get("/design/topology")
@@ -62,13 +62,13 @@ def design_add_node(request: AddNodeRequest) -> dict[str, str]:
         with design_history.step(app):
             design.add_node(app.state.design, request.name, request.role, request.image)
     except ValueError as exc:
-        raise HTTPException(400, template_health.explain(str(exc)))
+        raise HTTPException(400, template_health.explain(str(exc))) from exc
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
         # Environment.get_environment couldn't reach the template
         # service - same degraded-mode story as GET /templates above,
         # not a 500: the sketch itself is untouched, only classifying a
         # brand new node needs that service to be up.
-        raise HTTPException(503, template_health.describe(exc))
+        raise HTTPException(503, template_health.describe(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -79,7 +79,7 @@ def design_remove_node(name: str) -> dict[str, str]:
         with design_history.step(app):
             design.remove_node(app.state.design, name)
     except KeyError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -96,7 +96,7 @@ def design_add_link(request: AddLinkRequest) -> dict[str, str]:
                 request.if2,
             )
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -109,7 +109,7 @@ def design_remove_link(
         with design_history.step(app):
             design.remove_link(app.state.design, node1, node2, if1, if2)
     except KeyError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -154,7 +154,7 @@ def design_update_labels(update: LabelsUpdate) -> dict[str, dict[str, float]]:
         with design_history.step(app):
             label_layout.apply_changes(app.state.design.labels, changes)
     except ValueError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, str(exc)) from exc
     design_store.save(app.state.design)
     return app.state.design.labels
 
@@ -194,7 +194,7 @@ def design_delete(request: DesignDelete) -> dict[str, str]:
         with design_history.step(app):
             design.remove_many(app.state.design, request.nodes, request.links)
     except KeyError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 
@@ -223,9 +223,9 @@ def design_paste(request: DesignPaste) -> dict[str, str]:
                 [(l.node1, l.if1, l.node2, l.if2) for l in request.links],
             )
     except ValueError as exc:
-        raise HTTPException(400, template_health.explain(str(exc)))
+        raise HTTPException(400, template_health.explain(str(exc))) from exc
     except (TimeoutError, RuntimeError, requests.exceptions.RequestException) as exc:
-        raise HTTPException(503, str(exc))
+        raise HTTPException(503, str(exc)) from exc
     design_store.save(app.state.design)
     return {"status": "ok"}
 

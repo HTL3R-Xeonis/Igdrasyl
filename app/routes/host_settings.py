@@ -39,7 +39,7 @@ async def upload_settings_profile(file: UploadFile) -> dict[str, str]:
     try:
         settings_profiles.save_profile(file.filename, data)
     except settings_profiles.InvalidProfileName as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -145,9 +145,9 @@ def delete_settings_profile(filename: str) -> dict[str, str]:
         settings_profiles.delete_profile(filename)
         profile_secrets.delete(filename)
     except settings_profiles.InvalidProfileName as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     return {"status": "ok"}
 
 
@@ -162,7 +162,7 @@ def activate_settings_profile(filename: str) -> dict[str, str]:
     try:
         settings_profiles.restart_into_profile(filename)
     except settings_profiles.InvalidProfileName as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
+        raise HTTPException(404, str(exc)) from exc
     return {"status": "restarting"}
