@@ -253,8 +253,9 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   `POST /maintenance/connectivity-test` (`{"nodes": [...], "count": 10, "size": 56}`, all optional) returns a `job_id`;
   `GET /maintenance/connectivity-test/{job_id}` shows `phase`, then the `pairs` (sent, received, loss, average round trip),
   `skipped`, `problems` and `all_ok`. Only one such test or config push runs at a time. Measured on the `big-lab-13`
-  lab: no loss at a few pings per second, but a single stream above about 40 packets per second loses packets (the
-  emulated path, not the ESXi host, is the limit).
+  lab: 64-byte pings run without loss up to at least 200 per second, but 1400-byte pings above about 50 per second
+  (roughly 0.6 Mbit/s per direction) lose packets - the emulated path (QEMU switch image inside the GNS3 VM), not the ESXi
+  host, is the limit.
 
 ## GNS3 VM Deploy
 
