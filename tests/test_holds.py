@@ -171,7 +171,7 @@ def test_deploying_a_project_on_hold_is_refused(client, app_state):
         "selected": True,
         "project": {"name": "Office"},
     }
-    with patch("app.main.project_library.deployment_preview", return_value=preview):
+    with patch("app.project_library.deployment_preview", return_value=preview):
         response = client.post(f"/projects/{PROJECT_ID}/deploy/host.yml")
     assert response.status_code == 409
     assert "resume" in response.json()["detail"]
@@ -181,7 +181,7 @@ def test_hold_and_resume_endpoints_map_errors(client, app_state):
     _live(app_state)
     selection = {"project_id": PROJECT_ID, "project_name": "Office"}
     with (
-        patch("app.main.project_selection.get_selection", return_value=selection),
+        patch("app.project_selection.get_selection", return_value=selection),
         patch("app.holds.GNS3Connection.post"),
     ):
         assert client.post("/project/hold").status_code == 200
@@ -203,9 +203,7 @@ def test_delete_removes_the_project_and_clears_the_designer_link(client, app_sta
 
 def test_delete_is_refused_for_a_project_selected_by_a_host(client):
     project = project_library.create("In use")
-    with patch(
-        "app.main.project_selection.hosts_using", return_value=["lab.yml", "b.yml"]
-    ):
+    with patch("app.project_selection.hosts_using", return_value=["lab.yml", "b.yml"]):
         response = client.delete(f"/projects/{project['id']}")
     assert response.status_code == 409
     assert "lab.yml" in response.json()["detail"]
@@ -254,7 +252,7 @@ def test_resume_starts_a_push_job_for_the_saved_configs_when_the_project_wants_t
         patch(
             "app.holds.maintenance.run_verify", return_value={"passed": 1, "total": 1}
         ),
-        patch("app.main.push_jobs.start_job", return_value=fake_job) as start,
+        patch("app.push_jobs.start_job", return_value=fake_job) as start,
     ):
         response = client.post(f"/projects/{project['id']}/resume")
 
@@ -280,7 +278,7 @@ def test_resume_pushes_nothing_without_the_switch(client, app_state):
         patch(
             "app.holds.maintenance.run_verify", return_value={"passed": 1, "total": 1}
         ),
-        patch("app.main.push_jobs.start_job") as start,
+        patch("app.push_jobs.start_job") as start,
     ):
         response = client.post(f"/projects/{project['id']}/resume")
     assert response.status_code == 200

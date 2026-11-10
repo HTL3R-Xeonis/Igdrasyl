@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import yaml
+from frontend_js import read_app_js
 from src.settings import Settings
 
 STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
@@ -56,13 +57,13 @@ def test_a_garbage_bundle_gives_an_empty_preview_not_an_error(client, app_state)
 
 
 def test_the_import_asks_before_deleting_even_with_disruption_warnings_off():
-    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    js = read_app_js()
     assert 'fetch("/project/import/preview"' in js
     assert 'confirmLabel: "Delete and import", danger: true' in js
 
 
 def test_menubar_messages_can_be_dismissed_with_a_small_x():
-    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    js = read_app_js()
     css = (STATIC / "styles.css").read_text(encoding="utf-8")
     assert 'close.className = "menubar-dismiss"' in js
     assert 'close.addEventListener("click", clearMenubarStatus)' in js

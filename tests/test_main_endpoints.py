@@ -65,7 +65,7 @@ def test_reload_gns3_project_closes_and_reopens(client, app_state):
     app_state.project_id = "proj-1"
     app_state.gns3_vm_ip = "10.20.20.231"
 
-    with patch("app.main.reload_project") as fake_reload:
+    with patch("app.routes.projects.reload_project") as fake_reload:
         resp = client.post("/project/reload-gns3")
 
     assert resp.status_code == 200, resp.text
@@ -82,7 +82,10 @@ def test_reload_gns3_project_502s_on_gns3_failure(client, app_state):
     app_state.project_id = "proj-1"
     app_state.gns3_vm_ip = "10.20.20.231"
 
-    with patch("app.main.reload_project", side_effect=requests.ConnectionError("boom")):
+    with patch(
+        "app.routes.projects.reload_project",
+        side_effect=requests.ConnectionError("boom"),
+    ):
         resp = client.post("/project/reload-gns3")
 
     assert resp.status_code == 502
@@ -92,7 +95,7 @@ def test_deploy_gns3_vm_400s_when_unconfigured(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     with patch(
-        "app.main.gns3_vm_deploy_jobs.start_job",
+        "app.gns3_vm_deploy_jobs.start_job",
         side_effect=gns3_vm_deploy_jobs.NotConfigured("not configured"),
     ):
         resp = client.post("/gns3-vm/deploy")
@@ -103,7 +106,7 @@ def test_deploy_gns3_vm_409s_when_already_running(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     with patch(
-        "app.main.gns3_vm_deploy_jobs.start_job",
+        "app.gns3_vm_deploy_jobs.start_job",
         side_effect=gns3_vm_deploy_jobs.AlreadyRunning("already running"),
     ):
         resp = client.post("/gns3-vm/deploy")
@@ -114,7 +117,7 @@ def test_deploy_gns3_vm_returns_job_id(client, app_state):
     from app import gns3_vm_deploy_jobs
 
     fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
-    with patch("app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job):
+    with patch("app.gns3_vm_deploy_jobs.start_job", return_value=fake_job):
         resp = client.post("/gns3-vm/deploy")
     assert resp.status_code == 200
     assert resp.json() == {"job_id": "job-1"}
@@ -125,7 +128,7 @@ def test_deploy_gns3_vm_defaults_to_keeping_the_old_vm(client, app_state):
 
     fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
     with patch(
-        "app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job
+        "app.gns3_vm_deploy_jobs.start_job", return_value=fake_job
     ) as fake_start:
         resp = client.post("/gns3-vm/deploy")
     assert resp.status_code == 200
@@ -137,7 +140,7 @@ def test_deploy_gns3_vm_forwards_delete_old_vm(client, app_state):
 
     fake_job = gns3_vm_deploy_jobs.GNS3VMDeployJob(id="job-1")
     with patch(
-        "app.main.gns3_vm_deploy_jobs.start_job", return_value=fake_job
+        "app.gns3_vm_deploy_jobs.start_job", return_value=fake_job
     ) as fake_start:
         resp = client.post("/gns3-vm/deploy", json={"delete_old_vm": True})
     assert resp.status_code == 200
@@ -221,9 +224,7 @@ def test_topology_lists_every_link_with_the_interface_on_the_far_side(
 def test_link_endpoints_pass_the_interfaces_on_to_capture_and_options(
     client, app_state
 ):
-    with patch(
-        "app.main.capture.start_capture", return_value={"status": "ok"}
-    ) as start:
+    with patch("app.capture.start_capture", return_value={"status": "ok"}) as start:
         assert (
             client.post(
                 "/links/R1/SW1/capture/start", params={"if1": "Gi0/1", "if2": "Gi0/2"}
@@ -232,7 +233,7 @@ def test_link_endpoints_pass_the_interfaces_on_to_capture_and_options(
         )
     start.assert_called_once_with(app_module.app, "R1", "SW1", "Gi0/1", "Gi0/2")
 
-    with patch("app.main.capture.stop_capture") as stop:
+    with patch("app.capture.stop_capture") as stop:
         assert (
             client.post(
                 "/links/R1/SW1/capture/stop", params={"if1": "Gi0/1"}
@@ -241,7 +242,7 @@ def test_link_endpoints_pass_the_interfaces_on_to_capture_and_options(
         )
     stop.assert_called_once_with(app_module.app, "R1", "SW1", "Gi0/1", None)
 
-    with patch("app.main.link_options.set_options", return_value={}) as options:
+    with patch("app.link_options.set_options", return_value={}) as options:
         assert (
             client.put(
                 "/links/R1/SW1/options",
@@ -259,7 +260,7 @@ def test_link_endpoints_pass_the_interfaces_on_to_capture_and_options(
 def test_design_remove_link_takes_the_interfaces_to_remove_one_of_several(
     client, app_state
 ):
-    with patch("app.main.design.remove_link") as remove:
+    with patch("app.design.remove_link") as remove:
         assert (
             client.delete(
                 "/design/links/R1/R2", params={"if1": "Gi0/1", "if2": "Gi0/1"}
@@ -750,7 +751,7 @@ def test_generate_design_returns_job_id(client, app_state):
     from app import generate_jobs
 
     fake_job = generate_jobs.GenerateJob(id="job-1", max_attempts=4)
-    with patch("app.main.generate_jobs.start_job", return_value=fake_job):
+    with patch("app.generate_jobs.start_job", return_value=fake_job):
         resp = client.post(
             "/design/generate", json={"prompt": "a small office network"}
         )
@@ -824,9 +825,9 @@ def test_template_lists_503_with_a_readable_reason_when_the_service_is_down(
         "HTTPConnectionPool(host='x', port=9): Max retries exceeded"
     )
     with (
-        patch("app.main.topology_write.list_templates", side_effect=down),
+        patch("app.topology_write.list_templates", side_effect=down),
         patch(
-            "app.main.template_health.describe",
+            "app.template_health.describe",
             return_value="The ESXi template service (x) is not reachable.",
         ),
     ):
@@ -841,9 +842,9 @@ def test_reload_endpoint_recovers_after_a_transient_failure(client, app_state):
     app_state.startup_warning = "boom"
 
     with (
-        patch("app.main.load_graph") as fake_load_graph,
-        patch("app.main.resolve_project_id", return_value=None),
-        patch("app.main.gns3_vm_deploy_jobs.auto_deploy_if_missing"),
+        patch("app.startup.load_graph") as fake_load_graph,
+        patch("app.startup.resolve_project_id", return_value=None),
+        patch("app.gns3_vm_deploy_jobs.auto_deploy_if_missing"),
     ):
         fake_load_graph.return_value = MagicMock(nodes={})
         resp = client.post("/reload")
@@ -953,7 +954,7 @@ def test_health_offers_the_selected_project_when_gns3_has_none(
     app_state.project_id = None
     app_state.gns3_vm_ip = "10.0.0.5"
     selection = {"project_id": "abc", "project_name": "Office"}
-    with patch("app.main.project_selection.get_selection", return_value=selection):
+    with patch("app.project_selection.get_selection", return_value=selection):
         offered = client.get("/health").json()["deployable_project"]
         assert offered == {"id": "abc", "name": "Office", "filename": "host.yml"}
 
@@ -974,12 +975,12 @@ def test_health_offers_nothing_without_a_selected_project(
     app_state.project_id = None
     app_state.gns3_vm_ip = "10.0.0.5"
     selection = {"project_id": None, "project_name": None}
-    with patch("app.main.project_selection.get_selection", return_value=selection):
+    with patch("app.project_selection.get_selection", return_value=selection):
         assert client.get("/health").json()["deployable_project"] is None
 
 
 def test_the_page_and_scripts_are_revalidated_on_every_load(client):
-    for path in ("/", "/app.js"):
+    for path in ("/", "/core.js"):
         assert client.get(path).headers["cache-control"] == "no-cache"
 
 

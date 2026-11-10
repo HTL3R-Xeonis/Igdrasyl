@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 import requests
+from frontend_js import read_app_js
 from src.settings import Settings
 
 from app import design, node_credentials, node_notes, project_bundle
@@ -223,7 +224,7 @@ def test_an_unreachable_template_service_is_reported_not_raised(real_template_lo
 
 def test_the_credentials_endpoints_use_the_nodes_image(client, app_state):
     with patch(
-        "app.main.node_credentials.for_image", return_value={"source": None}
+        "app.node_credentials.for_image", return_value={"source": None}
     ) as lookup:
         assert client.get("/nodes/R1/credentials").status_code == 200
     assert lookup.call_args.args[0] == app_state.graph.nodes["R1"].image
@@ -244,11 +245,8 @@ def test_the_node_popup_has_a_note_button_and_the_page_a_note_dialog():
 
 
 def test_default_logins_are_rendered_without_innerhtml():
-    from pathlib import Path
 
-    js = (
-        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-    ).read_text(encoding="utf-8")
+    js = read_app_js()
     start = js.index("function renderNodeLogins")
     body = js[start : js.index("async function openNodeNote")]
     assert "innerHTML" not in body  # a template's text must never be parsed as markup

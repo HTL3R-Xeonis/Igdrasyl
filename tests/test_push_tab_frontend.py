@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from frontend_js import read_app_js
 
 import app.config_push as cp
 import app.main as main_module
@@ -24,11 +25,11 @@ STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
 
 
 def _waiting_text(names) -> str:
-    source = (STATIC / "app.js").read_text()
+    source = read_app_js()
     match = re.search(
         r"^function pushWaitingText\(.*?^\}", source, re.DOTALL | re.MULTILINE
     )
-    assert match, "pushWaitingText is missing from app.js"
+    assert match, "pushWaitingText is missing from the frontend scripts"
     script = (
         f"{match.group(0)}\nprocess.stdout.write(pushWaitingText({json.dumps(names)}));"
     )
@@ -49,12 +50,12 @@ def test_the_waiting_line_names_the_devices_and_is_empty_without_any():
 
 
 def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_version():
-    source = (STATIC / "app.js").read_text()
+    source = read_app_js()
     progress = source[source.index("function renderPushProgress") :]
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/app.js?v=ginnungagap-34" in html
+    assert "/core.js?v=ginnungagap-35" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):
@@ -78,21 +79,21 @@ def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state
 
 def test_design_mode_has_a_clear_topology_menu_item():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    js = read_app_js()
     assert 'id="clear-design-btn"' in html
     assert 'fetch("/design/reset", { method: "POST" })' in js
     assert '"clear-design-btn").hidden = !designMode' in js
 
 
 def test_import_progress_shows_elapsed_time_and_what_is_pending():
-    js = (STATIC / "app.js").read_text()
+    js = read_app_js()
     assert "function importProgressDetail(body)" in js
     assert "importProgressDetail(body)" in js.split("async function pollImportJob")[1]
 
 
 def test_connectivity_test_has_a_menu_item_and_a_report():
     html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
+    js = read_app_js()
     assert 'id="connectivity-test-btn"' in html
     assert "function formatConnectivityReport(result)" in js
     assert '"/maintenance/connectivity-test"' in js

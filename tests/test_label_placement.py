@@ -1,5 +1,5 @@
 """
-The automatic placement of port labels (app.js, the block between the "label placement" markers) is pure geometry,
+The automatic placement of port labels (the frontend scripts, the block between the "label placement" markers) is pure geometry,
 so it is run here under node. Skipped where node is not installed.
 """
 
@@ -7,11 +7,9 @@ import json
 import math
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
-
-APP_JS = Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
+from frontend_js import read_app_js
 
 pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="node is not installed"
@@ -19,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _block() -> str:
-    js = APP_JS.read_text(encoding="utf-8")
+    js = read_app_js()
     start = js.index("// ---- label placement")
     end = js.index("// ---- end label placement ----")
     return js[start:end]

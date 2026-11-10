@@ -120,7 +120,7 @@ def test_the_in_app_logs_panel_still_has_history_right_after_a_rotation(
 
 def test_template_health_is_served_and_redacted(client):
     healthy = {"ok": True, "problems": [], "esxi_templates": 1, "gns3_templates": 2}
-    with patch("app.main.template_health.check", return_value=healthy):
+    with patch("app.template_health.check", return_value=healthy):
         body = client.get("/templates/health").json()
 
     assert body["ok"] is True and body["gns3_templates"] == 2
@@ -134,7 +134,7 @@ def test_an_image_error_from_adding_a_design_node_names_the_template_problem(cli
     with (
         patch("app.template_health.check", return_value=problem),
         patch(
-            "app.main.design.add_node",
+            "app.design.add_node",
             side_effect=ValueError("Image VPCS not found on ESXi or GNS3"),
         ),
     ):

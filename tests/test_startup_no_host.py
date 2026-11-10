@@ -7,20 +7,22 @@ on it.
 from unittest.mock import MagicMock, patch
 
 import app.main as main_module
+from app.routes.common import SETTINGS_ENV_VAR
+from app.startup import refresh_startup_state
 
 
 def _refresh(app_state, active_host: str | None, monkeypatch):
     if active_host is None:
-        monkeypatch.delenv(main_module._SETTINGS_ENV_VAR, raising=False)
+        monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
     else:
-        monkeypatch.setenv(main_module._SETTINGS_ENV_VAR, active_host)
+        monkeypatch.setenv(SETTINGS_ENV_VAR, active_host)
     app_state.esxi_connection = MagicMock(name="esxi")
     app_state.esxi_connection.get_vm_ip_address.return_value = None
     with (
-        patch("app.main.load_graph", return_value=app_state.graph),
-        patch("app.main.gns3_vm_deploy_jobs.auto_deploy_if_missing") as auto_deploy,
+        patch("app.startup.load_graph", return_value=app_state.graph),
+        patch("app.gns3_vm_deploy_jobs.auto_deploy_if_missing") as auto_deploy,
     ):
-        main_module._refresh_startup_state(main_module.app)
+        refresh_startup_state(main_module.app)
     return auto_deploy
 
 
@@ -37,9 +39,11 @@ def test_without_an_active_host_nothing_is_looked_up_and_nothing_is_warned_about
 def test_the_topology_problem_is_still_reported_without_an_active_host(
     app_state, monkeypatch
 ):
-    monkeypatch.delenv(main_module._SETTINGS_ENV_VAR, raising=False)
-    with patch("app.main.load_graph", side_effect=ValueError("No project selected.")):
-        main_module._refresh_startup_state(main_module.app)
+    monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
+    with patch(
+        "app.startup.load_graph", side_effect=ValueError("No project selected.")
+    ):
+        refresh_startup_state(main_module.app)
     assert (
         app_state.graph is None and "No project selected" in app_state.startup_warning
     )

@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+import app.startup as startup_module
 from app import esxi_session
 from app.esxi_session import EsxiUnavailable, LazyESXiConnection
 
@@ -143,12 +144,12 @@ def test_the_app_starts_although_the_esxi_host_is_down():
     esxi = MagicMock(side_effect=OSError("host down"))
     try:
         with (
-            patch.object(main_module, "ESXiConnection", esxi),
-            patch.object(main_module, "_refresh_startup_state"),
-            patch.object(main_module, "configure_logging"),
-            patch.object(main_module.startup_retry, "start"),
-            patch.object(main_module.ova_templates, "initialise"),
-            patch.object(main_module.project_selection, "initialise"),
+            patch.object(startup_module, "ESXiConnection", esxi),
+            patch.object(startup_module, "refresh_startup_state"),
+            patch.object(startup_module, "configure_logging"),
+            patch.object(startup_module.startup_retry, "start"),
+            patch.object(startup_module.ova_templates, "initialise"),
+            patch.object(startup_module.project_selection, "initialise"),
             TestClient(app) as started,
         ):
             esxi.assert_not_called()  # startup did not touch ESXi

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from frontend_js import read_app_js
 from src.settings import Settings
 
 from app import esxi_session, gns3_vm_power
@@ -145,7 +146,7 @@ def test_the_banner_offers_a_start_button_for_the_gns3_vm():
 
     static = Path(__file__).resolve().parent.parent / "app" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
-    js = (static / "app.js").read_text(encoding="utf-8")
+    js = read_app_js()
     assert 'id="warning-gns3vm-btn"' in html
     assert 'fetch("/gns3-vm/start", { method: "POST" })' in js
     assert "gns3Vm: designMode ? null : health.gns3_vm" in js
@@ -157,12 +158,12 @@ def test_template_health_carries_the_power_state_only_when_unhealthy(client, app
     _esxi(app_state, "poweredOff")
     app_state.gns3_vm_ip = None
     broken = {"ok": False, "problems": ["The GNS3 template service lists 0 templates."]}
-    with patch("app.main.template_health.check", return_value=broken):
+    with patch("app.template_health.check", return_value=broken):
         body = client.get("/templates/health").json()
     assert body["gns3_vm"]["action"] == "start"
 
     healthy = {"ok": True, "problems": []}
-    with patch("app.main.template_health.check", return_value=healthy):
+    with patch("app.template_health.check", return_value=healthy):
         assert "gns3_vm" not in client.get("/templates/health").json()
 
 
@@ -171,7 +172,7 @@ def test_the_template_banner_offers_the_same_button():
 
     static = Path(__file__).resolve().parent.parent / "app" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
-    js = (static / "app.js").read_text(encoding="utf-8")
+    js = read_app_js()
     assert 'id="template-gns3vm-btn"' in html
     assert "startGns3Vm(templateGns3Vm" in js
     assert "health.gns3_vm" in js
@@ -233,11 +234,8 @@ def test_template_health_says_whether_asking_for_a_refresh_can_help(monkeypatch)
 
 
 def test_both_banners_say_what_the_start_is_doing_instead_of_the_old_problem_text():
-    from pathlib import Path
 
-    js = (
-        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-    ).read_text(encoding="utf-8")
+    js = read_app_js()
     assert "setGns3VmProgress(" in js
     assert "text && gns3VmProgress ? gns3VmProgress : text" in js
     assert "gns3VmProgress || `Template service problem" in js
@@ -245,20 +243,14 @@ def test_both_banners_say_what_the_start_is_doing_instead_of_the_old_problem_tex
 
 
 def test_check_again_stays_silent_when_a_service_cannot_be_asked():
-    from pathlib import Path
 
-    js = (
-        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-    ).read_text(encoding="utf-8")
+    js = read_app_js()
     assert "could not be asked to read their sources again" not in js
     assert "Could not ask the template services" not in js
 
 
 def test_the_status_line_reads_connected_colon_nodes_with_the_running_count_in_brackets():
-    from pathlib import Path
 
-    js = (
-        Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-    ).read_text(encoding="utf-8")
+    js = read_app_js()
     assert '${designMode ? "Design" : "Connected"}: ${parts.join(", ")}' in js
     assert "` (${running} running)`" in js

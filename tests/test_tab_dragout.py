@@ -1,6 +1,6 @@
 """
 Dragging a console/screen tab out of the panel opens that session in its own window. The decision "is this a drag, and is it
-far enough outside the panel" is pure geometry (app.js, the block between the "tab drag-out" markers) and is run here under
+far enough outside the panel" is pure geometry (the frontend scripts, the block between the "tab drag-out" markers) and is run here under
 node, skipped where node is not installed; the wiring is checked as text.
 """
 
@@ -11,10 +11,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from frontend_js import read_app_js
 
-APP_JS = (
-    Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-).read_text(encoding="utf-8")
+APP_JS = read_app_js()
 CSS = (
     Path(__file__).resolve().parent.parent / "app" / "static" / "styles.css"
 ).read_text(encoding="utf-8")

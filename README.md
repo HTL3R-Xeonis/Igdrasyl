@@ -28,7 +28,22 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 ## Architecture
 
 - Web app: a FastAPI backend (`app/`) + a plain HTML/JS frontend
-  (`app/static/index.html`, `styles.css`, `app.js`, and `projects.js`), not a native desktop app.
+  (`app/static/index.html`, `styles.css` and several scripts), not a native desktop app.
+- **Layout of the backend**: `app/main.py` only wires things together (middleware, error handlers, the WebSocket routes, the
+  frontend mount). The FastAPI instance is in `app/application.py`, the startup (topology and GNS3 project resolution, retry
+  loop, lifespan, banner state) in `app/startup.py`, and the HTTP endpoints in `app/routes/`, one module per area: `system`
+  (health, reload, logs, template status), `live` (topology, nodes, layout, labels, notes, links, capture, serial, start/stop),
+  `push` (config push), `design` (the offline design canvas and canvas annotations), `projects` (bundles, project library,
+  hold/resume, saved configs, deploy), `maintenance` (health check, connectivity test, orphans, GNS3 VM deploy) and
+  `host_settings` (settings profiles, host configuration, connections, OVA templates). `app/main.py` imports the route
+  modules in a fixed order, because Starlette tries routes in registration order.
+- **Layout of the frontend**: no bundler. The scripts are plain classic scripts that `index.html` loads in a fixed order and
+  that share one global scope: `core.js`, `canvas-state.js`, `label-placement.js`, `drawings.js`, `canvas-render.js`,
+  `edit-actions.js`, `link-actions-and-capture.js`, `palette-and-screenshot.js`, `import-and-generate.js`,
+  `connection-settings-and-maintenance.js`, `consoles-and-push.js`, then `projects.js` (each starts with a comment saying what
+  it holds). Because of the shared scope the order matters only for code that runs while a file loads; a function defined in a
+  later file can be used by a callback at any time. Tests that look at the frontend read all of them in load order
+  (`tests/frontend_js.py`).
 - Depends on TopologyBuilder as an installed library
   (`ESXiConnection`/`GNS3Connection`/`Settings`/`Graph`), not a copy of
   its code. Its top-level package name is `src`, so this project's own
@@ -189,7 +204,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 - **Automatic label placement**: port labels you have not moved are placed on the first free spot next to their link endpoint (text
   grows away from the node; nudged outward/sideways around icons, names, other labels and the lines of *other* links;
   lying on its own line is fine), so a switch with five links no longer
-  stacks them. Pure geometry in `app.js` (`placePortLabels`), run under `node` by `tests/test_label_placement.py`; moved labels stay
+  stacks them. Pure geometry in `label-placement.js` (`placePortLabels`), run under `node` by `tests/test_label_placement.py`; moved labels stay
   exactly where they were put and count as obstacles for the others.
 - **Movable labels**: port labels and node names are dragged with the mouse (double-click puts one back; View menu >
   Reset Label Positions resets all). They sit in a layer above the nodes, so no icon hides one, and keep a halo so
