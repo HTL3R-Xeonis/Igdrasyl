@@ -104,7 +104,14 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   100 % while the job still runs - a big Windows image makes the bar stand
   still for minutes. A bundle can opt itself into
   running its own config-push automatically right after the deploy
-  succeeds (`manifest.json`'s `auto_config_push`).
+  succeeds (`manifest.json`'s `auto_config_push`). Verified live against a
+  real, full (non-incremental) import: the bar, clock and phase text all
+  update correctly. That same test also found TopologyBuilder's own
+  deploy call could hang indefinitely if the ESXi/GNS3-VM connection died
+  mid-deploy (no timeout anywhere in that path) - fixed there
+  (`ESXiConnection`/`GNS3VMInterfaceSetup` now bound every task wait and
+  SSH read), so a future import fails with a clear error instead of
+  hanging forever.
 - Node canvas positions (`app/layout.py`) are a TopologyOperator-owned
   concern, independent of GNS3's own node x/y - saved from drags, a
   bundle's own layout.json, or a shared force-directed default
