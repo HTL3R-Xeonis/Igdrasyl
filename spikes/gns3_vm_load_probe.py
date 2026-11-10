@@ -48,7 +48,7 @@ READ_ONLY_COMMANDS = [
     ),
     (
         "threads by CPU, 3 samples of 10 s",
-        "top -b -H -n 3 -d 10 -w 200 | grep -E '^top|^%Cpu|qemu|ubridge|ksoftirq|vhost' | head -60",
+        "top -b -H -n 3 -d 10 -w 200 | grep -E '^top|^%Cpu|qemu|ubridge|ksoftirq|vhost' | awk '/^top|^%Cpu/ || $9 > 5' | head -40",
     ),
     ("softirq and interrupts", "grep -E 'NET_RX|NET_TX' /proc/softirqs"),
 ]
@@ -80,6 +80,7 @@ def main():
     print("== setting temporary addresses", flush=True)
     push({host.name: ct.setup_commands(host) for host in HOSTS})
     try:
+        started = time.monotonic()
         print(
             f"== starting {STREAM_SECONDS} s of 1400 B x 100 pps, LXWEB -> LXDB",
             flush=True,
@@ -113,7 +114,7 @@ def main():
         finally:
             client.close()
 
-        time.sleep(max(0, STREAM_SECONDS - 40))
+        time.sleep(max(0, STREAM_SECONDS - (time.monotonic() - started) + 5))
         result = push(
             {
                 "LXWEB": {

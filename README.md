@@ -255,7 +255,8 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   `skipped`, `problems` and `all_ok`. Only one such test or config push runs at a time. Measured on the `big-lab-13`
   lab: 64-byte pings run without loss up to at least 200 per second, but 1400-byte pings above about 50 per second
   (roughly 0.6 Mbit/s per direction) lose packets - the emulated path (QEMU switch image inside the GNS3 VM), not the ESXi
-  host, is the limit.
+  host, is the limit. Measured on the GNS3 VM under load (`spikes/gns3_vm_load_probe.py`): the single vCPU of the switch node
+  `SW1` (Cisco `vios_l2`) sits at 99.9 % while the VM as a whole is still a third idle; KVM and nested virtualization are active.
 
 ## GNS3 VM Deploy
 
