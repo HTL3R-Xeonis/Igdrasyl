@@ -45,6 +45,27 @@ def test_create_job_sets_total_from_target_names(app_state):
     assert job.completed == 0
 
 
+def test_create_job_prunes_old_finished_jobs_but_keeps_running_ones(app_state):
+    app = _fake_app(app_state)
+    app.state.import_jobs = {}
+    for i in range(import_jobs._MAX_FINISHED_JOBS + 10):
+        old = import_jobs.ImportJob(id=f"finished-{i}", total=1, status="done")
+        app.state.import_jobs[old.id] = old
+    running = import_jobs.ImportJob(id="still-running", total=1, status="running")
+    app.state.import_jobs[running.id] = running
+
+    import_jobs.create_job(app, {"R1"})
+
+    jobs = app.state.import_jobs
+    assert running.id in jobs
+    assert sum(1 for job in jobs.values() if job.status != "running") <= (
+        import_jobs._MAX_FINISHED_JOBS
+    )
+    # The oldest finished jobs are the ones dropped, not the newest.
+    assert "finished-0" not in jobs
+    assert f"finished-{import_jobs._MAX_FINISHED_JOBS + 9}" in jobs
+
+
 def test_poll_progress_counts_live_esxi_vms_by_name(app_state):
     app = _fake_app(app_state)
     job = import_jobs.create_job(app, {"VM1", "VM2"})

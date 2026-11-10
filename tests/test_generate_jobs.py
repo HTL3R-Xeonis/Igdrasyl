@@ -222,3 +222,22 @@ def test_start_job_runs_in_the_background_and_completes(app_state):
 
     assert job.status == "done"
     assert app_state.generate_jobs[job.id] is job
+
+
+def test_prune_finished_drops_oldest_finished_jobs_but_keeps_running_ones():
+    jobs = {
+        f"finished-{i}": generate_jobs.GenerateJob(id=f"finished-{i}", status="done")
+        for i in range(generate_jobs._MAX_FINISHED_JOBS + 10)
+    }
+    jobs["still-running"] = generate_jobs.GenerateJob(
+        id="still-running", status="running"
+    )
+
+    generate_jobs._prune_finished(jobs)
+
+    assert "still-running" in jobs
+    assert sum(1 for job in jobs.values() if job.status != "running") == (
+        generate_jobs._MAX_FINISHED_JOBS
+    )
+    assert "finished-0" not in jobs
+    assert f"finished-{generate_jobs._MAX_FINISHED_JOBS + 9}" in jobs

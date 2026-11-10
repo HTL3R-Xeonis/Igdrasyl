@@ -86,12 +86,30 @@ def peek_target_node_names(zip_bytes: bytes) -> set[str]:
         return set()
 
 
+_MAX_FINISHED_JOBS = 50
+
+
+def _prune_finished(jobs: dict[str, ImportJob]) -> None:
+    """
+    Caps how many finished jobs app.state.import_jobs keeps, so a
+    long-running process doesn't accumulate one entry (plus its result -
+    manifest, configs, drawings) per import forever. Running jobs are
+    never pruned. Oldest-inserted first (dicts keep insertion order),
+    which is also oldest-started first since jobs are only ever added,
+    never reordered.
+    """
+    finished = [job_id for job_id, job in jobs.items() if job.status != "running"]
+    for job_id in finished[: len(finished) - _MAX_FINISHED_JOBS]:
+        del jobs[job_id]
+
+
 def create_job(app: FastAPI, target_names: set[str]) -> ImportJob:
     job = ImportJob(
         id=str(uuid.uuid4()), total=len(target_names), target_names=target_names
     )
     if not hasattr(app.state, "import_jobs"):
         app.state.import_jobs = {}
+    _prune_finished(app.state.import_jobs)
     app.state.import_jobs[job.id] = job
     return job
 

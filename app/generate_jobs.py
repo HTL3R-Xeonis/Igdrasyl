@@ -146,12 +146,28 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
     logger.error(f"Generate job {job.id} failed: {job.error}")
 
 
+_MAX_FINISHED_JOBS = 50
+
+
+def _prune_finished(jobs: dict[str, GenerateJob]) -> None:
+    """
+    Caps how many finished jobs app.state.generate_jobs keeps, so a
+    long-running process doesn't accumulate one entry per generation
+    forever - same reasoning as app.import_jobs._prune_finished. Running
+    jobs are never pruned.
+    """
+    finished = [job_id for job_id, job in jobs.items() if job.status != "running"]
+    for job_id in finished[: len(finished) - _MAX_FINISHED_JOBS]:
+        del jobs[job_id]
+
+
 def start_job(app: FastAPI, prompt: str) -> GenerateJob:
     job = GenerateJob(
         id=str(uuid.uuid4()), max_attempts=Settings.GENERATE_MAX_RETRIES + 1
     )
     if not hasattr(app.state, "generate_jobs"):
         app.state.generate_jobs = {}
+    _prune_finished(app.state.generate_jobs)
     app.state.generate_jobs[job.id] = job
     thread = threading.Thread(
         target=run_generate_job, args=(app, job, prompt), daemon=True
