@@ -241,6 +241,7 @@ function applyDesignModeUI() {
   document.getElementById("clear-design-btn").hidden = !designMode;
   document.getElementById("design-project-separator").hidden = !designMode;
   document.getElementById("export-project-btn").href = designMode ? "/design/export" : "/project/export";
+  document.getElementById("export-gns3-btn").hidden = designMode;
   document.getElementById("import-project-btn").hidden = designMode;
   document.getElementById("reload-gns3-btn").hidden = designMode;
   document.getElementById("deploy-gns3-vm-btn").hidden = designMode;

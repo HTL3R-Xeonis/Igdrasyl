@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-41">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-42">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -23,7 +23,6 @@
         <button class="menu-item" id="deploy-library-project-btn" hidden>Deploy to Host…</button>
         <button class="menu-item" id="clear-design-btn" hidden title="Removes every device, link and drawing from the sketch and starts an empty one (Undo brings it back)">Clear Topology…</button>
         <div class="menu-separator" id="design-project-separator" hidden></div>
-        <a class="menu-item" id="export-project-btn" href="/project/export" download title="Download the current topology + configs as a .topoproj bundle">Export Project</a>
         <button class="menu-item" id="import-project-btn" title="Deploy a .topoproj bundle's topology live">Import Project…</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reload-gns3-btn" title="Closes and reopens the live GNS3 project to refresh GNS3's own state, then restarts whichever GNS3-native nodes were running - doesn't touch ESXi VMs or redeploy anything">Reload GNS3 Project</button>
@@ -69,7 +68,16 @@
         <button class="menu-item active" id="toggle-devices-btn">Template List</button>
         <div class="menu-separator"></div>
         <button class="menu-item" id="reset-labels-btn">Reset Label Positions</button>
-        <button class="menu-item" id="take-screenshot-btn">Take Screenshot</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-btn" data-menu="export">Export</button>
+      <div class="menu-dropdown" id="menu-export" hidden>
+        <button class="menu-item" id="take-screenshot-btn" type="button">Diagram (PNG)</button>
+        <button class="menu-item" id="export-svg-btn" type="button">Diagram (SVG)</button>
+        <div class="menu-separator"></div>
+        <a class="menu-item" id="export-project-btn" href="/project/export" download title="Download the Operator project bundle">Operator Project (.topoproj)</a>
+        <a class="menu-item" id="export-gns3-btn" href="/export/gns3project" target="_blank" rel="noopener" title="Export the active GNS3 project. Its devices must be stopped.">GNS3 Project (.gns3project)</a>
       </div>
     </div>
     <div class="menu">
@@ -483,19 +491,19 @@
   </div>
 </div>
 
-<script src="/core.js?v=ginnungagap-41"></script>
-<script src="/canvas-state.js?v=ginnungagap-41"></script>
-<script src="/label-placement.js?v=ginnungagap-41"></script>
-<script src="/drawings.js?v=ginnungagap-41"></script>
-<script src="/canvas-render.js?v=ginnungagap-41"></script>
-<script src="/edit-actions.js?v=ginnungagap-41"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-41"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-41"></script>
-<script src="/import-and-generate.js?v=ginnungagap-41"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-41"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-41"></script>
-<script src="/projects.js?v=ginnungagap-41"></script>
-<script src="/staging.js?v=ginnungagap-41"></script>
-<script src="/snapshots.js?v=ginnungagap-41"></script>
+<script src="/core.js?v=ginnungagap-42"></script>
+<script src="/canvas-state.js?v=ginnungagap-42"></script>
+<script src="/label-placement.js?v=ginnungagap-42"></script>
+<script src="/drawings.js?v=ginnungagap-42"></script>
+<script src="/canvas-render.js?v=ginnungagap-42"></script>
+<script src="/edit-actions.js?v=ginnungagap-42"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-42"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-42"></script>
+<script src="/import-and-generate.js?v=ginnungagap-42"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-42"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-42"></script>
+<script src="/projects.js?v=ginnungagap-42"></script>
+<script src="/staging.js?v=ginnungagap-42"></script>
+<script src="/snapshots.js?v=ginnungagap-42"></script>
 </body>
 </html>

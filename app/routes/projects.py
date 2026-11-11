@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from collections.abc import Iterator
+from typing import Annotated, Any
 
 import requests
-from fastapi import HTTPException, Response, UploadFile
+from fastapi import Depends, HTTPException, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 from src.settings import Settings
 
 from app import (
+    gns3_export,
     holds,
     import_jobs,
     project_bundle,
@@ -22,6 +26,7 @@ from app import (
 from app.application import app
 from app.config_push import DeviceSpec
 from app.gns3_state import (
+    NoLiveProject,
     reload_project,
 )
 from app.routes.common import (
@@ -31,6 +36,54 @@ from app.routes.common import (
 from app.startup import (
     active_host_filename,
 )
+
+
+def _open_gns3_archive() -> Iterator[tuple[str, requests.Response]]:
+    name = getattr(app.state, "project_name", None) or "topology"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._-") or "topology"
+    try:
+        upstream = gns3_export.export_stream(app)
+    except NoLiveProject as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except requests.Timeout as exc:
+        raise HTTPException(
+            504, "GNS3 timed out preparing the project archive."
+        ) from exc
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status == 409:
+            raise HTTPException(
+                409,
+                "GNS3 refused the export. If the project's GNS3 devices are running, "
+                "stop them and try again; otherwise check the project in GNS3.",
+            ) from exc
+        if status == 404:
+            raise HTTPException(
+                404, "GNS3 could not export this project. Check it in the GNS3 Web UI."
+            ) from exc
+        raise HTTPException(502, "GNS3 refused the project export.") from exc
+    except requests.RequestException as exc:
+        raise HTTPException(502, "Could not reach GNS3 to export the project.") from exc
+    try:
+        yield safe_name, upstream
+    finally:
+        # Request-scoped dependency: release the socket after streaming, including on disconnect.
+        upstream.close()
+
+
+@app.get("/export/gns3project", response_class=StreamingResponse)
+def export_native_gns3_project(
+    archive: Annotated[tuple[str, requests.Response], Depends(_open_gns3_archive)],
+) -> StreamingResponse:
+    filename, upstream = archive
+    return StreamingResponse(
+        upstream.iter_content(chunk_size=64 * 1024),
+        media_type="application/gns3project",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}.gns3project"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.get("/project/export")

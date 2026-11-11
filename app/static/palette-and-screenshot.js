@@ -194,14 +194,8 @@ document.getElementById("toggle-devices-btn").addEventListener("click", () => {
   setDevicePaletteVisible(document.getElementById("device-palette").hidden);
 });
 
-// Screenshot export: rasterizes the *whole diagram* (all nodes/links/
-// drawings, auto-fit - not just whatever's currently panned/zoomed into
-// view) as a PNG. Renders through a throwaway <img>/<canvas> rather than
-// any library: a standalone serialized SVG carries none of the page's
-// own external <style>, so a full copy of this page's one <style> block
-// is embedded into the clone first - :root there still resolves the
-// --accent/--canvas-bg/etc custom properties correctly, since :root in a
-// parsed SVG document means the SVG's own root element.
+// Export the whole diagram (nodes, links and drawings) at its own bounds,
+// independent of the current zoom and pan. Both formats share one styled SVG.
 const SCREENSHOT_PADDING = 40;
 const SCREENSHOT_SCALE = 2;
 const SCREENSHOT_MAX_DIMENSION = 8000;
@@ -221,6 +215,7 @@ function unionBBox(boxes) {
 async function pageCss() {
   const parts = [...document.querySelectorAll("style")].map((el) => el.textContent);
   for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+    if (new URL(link.href).origin !== window.location.origin) continue;
     try {
       const response = await fetch(link.href);
       if (response.ok) parts.push(await response.text());
@@ -231,15 +226,44 @@ async function pageCss() {
   return parts.join("\n");
 }
 
-async function takeCanvasScreenshot() {
+async function inlineDiagramIcons(svg) {
+  const iconUrls = new Set(Object.values(ROLE_ICON_FILES).map((path) => new URL(path, window.location.href).href));
+  const dataUrls = new Map();
+  await Promise.all(Array.from(svg.querySelectorAll("image"), async (img) => {
+    const xlink = "http://www.w3.org/1999/xlink";
+    const href = img.getAttribute("href") || img.getAttributeNS(xlink, "href");
+    if (!href || href.startsWith("data:")) return;
+    const url = new URL(href, window.location.href);
+    if (!iconUrls.has(url.href)) {
+      throw new Error("A linked image cannot be exported. Add it as an image file to include it.");
+    }
+    if (!dataUrls.has(url.href)) {
+      dataUrls.set(url.href, (async () => {
+        const response = await fetch(url.href, { mode: "same-origin" });
+        if (!response.ok) throw new Error(`Could not load diagram image (${response.status}).`);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      })());
+    }
+    const dataUrl = await dataUrls.get(url.href);
+    img.removeAttributeNS(xlink, "href");
+    img.setAttribute("href", dataUrl);
+  }));
+}
+
+async function buildCanvasDiagram() {
   const layerIds = ["drawings-layer", "links-layer", "nodes-layer"];
   const layers = layerIds.map((id) => document.getElementById(id));
   let content;
   try {
     content = unionBBox(layers.map((el) => el.getBBox()));
   } catch {
-    setMenubarMessage("Nothing to screenshot - canvas is empty.");
-    return;
+    throw new Error("No diagram is visible.");
   }
   const vx = content.x - SCREENSHOT_PADDING;
   const vy = content.y - SCREENSHOT_PADDING;
@@ -247,11 +271,13 @@ async function takeCanvasScreenshot() {
   const vh = content.height + SCREENSHOT_PADDING * 2;
 
   const exportSvg = document.createElementNS(SVG_NS, "svg");
-  exportSvg.setAttribute("xmlns", SVG_NS);
+  // XMLSerializer emits the SVG namespace from createElementNS.
   exportSvg.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
   const pixelScale = Math.min(SCREENSHOT_SCALE, SCREENSHOT_MAX_DIMENSION / Math.max(vw, vh, 1));
-  exportSvg.setAttribute("width", Math.round(vw * pixelScale));
-  exportSvg.setAttribute("height", Math.round(vh * pixelScale));
+  const width = Math.round(vw * pixelScale);
+  const height = Math.round(vh * pixelScale);
+  exportSvg.setAttribute("width", width);
+  exportSvg.setAttribute("height", height);
 
   const styleEl = document.createElementNS(SVG_NS, "style");
   styleEl.textContent = await pageCss();
@@ -268,19 +294,30 @@ async function takeCanvasScreenshot() {
   for (const layer of layers) {
     exportSvg.appendChild(layer.cloneNode(true));
   }
-  exportSvg.querySelectorAll("image").forEach((img) => {
-    const href = img.getAttribute("href") || img.getAttributeNS("http://www.w3.org/1999/xlink", "href");
-    if (href && !href.startsWith("data:")) {
-      const absolute = new URL(href, window.location.href).href;
-      img.setAttribute("href", absolute);
-      img.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
-    }
-  });
-
+  await inlineDiagramIcons(exportSvg);
   const svgText = new XMLSerializer().serializeToString(exportSvg);
-  const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-  const svgUrl = URL.createObjectURL(svgBlob);
+  return { svgBlob: new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }), width, height };
+}
+
+function downloadDiagram(blob, extension) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const projectMeta = document.getElementById("project-meta").textContent.split(" @ ")[0].trim();
+  const safeName = (projectMeta || "topology").replace(/[^\w.-]+/g, "_");
+  a.href = url;
+  a.download = `${safeName}-${stamp}.${extension}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function takeCanvasScreenshot() {
+  let svgUrl;
   try {
+    const { svgBlob, width, height } = await buildCanvasDiagram();
+    svgUrl = URL.createObjectURL(svgBlob);
     const image = new Image();
     await new Promise((resolve, reject) => {
       image.onload = resolve;
@@ -288,29 +325,31 @@ async function takeCanvasScreenshot() {
       image.src = svgUrl;
     });
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(vw * pixelScale);
-    canvas.height = Math.round(vh * pixelScale);
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    const pngUrl = URL.createObjectURL(pngBlob);
-    const a = document.createElement("a");
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const projectMeta = document.getElementById("project-meta").textContent.split(" @ ")[0].trim();
-    const safeName = (projectMeta || "topology").replace(/[^\w.-]+/g, "_");
-    a.href = pngUrl;
-    a.download = `${safeName}-${stamp}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(pngUrl);
+    if (!pngBlob) throw new Error("The browser could not encode the PNG.");
+    downloadDiagram(pngBlob, "png");
   } catch (err) {
     setMenubarMessage(`Screenshot failed: ${err.message}`);
   } finally {
-    URL.revokeObjectURL(svgUrl);
+    if (svgUrl) URL.revokeObjectURL(svgUrl);
   }
 }
+
+async function exportCanvasSvg() {
+  try {
+    const { svgBlob } = await buildCanvasDiagram();
+    downloadDiagram(svgBlob, "svg");
+  } catch (err) {
+    setMenubarMessage(`SVG export failed: ${err.message}`);
+  }
+}
+
 document.getElementById("take-screenshot-btn").addEventListener("click", () => { takeCanvasScreenshot(); });
+document.getElementById("export-svg-btn").addEventListener("click", () => { exportCanvasSvg(); });
 
 // Loading feedback for slow, live-deploying actions - shown next to
 // the menu bar's own buttons rather than a full-page overlay, since

@@ -46,7 +46,7 @@ def test_the_lock_covers_the_canvas_and_blocks_palette_and_device_list():
 def test_the_screenshot_reads_the_linked_style_sheet_not_a_style_element():
     # the page's CSS lives in /styles.css; document.querySelector("style") is null there and broke the screenshot
     js = read_app_js()
-    body = js[js.index("async function takeCanvasScreenshot") :]
+    body = js[js.index("async function buildCanvasDiagram") :]
     body = body[: body.index("\n}\n")]
     assert 'document.querySelector("style")' not in body
     assert "await pageCss()" in body

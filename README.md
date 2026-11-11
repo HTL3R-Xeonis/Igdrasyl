@@ -90,6 +90,12 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   guest-ops (ESXi VMs), the same transports the interactive
   console/screen features use. Stops on the first failed command per
   device, but continues to the next device (`app/config_push.py`).
+- **Export** contains **Diagram (PNG)** and **Diagram (SVG)** in both live and design mode. Both cover the
+  whole canvas, including links and drawings, regardless of zoom or pan. The SVG embeds the device icons
+  and can be opened offline. **Operator Project (.topoproj)** exports the existing Operator bundle.
+- **GNS3 Project (.gns3project)** streams the live controller's native archive without bundling base images
+  or ESXi VMs. GNS3 requires the project's devices to be stopped before export; the Operator never stops
+  them for you. Use `.topoproj` to hand off an Operator topology with ESXi device definitions.
 - Project import/export (`app/project_bundle.py`): a `.topoproj` bundle
   (a plain zip) carries the topology YAML, a sanitized settings
   snapshot (used only as an ESXi/GNS3-target safety check on import,
@@ -699,6 +705,7 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET /logs?lines=N` (the in-project panel), `GET /logs/entries?lines=N&level=L&search=S` (entries with
   tracebacks kept together, plus how full the log is), `GET /logs/download` (the whole retained log as text),
   `GET /templates/health` - see Architecture above.
+- `GET /export/gns3project` streams the selected live GNS3 project's native archive.
 - `GET /project/export`, `POST /project/import` (kicks off a background
   job, returns `{job_id, total}`), `GET /project/import/{job_id}`
   (progress + final result), `POST /project/reload-gns3` (closes and
