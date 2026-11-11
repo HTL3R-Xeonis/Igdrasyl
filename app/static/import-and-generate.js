@@ -332,12 +332,11 @@ async function promptAndGenerateTopology() {
     confirmLabel: "Generate",
     attachments: {
       accept: ".pdf,.png,.jpg,.jpeg,.docx,.txt,.md,.csv",
-      hint: "PDF, PNG, JPEG, Word (.docx), TXT, Markdown or CSV. Up to 5 files and 10 MiB total. By default, attachments may be sent to Gemini.",
       validate: validateGenerateAttachments,
     },
   });
   if (!input) return;
-  const { prompt, files, ollamaOnly } = input;
+  const { prompt, files } = input;
 
   setLandingGenerateStatus("Starting generation…");
   try {
@@ -350,7 +349,6 @@ async function promptAndGenerateTopology() {
     if (files.length) {
       const body = new FormData();
       body.append("prompt", prompt);
-      body.append("ollama_only", String(ollamaOnly));
       for (const file of files) body.append("files", file);
       endpoint += "/attachments";
       request = { method: "POST", body };

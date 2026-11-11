@@ -358,7 +358,6 @@ function openModal(config) {
     const attachmentOptions = config.attachments;
     let attachmentFields;
     let fileInput;
-    let ollamaOnly;
     let fileError;
     if (attachmentOptions) {
       attachmentFields = document.createElement("div");
@@ -370,22 +369,12 @@ function openModal(config) {
       fileInput.type = "file";
       fileInput.multiple = true;
       fileInput.accept = attachmentOptions.accept;
-      const hint = document.createElement("p");
-      hint.id = "modal-attachments-hint";
-      hint.textContent = attachmentOptions.hint;
-      fileInput.setAttribute("aria-describedby", hint.id);
       fileError = document.createElement("p");
       fileError.setAttribute("role", "alert");
-      const modelLabel = document.createElement("label");
-      ollamaOnly = document.createElement("input");
-      ollamaOnly.type = "checkbox";
-      ollamaOnly.disabled = true;
-      modelLabel.append(ollamaOnly, " Use only configured Ollama models");
       fileInput.addEventListener("change", () => {
-        ollamaOnly.disabled = !fileInput.files.length;
         fileError.textContent = "";
       });
-      attachmentFields.append(fileLabel, fileInput, hint, modelLabel, fileError);
+      attachmentFields.append(fileLabel, fileInput, fileError);
       fieldWrap.appendChild(attachmentFields);
     }
 
@@ -431,7 +420,7 @@ function openModal(config) {
           fileError.textContent = error;
           return;
         }
-        return finish({ prompt, files, ollamaOnly: files.length > 0 && ollamaOnly.checked });
+        return finish({ prompt, files });
       }
       if (isTextarea) return finish(textareaEl.value.trim() || null);
       return finish(inputEl.value.trim() || null);
