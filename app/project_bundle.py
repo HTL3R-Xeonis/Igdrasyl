@@ -163,8 +163,8 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     """
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        raise BundleValidationError("not a valid .topoproj (zip) file")
+    except zipfile.BadZipFile as exc:
+        raise BundleValidationError("not a valid .topoproj (zip) file") from exc
 
     missing = _REQUIRED_MEMBERS - set(zf.namelist())
     if missing:
@@ -173,7 +173,7 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     try:
         manifest = json.loads(zf.read("manifest.json"))
     except json.JSONDecodeError as exc:
-        raise BundleValidationError(f"manifest.json isn't valid JSON: {exc}")
+        raise BundleValidationError(f"manifest.json isn't valid JSON: {exc}") from exc
     if manifest.get("format_version") != _FORMAT_VERSION:
         raise BundleValidationError(
             f"unsupported bundle format_version {manifest.get('format_version')!r}"
@@ -182,7 +182,7 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     try:
         bundled_settings = yaml.safe_load(zf.read("settings.yml")) or {}
     except yaml.YAMLError as exc:
-        raise BundleValidationError(f"settings.yml isn't valid YAML: {exc}")
+        raise BundleValidationError(f"settings.yml isn't valid YAML: {exc}") from exc
     bundled_esxi = bundled_settings.get("esxi", {})
     # A bundle built by the offline design canvas (see app/design.py)
     # was never targeted at any real host - its settings.yml carries no
@@ -204,7 +204,7 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
     try:
         configs = json.loads(zf.read("configs.json"))
     except json.JSONDecodeError as exc:
-        raise BundleValidationError(f"configs.json isn't valid JSON: {exc}")
+        raise BundleValidationError(f"configs.json isn't valid JSON: {exc}") from exc
 
     # Optional members - bundles exported before these existed won't have
     # them, and that's fine, not a validation failure.
@@ -213,28 +213,30 @@ def apply_import(app: FastAPI, zip_bytes: bytes) -> dict[str, Any]:
         try:
             drawings = json.loads(zf.read("drawings.json")).get("drawings", [])
         except json.JSONDecodeError as exc:
-            raise BundleValidationError(f"drawings.json isn't valid JSON: {exc}")
+            raise BundleValidationError(
+                f"drawings.json isn't valid JSON: {exc}"
+            ) from exc
 
     layout = {}
     if "layout.json" in zf.namelist():
         try:
             layout = json.loads(zf.read("layout.json")).get("layout", {})
         except json.JSONDecodeError as exc:
-            raise BundleValidationError(f"layout.json isn't valid JSON: {exc}")
+            raise BundleValidationError(f"layout.json isn't valid JSON: {exc}") from exc
 
     labels = {}
     if "labels.json" in zf.namelist():
         try:
             labels = json.loads(zf.read("labels.json")).get("labels", {})
         except json.JSONDecodeError as exc:
-            raise BundleValidationError(f"labels.json isn't valid JSON: {exc}")
+            raise BundleValidationError(f"labels.json isn't valid JSON: {exc}") from exc
 
     notes = {}
     if "notes.json" in zf.namelist():
         try:
             notes = json.loads(zf.read("notes.json")).get("notes", {})
         except json.JSONDecodeError as exc:
-            raise BundleValidationError(f"notes.json isn't valid JSON: {exc}")
+            raise BundleValidationError(f"notes.json isn't valid JSON: {exc}") from exc
 
     backend = get_or_create_backend(app)
     backend.deploy_topology(Settings.TOPOLOGY_FILE, topology_yaml_text)

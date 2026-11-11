@@ -98,7 +98,7 @@ def save_profile(filename: str, content: bytes) -> None:
     try:
         yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        raise InvalidProfileName(f"{filename!r} isn't valid YAML: {exc}")
+        raise InvalidProfileName(f"{filename!r} isn't valid YAML: {exc}") from exc
     (_profiles_dir() / filename).write_bytes(content)
 
 
