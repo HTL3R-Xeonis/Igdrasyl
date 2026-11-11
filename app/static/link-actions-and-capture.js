@@ -232,6 +232,7 @@ class PcapStreamParser {
     this.buf = new Uint8Array(0);
     this.haveGlobalHeader = false;
     this.littleEndian = true;
+    this.nsResolution = false; // true for the 0xa1b23c4d magic - its second header field is nanoseconds, not microseconds
   }
 
   push(chunk) {
@@ -246,23 +247,42 @@ class PcapStreamParser {
     if (!this.haveGlobalHeader) {
       if (this.buf.length < 24) return;
       const dv = new DataView(this.buf.buffer, this.buf.byteOffset, 24);
-      // 0xa1b2c3d4 (or the nanosecond-precision variant 0xa1b23c4d) read
-      // little-endian means the file is little-endian; read big-endian
-      // means it's big-endian - either way the magic number itself tells
-      // us which to use for everything that follows.
+      // Read the magic number both ways - whichever interpretation
+      // produces one of the two known magics tells us the file's byte
+      // order (and, via which magic, its timestamp resolution). Only
+      // checking the little-endian reading (as a previous version of
+      // this code did) left a genuinely big-endian capture's "not the
+      // expected value" outcome merely assumed to mean big-endian,
+      // never actually confirmed against the real magic.
       const leMagic = dv.getUint32(0, true);
-      this.littleEndian = leMagic === 0xa1b2c3d4 || leMagic === 0xa1b23c4d;
+      const beMagic = dv.getUint32(0, false);
+      if (leMagic === 0xa1b2c3d4 || leMagic === 0xa1b23c4d) {
+        this.littleEndian = true;
+        this.nsResolution = leMagic === 0xa1b23c4d;
+      } else {
+        // Falls back to big-endian/microsecond for anything else too
+        // (including a magic matching neither form) - the global
+        // header is otherwise unused here, so there's nothing better
+        // to do with a stream that isn't recognizable pcap.
+        this.littleEndian = false;
+        this.nsResolution = beMagic === 0xa1b23c4d;
+      }
       this.haveGlobalHeader = true;
       this.buf = this.buf.slice(24);
     }
     while (this.buf.length >= 16) {
       const dv = new DataView(this.buf.buffer, this.buf.byteOffset, 16);
       const tsSec = dv.getUint32(0, this.littleEndian);
-      const tsUsec = dv.getUint32(4, this.littleEndian);
+      const tsFrac = dv.getUint32(4, this.littleEndian);
       const inclLen = dv.getUint32(8, this.littleEndian);
       if (this.buf.length < 16 + inclLen) break;
       const packetData = this.buf.slice(16, 16 + inclLen);
       this.buf = this.buf.slice(16 + inclLen);
+      // Always hand the callback microseconds, regardless of which pcap
+      // variant this stream turned out to be - callers (openCaptureViewer)
+      // divide by 1e6 to get fractional seconds and shouldn't need to
+      // know about the nanosecond-resolution magic at all.
+      const tsUsec = this.nsResolution ? Math.round(tsFrac / 1000) : tsFrac;
       this.onPacket(tsSec, tsUsec, packetData);
     }
   }
