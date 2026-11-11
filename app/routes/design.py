@@ -362,6 +362,7 @@ async def generate_design_from_attachments(
     files: Annotated[list[UploadFile], File()],
     prompt: Annotated[str, Form()] = "",
     ollama_only: Annotated[bool, Form()] = False,
+    match_screenshot_layout: Annotated[bool, Form()] = False,
 ) -> dict[str, str]:
     if not 1 <= len(files) <= MAX_GENERATE_ATTACHMENT_COUNT:
         raise HTTPException(400, "Choose between 1 and 5 files.")
@@ -378,7 +379,11 @@ async def generate_design_from_attachments(
         attachments.append((upload.filename or "attachment", content))
 
     job = generate_jobs.start_job(
-        app, prompt, attachments=attachments, ollama_only=ollama_only
+        app,
+        prompt,
+        attachments=attachments,
+        ollama_only=ollama_only,
+        match_screenshot_layout=match_screenshot_layout,
     )
     return {"job_id": job.id}
 

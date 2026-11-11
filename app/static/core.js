@@ -359,6 +359,7 @@ function openModal(config) {
     let attachmentFields;
     let fileInput;
     let fileError;
+    let screenshotLayout;
     if (attachmentOptions) {
       attachmentFields = document.createElement("div");
       const fileLabel = document.createElement("label");
@@ -369,12 +370,21 @@ function openModal(config) {
       fileInput.type = "file";
       fileInput.multiple = true;
       fileInput.accept = attachmentOptions.accept;
+      const screenshotOption = document.createElement("div");
+      screenshotOption.hidden = true;
+      const screenshotLabel = document.createElement("label");
+      screenshotLayout = document.createElement("input");
+      screenshotLayout.type = "checkbox";
+      screenshotLabel.append(screenshotLayout, " Match screenshot layout");
+      screenshotOption.append(screenshotLabel);
       fileError = document.createElement("p");
       fileError.setAttribute("role", "alert");
       fileInput.addEventListener("change", () => {
         fileError.textContent = "";
+        screenshotOption.hidden = Array.from(fileInput.files).filter(attachmentOptions.isScreenshot).length !== 1;
+        if (screenshotOption.hidden) screenshotLayout.checked = false;
       });
-      attachmentFields.append(fileLabel, fileInput, fileError);
+      attachmentFields.append(fileLabel, fileInput, screenshotOption, fileError);
       fieldWrap.appendChild(attachmentFields);
     }
 
@@ -420,7 +430,7 @@ function openModal(config) {
           fileError.textContent = error;
           return;
         }
-        return finish({ prompt, files });
+        return finish({ prompt, files, matchScreenshotLayout: screenshotLayout.checked });
       }
       if (isTextarea) return finish(textareaEl.value.trim() || null);
       return finish(inputEl.value.trim() || null);

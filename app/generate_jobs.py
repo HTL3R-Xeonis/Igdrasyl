@@ -46,7 +46,7 @@ class GenerateJob:
 
 
 def _load_generated_topology(
-    nodes: list[dict], edges: list[list[str]]
+    nodes: list[dict], edges: list[list[str]], screenshot_layout: dict | None = None
 ) -> design.DesignState:
     """
     Builds a fresh design.DesignState from a validated topology's own
@@ -66,7 +66,10 @@ def _load_generated_topology(
             design.add_node(state, name, role, image)
     for node1, if1, node2, if2 in edges:
         design.add_link(state, node1, if1, node2, if2)
-    design.auto_layout(state)
+    if screenshot_layout is None:
+        design.auto_layout(state)
+    else:
+        design.apply_screenshot_layout(state, screenshot_layout)
     return state
 
 
@@ -74,12 +77,18 @@ Attachment = tuple[str, bytes]
 
 
 def _generate_from_attachments(
-    prompt: str, attachments: list[Attachment], ollama_only: bool
+    prompt: str,
+    attachments: list[Attachment],
+    ollama_only: bool,
+    match_screenshot_layout: bool = False,
 ) -> dict:
+    data = {"prompt": prompt, "ollama_only": str(ollama_only).lower()}
+    if match_screenshot_layout:
+        data["match_screenshot_layout"] = "true"
     try:
         response = requests.post(
             f"{Settings.API.TOPOLOGY_GENERATOR_URL.rstrip('/')}/api/generate-topology/attachments",
-            data={"prompt": prompt, "ollama_only": str(ollama_only).lower()},
+            data=data,
             files=[("files", (name, contents)) for name, contents in attachments],
             timeout=Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS,
         )
@@ -105,6 +114,7 @@ def run_generate_job(
     prompt: str,
     attachments: list[Attachment] | None = None,
     ollama_only: bool = False,
+    match_screenshot_layout: bool = False,
 ) -> None:
     # The reason the most recent attempt was rejected, so the final error
     # can say WHY instead of only "no valid topology" - e.g. the LLM
@@ -114,7 +124,9 @@ def run_generate_job(
         job.attempt = attempt
         try:
             result = (
-                _generate_from_attachments(prompt, attachments, ollama_only)
+                _generate_from_attachments(
+                    prompt, attachments, ollama_only, match_screenshot_layout
+                )
                 if attachments
                 else TopologyGeneratorClient.generate_topology(prompt)
             )
@@ -136,6 +148,14 @@ def run_generate_job(
             )
             continue
 
+        screenshot_layout = (
+            result.get("screenshot_layout") if match_screenshot_layout else None
+        )
+        if match_screenshot_layout and screenshot_layout is None:
+            job.error = "The Topology Generator did not return screenshot positions. Check that it supports this mode."
+            job.status = "error"
+            return
+
         fd, tmp_name = tempfile.mkstemp(suffix=".yml", prefix="generated_topology_")
         os.close(fd)
         tmp_path = Path(tmp_name)
@@ -143,7 +163,9 @@ def run_generate_job(
             tmp_path.write_text(result["yaml"])
             validator = TopologyFileValidation(str(tmp_path))
             validator.validate_file()
-            generated = _load_generated_topology(validator.nodes, validator.edges)
+            generated = _load_generated_topology(
+                validator.nodes, validator.edges, screenshot_layout
+            )
             with design_history.step(app):
                 app.state.design = generated
             app.state.design_project_id = None
@@ -206,6 +228,7 @@ def start_job(
     *,
     attachments: list[Attachment] | None = None,
     ollama_only: bool = False,
+    match_screenshot_layout: bool = False,
 ) -> GenerateJob:
     job = GenerateJob(
         id=str(uuid.uuid4()), max_attempts=Settings.GENERATE_MAX_RETRIES + 1
@@ -216,7 +239,7 @@ def start_job(
     app.state.generate_jobs[job.id] = job
     thread = threading.Thread(
         target=run_generate_job,
-        args=(app, job, prompt, attachments, ollama_only),
+        args=(app, job, prompt, attachments, ollama_only, match_screenshot_layout),
         daemon=True,
     )
     thread.start()

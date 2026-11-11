@@ -333,10 +333,11 @@ async function promptAndGenerateTopology() {
     attachments: {
       accept: ".pdf,.png,.jpg,.jpeg,.docx,.txt,.md,.csv",
       validate: validateGenerateAttachments,
+      isScreenshot: (file) => /\.(png|jpe?g)$/i.test(file.name),
     },
   });
   if (!input) return;
-  const { prompt, files } = input;
+  const { prompt, files, matchScreenshotLayout } = input;
 
   setLandingGenerateStatus("Starting generation…");
   try {
@@ -349,6 +350,7 @@ async function promptAndGenerateTopology() {
     if (files.length) {
       const body = new FormData();
       body.append("prompt", prompt);
+      if (matchScreenshotLayout) body.append("match_screenshot_layout", "true");
       for (const file of files) body.append("files", file);
       endpoint += "/attachments";
       request = { method: "POST", body };

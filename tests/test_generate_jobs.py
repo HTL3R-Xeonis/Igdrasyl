@@ -257,3 +257,45 @@ def test_attachment_job_posts_multipart_and_preserves_local_model_choice(app_sta
     assert post.call_args.args[0].endswith("/api/generate-topology/attachments")
     assert post.call_args.kwargs["data"] == {"prompt": "", "ollama_only": "true"}
     assert post.call_args.kwargs["files"] == [("files", files[0])]
+
+
+def test_screenshot_job_preserves_positions_and_aspect_ratio(app_state):
+    app = _fake_app(app_state)
+    job = generate_jobs.GenerateJob(id="screenshot-job")
+    files = [("network.png", b"image")]
+    with patch("app.generate_jobs.requests.post") as post:
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            **_valid_result(),
+            "screenshot_layout": {
+                "width": 800,
+                "height": 400,
+                "positions": {"R1": [250, 250], "PC1": [750, 750]},
+            },
+        }
+        generate_jobs.run_generate_job(
+            app, job, "", files, match_screenshot_layout=True
+        )
+
+    assert job.status == "done"
+    assert post.call_args.kwargs["data"]["match_screenshot_layout"] == "true"
+    assert app_state.design.layout == {
+        "R1": {"x": 400.0, "y": 250.0},
+        "PC1": {"x": 1200.0, "y": 650.0},
+    }
+
+
+def test_missing_screenshot_layout_does_not_replace_the_current_design(app_state):
+    app = _fake_app(app_state)
+    previous_design = app_state.design
+    job = generate_jobs.GenerateJob(id="missing-layout-job")
+    with patch(
+        "app.generate_jobs._generate_from_attachments", return_value=_valid_result()
+    ):
+        generate_jobs.run_generate_job(
+            app, job, "", [("network.png", b"image")], match_screenshot_layout=True
+        )
+
+    assert job.status == "error"
+    assert "did not return screenshot positions" in job.error
+    assert app_state.design is previous_design

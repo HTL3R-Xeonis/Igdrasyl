@@ -385,6 +385,45 @@ def auto_layout(state: DesignState) -> None:
         state.layout[name] = {"x": x, "y": y}
 
 
+def apply_screenshot_layout(state: DesignState, layout: object) -> None:
+    if not isinstance(layout, dict):
+        raise TypeError("The generator did not provide a screenshot layout.")
+    width, height = layout.get("width"), layout.get("height")
+    positions = layout.get("positions")
+    if (
+        type(width) is not int
+        or type(height) is not int
+        or width <= 0
+        or height <= 0
+        or not isinstance(positions, dict)
+        or positions.keys() != state.nodes.keys()
+    ):
+        raise ValueError(
+            "The screenshot layout must include a position for every device."
+        )
+
+    scale = min(_CANVAS_WIDTH / width, _CANVAS_HEIGHT / height)
+    canvas_width, canvas_height = width * scale, height * scale
+    offset_x = (_CANVAS_WIDTH - canvas_width) / 2
+    offset_y = (_CANVAS_HEIGHT - canvas_height) / 2
+    node_layout = {}
+    for name, pair in positions.items():
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not all(
+                type(value) in (int, float) and 0 <= value <= 1000 for value in pair
+            )
+        ):
+            raise ValueError(f"Invalid screenshot position for {name!r}.")
+        x, y = pair
+        node_layout[name] = {
+            "x": offset_x + canvas_width * x / 1000,
+            "y": offset_y + canvas_height * y / 1000,
+        }
+    state.layout = node_layout
+
+
 def layout_with_defaults(state: DesignState) -> dict[str, dict[str, float]]:
     """
     The saved positions, plus a force-directed default for every node that has none (a design opened from a stored
