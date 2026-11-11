@@ -666,14 +666,21 @@ function deselectNode() {
   document.querySelectorAll(".summary-row.selected").forEach((r) => r.classList.remove("selected"));
 }
 let ignoreNextDocumentClick = false; // set when a rubber-band drag ends: its trailing click must not clear the new selection
+// Node selection and drawing selection (selectedDrawingId) are two independent pieces of
+// state - selecting a node already clears the drawing one directly (see selectNode/
+// setSelection's own deselectDrawing() calls); this listener covers the rest: clicking a
+// node clears a lingering drawing selection too, and clicking neither a node nor any of a
+// drawing's own UI (its shape, resize/rotate handles, or its style popup) clears it.
+const DRAWING_UI_SELECTOR = ".drawing-shape, .drawing-handle, .drawing-rotate-line, .drawing-rotate-handle, .drawing-popup";
 document.addEventListener("click", (evt) => {
   if (ignoreNextDocumentClick) { ignoreNextDocumentClick = false; return; }
   const popup = document.getElementById("node-actions");
   const multi = document.getElementById("multi-actions");
-  if (popup.hidden && multi.hidden) return;
-  if (popup.contains(evt.target) || multi.contains(evt.target)) return;
-  if (evt.target.closest(".node-shape") || evt.target.closest(".summary-row")) return;
-  deselectNode();
+  const onNode = evt.target.closest(".node-shape") || evt.target.closest(".summary-row");
+  const onNodePopup = popup.contains(evt.target) || multi.contains(evt.target);
+  if (!(popup.hidden && multi.hidden) && !onNodePopup && !onNode) deselectNode();
+  if (onNode) deselectDrawing();
+  else if (selectedDrawingId !== null && !evt.target.closest(DRAWING_UI_SELECTOR)) deselectDrawing();
 });
 
 // Settings has live fields (a number input, checkboxes) rather than

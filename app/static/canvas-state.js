@@ -205,6 +205,16 @@ let drawIdCounter = 0;
 let drawMode = null; // 'rect' | 'ellipse' | 'line' | 'text' | null
 let drawDraft = null; // {type, x1, y1, x2, y2} while dragging out a new shape
 let selectedDrawingId = null; // which drawing shows resize handles right now
+
+// Node selection and drawing selection are two independent pieces of
+// state (a node's own popup vs. a drawing's resize/rotate handles) -
+// call this whenever a node gets selected so a previously selected
+// drawing's handles don't linger on screen pointing at the wrong thing.
+function deselectDrawing() {
+  if (selectedDrawingId === null) return;
+  selectedDrawingId = null;
+  renderDrawings();
+}
 let editingDrawingId = null; // which text drawing has an inline canvas editor open right now (hidden from the real SVG render while so)
 let availableTemplates = null; // {gns3: [...], esxi: [...]}, cached after first fetch
 let initialFitDone = false;

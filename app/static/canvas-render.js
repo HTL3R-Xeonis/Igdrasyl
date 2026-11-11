@@ -333,6 +333,7 @@ function refreshSelectionHighlight() {
 }
 
 function selectNode(name, anchor) {
+  deselectDrawing();
   selectedName = name;
   selectedNames = new Set([name]);
   hideMultiActions();
@@ -346,6 +347,7 @@ function setSelection(names, anchor) {
   const valid = [...names].filter((n) => nodesData[n]);
   if (valid.length === 0) { deselectNode(); return; }
   if (valid.length === 1) { selectNode(valid[0], anchor); return; }
+  deselectDrawing();
   selectedName = null;
   selectedNames = new Set(valid);
   document.getElementById("node-actions").hidden = true;
