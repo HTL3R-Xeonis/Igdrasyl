@@ -249,6 +249,7 @@ function applyDesignModeUI() {
   document.getElementById("find-orphans-btn").hidden = designMode;
   document.getElementById("tab-push").hidden = designMode;
   document.getElementById("nodes-menu").hidden = designMode;
+  document.getElementById("stage-changes-btn").hidden = designMode || stagingActive;
   if (designMode) showTab("console");
 }
 

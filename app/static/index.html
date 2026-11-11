@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-37">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-38">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -127,6 +127,12 @@
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
   <input type="file" id="draw-image-input" accept="image/*" hidden>
   <span id="menubar-mode-badge" hidden>Design mode</span>
+  <button id="stage-changes-btn" class="menu-btn" hidden title="Edit several live nodes/links at once without deploying each one separately - review a diff, then apply them all together">Stage Changes</button>
+  <span id="staging-indicator" hidden>
+    <span id="staging-count-text"></span>
+    <button id="staging-discard-btn" class="menu-btn">Discard</button>
+    <button id="staging-apply-btn" class="menu-btn">Review &amp; Apply…</button>
+  </span>
   <div id="menubar-status"></div>
 </header>
 <div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button><button id="warning-resume-btn" hidden>Resume project</button><button id="warning-gns3vm-btn" hidden>Start GNS3 VM</button></div>
@@ -344,6 +350,32 @@
   <button class="toolbar-btn" id="deployment-preview-close" type="button">Close</button>
 </dialog>
 
+<dialog id="staging-dialog" aria-labelledby="staging-title">
+  <h3 id="staging-title">Stage Live Edits</h3>
+  <p>Add or remove nodes/links here first - nothing is deployed until you review and apply the diff below.</p>
+  <h4>Nodes</h4>
+  <ul id="staging-nodes-list"></ul>
+  <form id="staging-add-node-form">
+    <input id="staging-node-name" placeholder="Name" autocomplete="off" required>
+    <input id="staging-node-role" placeholder="Role (e.g. VM)" autocomplete="off" required>
+    <input id="staging-node-image" placeholder="Image (template name)" autocomplete="off" required>
+    <button class="toolbar-btn" type="submit">Add node</button>
+  </form>
+  <h4>Links</h4>
+  <ul id="staging-links-list"></ul>
+  <form id="staging-add-link-form">
+    <input id="staging-link-node1" placeholder="Node 1" autocomplete="off" required>
+    <input id="staging-link-if1" placeholder="Interface 1" autocomplete="off" required>
+    <input id="staging-link-node2" placeholder="Node 2" autocomplete="off" required>
+    <input id="staging-link-if2" placeholder="Interface 2" autocomplete="off" required>
+    <button class="toolbar-btn" type="submit">Add link</button>
+  </form>
+  <p id="staging-dialog-status" role="status"></p>
+  <button class="toolbar-btn danger" id="staging-dialog-discard" type="button">Discard staging</button>
+  <button class="toolbar-btn primary" id="staging-dialog-review" type="button">Review &amp; Apply…</button>
+  <button class="toolbar-btn" id="staging-dialog-close" type="button">Close</button>
+</dialog>
+
 <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
   <h3 id="shortcuts-title">Keyboard shortcuts</h3>
   <table id="shortcuts-table"></table>
@@ -418,17 +450,18 @@
   </div>
 </div>
 
-<script src="/core.js?v=screenshot-layout-1"></script>
-<script src="/canvas-state.js?v=ginnungagap-37"></script>
-<script src="/label-placement.js?v=ginnungagap-37"></script>
-<script src="/drawings.js?v=ginnungagap-37"></script>
-<script src="/canvas-render.js?v=ginnungagap-37"></script>
-<script src="/edit-actions.js?v=ginnungagap-37"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-37"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-37"></script>
-<script src="/import-and-generate.js?v=screenshot-layout-1"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-37"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-37"></script>
-<script src="/projects.js?v=serial-1"></script>
+<script src="/core.js?v=ginnungagap-38"></script>
+<script src="/canvas-state.js?v=ginnungagap-38"></script>
+<script src="/label-placement.js?v=ginnungagap-38"></script>
+<script src="/drawings.js?v=ginnungagap-38"></script>
+<script src="/canvas-render.js?v=ginnungagap-38"></script>
+<script src="/edit-actions.js?v=ginnungagap-38"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-38"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-38"></script>
+<script src="/import-and-generate.js?v=ginnungagap-38"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-38"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-38"></script>
+<script src="/projects.js?v=ginnungagap-38"></script>
+<script src="/staging.js?v=ginnungagap-38"></script>
 </body>
 </html>

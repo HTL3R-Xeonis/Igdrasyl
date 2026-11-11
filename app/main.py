@@ -41,6 +41,7 @@ from app.request_logging import RequestLoggingMiddleware
 for _module in (
     "system",
     "live",
+    "staging",
     "push",
     "design",
     "projects",

@@ -195,6 +195,13 @@ async def lifespan(app: FastAPI):
         app.state.design = design.new_state()
     app.state.design_project_id = None
 
+    # The live-edit staging draft (see app/staging.py) - None whenever no
+    # staging session is open. Deliberately not persisted across a
+    # restart (unlike app.state.design): it is a draft of the live
+    # topology taken at a point in time, so a restart's own topology
+    # reload makes any stale draft meaningless anyway.
+    app.state.staged_edit = None
+
     app.state.gns3_vm_deploy_job = None
     refresh_startup_state(app)
 

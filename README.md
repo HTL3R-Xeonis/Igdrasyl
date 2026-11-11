@@ -542,6 +542,18 @@ live add also puts the topology file back exactly as it was (TopologyBackend alr
 successful deploy, so this is a safety net against a partly written file, not a fix for a known failure); what a failed
 deploy half created on ESXi/GNS3 shows up under File > Find Orphans.
 
+## Staging several live edits
+
+Every add/remove above deploys immediately, one call at a time. The **Stage Changes** button (top bar, live mode
+only) opens a draft copy of the live topology instead: add/remove nodes and links there first, see a plain-text
+diff against what is actually live, then **Review & Apply** once to run every change back-to-back. It does not
+reduce the number of underlying deploys (there is no multi-node batch API) or make them non-disruptive - it
+removes the friction of confirming and watching each one separately. Applying stops at the first failing step;
+everything before it has already happened live and stays applied, and staging stays open so the rest can be
+retried or discarded (`POST /live/stage`, `GET /live/stage/diff`, `POST /live/stage/apply`, see
+`app/staging.py`/`app/batch_apply.py`). Deliberately narrow: only nodes and links, no drawings/notes/labels/undo -
+those belong to the separate, much older design sketch (`app/design.py`).
+
 ## Deleting and holding projects
 
 **Delete**: select a project in the project library dialog and choose **Delete project...**. Only the
@@ -648,6 +660,10 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET /templates`, `POST /nodes`, `DELETE /nodes/{name}`, `POST
   /links`, `DELETE /links/{node1}/{node2}[?if1=..&if2=..]` - live add/remove.
 - `POST /nodes/{name}/start`, `.../stop`, `.../reload` - node lifecycle.
+- `GET/POST /live/stage` (open/check a staging session), `POST /live/stage/discard`,
+  `GET /live/stage/topology`, `POST /live/stage/nodes`, `DELETE /live/stage/nodes/{name}`,
+  `POST /live/stage/links`, `DELETE /live/stage/links/{node1}/{node2}`, `GET /live/stage/diff`,
+  `POST /live/stage/apply` `{"confirm": true}` - stage several live edits, see above.
 - `GET /links` (every live link + capturing state), `POST
   /links/{node1}/{node2}/capture/start`, `.../capture/stop`, `GET
   .../capture/stream` (proxies GNS3's own live pcap stream) - see
@@ -693,7 +709,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-814 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+833 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

@@ -355,6 +355,11 @@ async function loadCanvas() {
       : `${health.gns3_project_name} @ ${health.esxi_ip}`;
     setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project, gns3Vm: designMode ? null : health.gns3_vm });
     incrementalDeploy = health.incremental_deploy !== false;
+    if (!designMode) {
+      // Re-sync with a staging session that may already be open server-side (e.g. this page was reloaded).
+      setStagingUI((await fetch("/live/stage").then(r => r.ok ? r.json() : { active: false })).active);
+      if (stagingActive) document.getElementById("staging-count-text").textContent = "Staging changes…";
+    }
 
     const gns3Link = document.getElementById("gns3-webui-link");
     const esxiLink = document.getElementById("esxi-webui-link");

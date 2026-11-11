@@ -64,6 +64,29 @@ def new_state() -> DesignState:
     return DesignState()
 
 
+def from_graph(graph: Any) -> DesignState:
+    """
+    Builds an editable sketch directly from a live TopologyBuilder Graph
+    (app.state.graph) - used by the live-edit staging feature
+    (app/staging.py) so an operator can stage several live changes before
+    anything is deployed. Like from_dict, constructs DesignNode directly
+    rather than through add_node: every node's environment/role/image is
+    already resolved on the live Graph, so there is no need to ask the
+    template service about them again.
+    """
+    state = new_state()
+    for name, node in graph.nodes.items():
+        state.nodes[name] = DesignNode(
+            name=name, role=node.role, image=node.image, environment=node.env.name
+        )
+    for node1, if1, node2, if2 in graph.edges:
+        state.nodes[node1].interfaces[if1] = node2
+        state.nodes[node2].interfaces[if2] = node1
+        state.links.append((node1, if1, node2, if2))
+    auto_layout(state)
+    return state
+
+
 def add_node(state: DesignState, name: str, role: str, image: str) -> None:
     node_names.validate(name, state.nodes)
     environment = Environment.get_environment(image)
