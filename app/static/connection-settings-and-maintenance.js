@@ -222,6 +222,14 @@ document.getElementById("connection-test").addEventListener("click", async () =>
   finally { setConnectionBusy(false); }
 });
 function closeConnectionSettings() {
+  // Deliberately the native confirm(), not this app's own showConfirm():
+  // connectionDialog is a real <dialog> shown via showModal(), which
+  // renders in the browser's top layer - above every other element
+  // regardless of z-index. showConfirm()'s overlay is a plain div, so
+  // it would render invisibly *underneath* the still-open <dialog>
+  // (confirmed live: the confirm's DOM state was all correct, nothing
+  // was ever visible on screen). Tried once, reverted - see this
+  // comment before trying it again.
   if (connectionDirty && !window.confirm("Discard unsaved settings changes?")) return;
   connectionDialog.close();
 }
