@@ -605,7 +605,12 @@ The project controls live in the separate `app/static/projects.js` feature file.
 
 Open a library project in the design canvas to edit its topology, drawings, and
 node positions. **Save Project** writes those parts back to that project only;
-each library project therefore retains its own canvas layout. **Clear Topology…** (File menu, design
+each library project therefore retains its own canvas layout. **Snapshots…** (File
+menu, once a project is bound) checkpoints the current sketch under that project
+without replacing it - unlike Save Project, nothing is overwritten, so earlier
+points stay reachable; Restore replaces the current sketch with a snapshot's
+(Undo brings the previous state back), Delete removes one for good. Capped at
+50 per project, oldest dropped first (`app/project_snapshots.py`). **Clear Topology…** (File menu, design
 mode only) empties the sketch after a confirmation; Edit > Undo brings it back. **Deploy to Host…**
 shows the target ESXi address, GNS3 VM, node/link totals, role totals, and whether
 the host uses incremental or full deployment. The preview is read-only. Starting
@@ -647,6 +652,9 @@ same restart flow as host changes. Import and live edits require a selected proj
   (delay/jitter/loss/corruption/suspend; `GET /links` reports them back).
 - `POST /design/project` `{name}`: saves the current design as a new library project (the deploy
   dialog names and saves it itself, then deploys it).
+- `GET /design/project/{id}/snapshots`, `POST .../snapshots` `{name}`, `POST
+  .../snapshots/{snapshot_id}/restore`, `DELETE .../snapshots/{snapshot_id}` - named
+  checkpoints under a library project, see above.
 - `DELETE /logs`: permanently clears the log (both rotation files); the first
   new line records that it happened.
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
@@ -709,7 +717,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-833 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+845 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 

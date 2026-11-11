@@ -236,6 +236,7 @@ function applyDesignModeUI() {
   document.body.classList.toggle("design-mode", designMode);
   document.getElementById("open-library-project-btn").hidden = !designMode;
   document.getElementById("save-library-project-btn").hidden = !designMode;
+  document.getElementById("project-snapshots-btn").hidden = !designMode;
   document.getElementById("deploy-library-project-btn").hidden = !designMode;
   document.getElementById("clear-design-btn").hidden = !designMode;
   document.getElementById("design-project-separator").hidden = !designMode;

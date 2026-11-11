@@ -18,6 +18,7 @@ from app import (
     node_notes,
     project_bundle,
     project_library,
+    project_snapshots,
     public_text,
     template_health,
     topology_write,
@@ -315,6 +316,43 @@ def save_library_project(project_id: str) -> dict[str, Any]:
     app.state.design_project_id = project_id
     design_store.save(app.state.design)
     return {"project": project}
+
+
+class SnapshotRequest(BaseModel):
+    name: str
+
+
+@app.get("/design/project/{project_id}/snapshots")
+def list_project_snapshots(project_id: str) -> dict[str, Any]:
+    return {"snapshots": settings_call(project_snapshots.list_snapshots, project_id)}
+
+
+@app.post("/design/project/{project_id}/snapshots", status_code=201)
+def create_project_snapshot(
+    project_id: str, request: SnapshotRequest
+) -> dict[str, Any]:
+    """Checkpoints the CURRENT sketch under this project, without replacing it - see app/project_snapshots.py."""
+    return {
+        "snapshot": settings_call(
+            project_snapshots.create, project_id, request.name, app.state.design
+        )
+    }
+
+
+@app.post("/design/project/{project_id}/snapshots/{snapshot_id}/restore")
+def restore_project_snapshot(project_id: str, snapshot_id: str) -> dict[str, Any]:
+    state = settings_call(project_snapshots.restore, project_id, snapshot_id)
+    with design_history.step(app):
+        app.state.design = state
+    app.state.design_project_id = project_id
+    design_store.save(app.state.design)
+    return {"status": "ok"}
+
+
+@app.delete("/design/project/{project_id}/snapshots/{snapshot_id}")
+def delete_project_snapshot(project_id: str, snapshot_id: str) -> dict[str, str]:
+    settings_call(project_snapshots.delete, project_id, snapshot_id)
+    return {"status": "ok"}
 
 
 @app.get("/design/export")
