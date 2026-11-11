@@ -147,6 +147,17 @@ function describeDiff(diff) {
   return lines;
 }
 
+async function withStagingDialogSuspended(action) {
+  const dialog = document.getElementById("staging-dialog");
+  const wasOpen = dialog.open;
+  if (wasOpen) dialog.close();
+  try {
+    return await action();
+  } finally {
+    if (wasOpen && stagingActive) dialog.showModal();
+  }
+}
+
 async function endStagingSession() {
   setStagingUI(false);
   document.getElementById("staging-dialog").close();
@@ -156,7 +167,8 @@ async function endStagingSession() {
 document.getElementById("staging-dialog-review").addEventListener("click", async () => {
   const diffResp = await fetch("/live/stage/diff");
   if (!diffResp.ok) {
-    stagingStatus(`Could not compute the diff: ${diffResp.status}`);
+    const error = await diffResp.json().catch(() => ({}));
+    stagingStatus(error.detail || `Could not compute the diff: ${diffResp.status}`);
     return;
   }
   const diff = await diffResp.json();
@@ -165,33 +177,37 @@ document.getElementById("staging-dialog-review").addEventListener("click", async
     stagingStatus("Nothing staged yet - add a node or link above first.");
     return;
   }
-  const ok = await showConfirm(
+  const ok = await withStagingDialogSuspended(() => showConfirm(
     `This will be deployed live, one change at a time (each one briefly disrupts already-running ESXi-bridged connections):\n\n${lines.join("\n")}`,
     { title: "Review & Apply", confirmLabel: "Apply", danger: true }
-  );
+  ));
   if (!ok) return;
 
   stagingStatus("Applying…");
   const resp = await fetch("/live/stage/apply", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirm: true }),
+    body: JSON.stringify({ confirm: true, review_id: diff.review_id }),
   });
-  const body = await resp.json().catch(() => ({ results: [], applied: false }));
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    stagingStatus(body.detail || `Could not apply changes: ${resp.status}`);
+    return;
+  }
   const summary = body.results
     .map((r) => `${r.ok ? "✓" : "✗"} ${r.action} ${r.target}${r.error ? ` - ${r.error}` : ""}`)
     .join("\n");
   if (body.applied) {
-    await showAlert(summary || "Nothing to apply.", { title: "Applied" });
     await endStagingSession();
+    await showAlert(summary || "Nothing to apply.", { title: "Applied" });
   } else {
-    await showAlert(`Stopped at the first failure - already-applied steps stayed applied, staging is still open for the rest:\n\n${summary}`, { title: "Apply failed" });
+    await withStagingDialogSuspended(() => showAlert(`Stopped at the first failure - already-applied steps stayed applied, staging is still open for the rest:\n\n${summary}`, { title: "Apply failed" }));
     await renderStagingLists();
   }
 });
 
 document.getElementById("staging-dialog-discard").addEventListener("click", async () => {
-  const ok = await showConfirm("Discard every staged change? Nothing live is touched.", { title: "Discard staging", confirmLabel: "Discard", danger: true });
+  const ok = await withStagingDialogSuspended(() => showConfirm("Discard every staged change? Nothing live is touched.", { title: "Discard staging", confirmLabel: "Discard", danger: true }));
   if (!ok) return;
   await fetch("/live/stage/discard", { method: "POST" });
   await endStagingSession();

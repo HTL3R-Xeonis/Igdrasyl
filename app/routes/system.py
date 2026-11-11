@@ -16,6 +16,7 @@ from app import (
     template_health,
 )
 from app.application import app
+from app.live_lock import exclusive
 from app.startup import (
     deployable_project,
     gns3_vm_power_state,
@@ -50,7 +51,8 @@ def reload_startup_state() -> dict[str, Any]:
     is the same shape as GET /health so the frontend can refresh from it
     directly.
     """
-    refresh_startup_state(app)
+    with exclusive("Reload live topology"):
+        refresh_startup_state(app)
     return health()
 
 

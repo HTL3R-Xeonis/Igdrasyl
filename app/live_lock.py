@@ -19,17 +19,23 @@ from contextlib import contextmanager
 from loguru import logger
 
 _LOCK = threading.Lock()
+_OWNER = threading.local()
 
 
 @contextmanager
 def exclusive(what: str) -> Iterator[None]:
-    """Hold the lock for one structural change; waits (and says so in the log) if another is running."""
+    """Serialize structural changes, allowing an outer batch to call individual writes."""
+    if getattr(_OWNER, "exclusive", False):
+        yield
+        return
     if not _LOCK.acquire(blocking=False):
         logger.info(f"{what}: waiting for another change to the lab to finish")
         _LOCK.acquire()
+    _OWNER.exclusive = True
     try:
         yield
     finally:
+        _OWNER.exclusive = False
         _LOCK.release()
 
 

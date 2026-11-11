@@ -550,7 +550,9 @@ diff against what is actually live, then **Review & Apply** once to run every ch
 reduce the number of underlying deploys (there is no multi-node batch API) or make them non-disruptive - it
 removes the friction of confirming and watching each one separately. Applying stops at the first failing step;
 everything before it has already happened live and stays applied, and staging stays open so the rest can be
-retried or discarded (`POST /live/stage`, `GET /live/stage/diff`, `POST /live/stage/apply`, see
+reviewed again or discarded. Each apply requires the `review_id` from the most recent preview. If the draft
+changed after review, open the preview again. If the live topology or selected project changed since staging
+started, discard the stale draft and start a new one (`POST /live/stage`, `GET /live/stage/diff`, `POST /live/stage/apply`, see
 `app/staging.py`/`app/batch_apply.py`). Deliberately narrow: only nodes and links, no drawings/notes/labels/undo -
 those belong to the separate, much older design sketch (`app/design.py`).
 

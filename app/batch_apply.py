@@ -56,7 +56,7 @@ class Diff:
         }
 
 
-def _link_key(node1: str, if1: str, node2: str, if2: str) -> tuple[str, str, str, str]:
+def link_key(node1: str, if1: str, node2: str, if2: str) -> tuple[str, str, str, str]:
     """Order-independent so the same link read from either side (draft vs. live) compares equal."""
     return (node1, if1, node2, if2) if node1 <= node2 else (node2, if2, node1, if1)
 
@@ -72,8 +72,8 @@ def compute_diff(draft: design.DesignState, graph: Any) -> Diff:
     ]
     removed_nodes = sorted(live_names - draft_names)
 
-    live_links = {_link_key(*edge): edge for edge in graph.edges}
-    draft_links = {_link_key(*link): link for link in draft.links}
+    live_links = {link_key(*edge): edge for edge in graph.edges}
+    draft_links = {link_key(*link): link for link in draft.links}
 
     added_links = [link for key, link in draft_links.items() if key not in live_links]
     removed_links = [edge for key, edge in live_links.items() if key not in draft_links]
