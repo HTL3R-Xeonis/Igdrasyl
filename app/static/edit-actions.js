@@ -378,6 +378,24 @@ function moveSelectionBy(dx, dy) {
   }, 500);
 }
 
+// Same idea as moveSelectionBy/arrowMove above, for the one selected
+// drawing instead of the node selection - persistDrawings() already does
+// the right thing in both modes (live history diff / design_history
+// server-side), so held arrow keys just need debouncing down to one
+// call instead of one per keydown.
+let drawingArrowMoveTimer = null;
+function moveDrawingBy(dx, dy) {
+  const d = drawings.find((dr) => dr.id === selectedDrawingId);
+  if (!d) return;
+  d.x1 += dx;
+  d.y1 += dy;
+  if ("x2" in d) d.x2 += dx;
+  if ("y2" in d) d.y2 += dy;
+  renderDrawings();
+  clearTimeout(drawingArrowMoveTimer);
+  drawingArrowMoveTimer = setTimeout(persistDrawings, 500);
+}
+
 function typingInside(el) {
   return !!(el && el.closest && el.closest("input, textarea, select, [contenteditable='true'], .xterm"));
 }
@@ -426,10 +444,13 @@ window.addEventListener("keydown", async (evt) => {
     return;
   }
   if (key.startsWith("arrow")) {
-    if (!selectedNames.size) return;
+    if (!selectedNames.size && selectedDrawingId === null) return;
     handled();
     const step = (snapToGridEnabled ? GRID_SIZE : 10) * (evt.shiftKey ? 5 : 1);
-    moveSelectionBy(key === "arrowleft" ? -step : key === "arrowright" ? step : 0, key === "arrowup" ? -step : key === "arrowdown" ? step : 0);
+    const dx = key === "arrowleft" ? -step : key === "arrowright" ? step : 0;
+    const dy = key === "arrowup" ? -step : key === "arrowdown" ? step : 0;
+    if (selectedNames.size) moveSelectionBy(dx, dy);
+    else moveDrawingBy(dx, dy);
     return;
   }
   const center = { x: viewBoxState.x + viewBoxState.w / 2, y: viewBoxState.y + viewBoxState.h / 2 };
