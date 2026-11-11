@@ -67,6 +67,18 @@
     color: var(--dim);
   }
   #menubar-status:empty { display: none; }
+  /* Persistent indicator, unlike #menubar-status's transient busy/progress/message
+     text above - stays up the whole time the design sketch (not a live project) is open. */
+  #menubar-mode-badge {
+    margin-left: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+  }
   .menubar-spinner {
     width: 12px;
     height: 12px;
@@ -346,6 +358,12 @@
   }
   body.canvas-locked #palette-list,
   body.canvas-locked #topology-summary-list { pointer-events: none; opacity: 0.55; }
+  /* A sketch has no live status/console/screen - the node list only ever reads "no live
+     data" and the console placeholder's "open its Console or Screen" never applies. The
+     per-node Start/Stop/Reload/Console/Screen buttons are already disabled individually
+     (showNodeActions); this just dims the panel as a whole, Note/Delete stay clickable. */
+  body.design-mode #topology-summary,
+  body.design-mode #console-area { opacity: 0.55; }
   #canvas.panning { cursor: grabbing; }
   #canvas.placing, #canvas.drawing { cursor: crosshair; }
   /* Colors/widths for rect/ellipse/line/text are all set per-shape as

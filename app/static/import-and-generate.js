@@ -225,6 +225,15 @@ function showLandingView() {
 // real, deployed host - nothing under /design/* has a live GNS3/ESXi
 // connection to import into, reload, or push configs to.
 function applyDesignModeUI() {
+  document.getElementById("menubar-mode-badge").hidden = !designMode;
+  // Dims the topology summary + console area: a sketch has no live
+  // status/console/screen, so the list only ever reads "no live data"
+  // and the console placeholder's own advice ("open its Console or
+  // Screen") never applies there - individual buttons are already
+  // disabled per node (showNodeActions), this is just the visual cue
+  // for the panel as a whole. Note/Delete stay fully usable, just a
+  // little dimmed along with everything else.
+  document.body.classList.toggle("design-mode", designMode);
   document.getElementById("open-library-project-btn").hidden = !designMode;
   document.getElementById("save-library-project-btn").hidden = !designMode;
   document.getElementById("deploy-library-project-btn").hidden = !designMode;
@@ -304,11 +313,11 @@ async function promptAndGenerateTopology() {
     return;
   }
 
-  const prompt = await showTextareaPrompt(
-    "Describe the topology you want (e.g. \"a small office network with " +
-    "2 routers, 3 switches, and 5 PCs\"):",
-    { title: "Generate via LLM", placeholder: "Describe the topology…", confirmLabel: "Generate" }
-  );
+  const prompt = await showTextareaPrompt("", {
+    title: "Generate via LLM",
+    placeholder: "Describe the topology you want (e.g. \"a small office network with 2 routers, 3 switches, and 5 PCs\")…",
+    confirmLabel: "Generate",
+  });
   if (!prompt) return;
 
   setLandingGenerateStatus("Starting generation…");

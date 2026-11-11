@@ -358,6 +358,7 @@ function openModal(config) {
 
     titleEl.textContent = config.title || "";
     messageEl.textContent = config.message || "";
+    messageEl.hidden = !config.message;
     inputEl.hidden = true;
     textareaEl.hidden = true;
     fieldWrap.hidden = !isText && !isTextarea;
