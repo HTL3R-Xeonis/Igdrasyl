@@ -357,7 +357,13 @@ async function loadCanvas() {
       gns3Link.href = "#";
       gns3Link.classList.add("menu-item-disabled");
     }
-    esxiLink.href = health.esxi_ip ? `https://${health.esxi_ip}/` : "#";
+    if (health.esxi_ip) {
+      esxiLink.href = `https://${health.esxi_ip}/`;
+      esxiLink.classList.remove("menu-item-disabled");
+    } else {
+      esxiLink.href = "#";
+      esxiLink.classList.add("menu-item-disabled");
+    }
 
     labelOffsets = await fetch(apiPath("/labels")).then(r => r.ok ? r.json() : {}).catch(() => ({}));
     nodeNotes = await fetch(apiPath("/notes")).then(r => r.ok ? r.json() : {}).catch(() => ({}));
