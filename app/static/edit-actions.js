@@ -165,7 +165,8 @@ async function pasteClipboard() {
 }
 
 async function duplicateSelection() {
-  if (copySelection()) await pasteClipboard();
+  if (copySelection()) { await pasteClipboard(); return; }
+  if (copySelectedDrawing()) pasteDrawingClipboard();
 }
 
 // Copy/paste for a single selected drawing (Ctrl+C/Ctrl+V) - unlike node
@@ -404,7 +405,12 @@ window.addEventListener("keydown", async (evt) => {
     else if (drawingClipboard) { handled(); pasteDrawingClipboard(); }
     return;
   }
-  if (mod && key === "d") { handled(); if (designMode) await duplicateSelection(); return; }
+  if (mod && key === "d") {
+    handled();
+    if (designMode && selectedNames.size) await duplicateSelection();
+    else if (selectedDrawingId !== null) await duplicateSelection();
+    return;
+  }
   if (mod && key === "f") { handled(); openNodeFinder(); return; }
   if (mod || evt.altKey) return;
 
