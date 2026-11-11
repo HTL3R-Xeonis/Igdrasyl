@@ -123,6 +123,7 @@ function copySelection() {
     nodes: names.map((n) => ({ name: n, role: nodesData[n].role, image: nodesData[n].image, x: nodesData[n].x, y: nodesData[n].y })),
     links,
   };
+  drawingClipboard = null; // one clipboard at a time - whichever was copied last is what Ctrl+V pastes
   pasteCount = 0;
   setMenubarMessage(`Copied ${names.length} node${names.length === 1 ? "" : "s"}.`);
   return true;
@@ -165,6 +166,43 @@ async function pasteClipboard() {
 
 async function duplicateSelection() {
   if (copySelection()) await pasteClipboard();
+}
+
+// Copy/paste for a single selected drawing (Ctrl+C/Ctrl+V) - unlike node
+// copy/paste this works in a live project too, same as moving or
+// deleting a drawing already does (drawings are the one thing besides
+// node positions that stays undoable/editable live - see the "Undo /
+// redo" comment up top).
+let drawingClipboard = null; // a cloneDrawings()-deep-copied drawing object, id stripped
+let drawingPasteCount = 0;   // each paste of the same copy lands a bit further along, like pasteClipboard's own step
+
+function copySelectedDrawing() {
+  if (selectedDrawingId === null) return false;
+  const original = drawings.find((d) => d.id === selectedDrawingId);
+  if (!original) return false;
+  const { id: _unused, ...rest } = cloneDrawings([original])[0];
+  drawingClipboard = rest;
+  nodeClipboard = null; // one clipboard at a time - whichever was copied last is what Ctrl+V pastes
+  drawingPasteCount = 0;
+  setMenubarMessage("Copied drawing.");
+  return true;
+}
+
+function pasteDrawingClipboard() {
+  if (!drawingClipboard) return;
+  drawingPasteCount++;
+  const step = 40 * drawingPasteCount;
+  const place = (v) => (snapToGridEnabled ? snapToGrid(v) : v);
+  const pasted = { ...cloneDrawings([drawingClipboard])[0], id: ++drawIdCounter };
+  pasted.x1 = place(pasted.x1 + step);
+  pasted.y1 = place(pasted.y1 + step);
+  if ("x2" in pasted) pasted.x2 = place(pasted.x2 + step);
+  if ("y2" in pasted) pasted.y2 = place(pasted.y2 + step);
+  drawings.push(pasted);
+  selectedDrawingId = pasted.id;
+  renderDrawings();
+  persistDrawings();
+  setMenubarMessage("Pasted drawing.");
 }
 
 function selectAllNodes() {
@@ -356,8 +394,16 @@ window.addEventListener("keydown", async (evt) => {
   if (mod && key === "z") { handled(); await (evt.shiftKey ? redoAction() : undoAction()); return; }
   if (mod && key === "y") { handled(); await redoAction(); return; }
   if (mod && key === "a") { handled(); selectAllNodes(); return; }
-  if (mod && key === "c") { if (designMode && selectedNames.size) { handled(); copySelection(); } return; }
-  if (mod && key === "v") { if (designMode && nodeClipboard) { handled(); await pasteClipboard(); } return; }
+  if (mod && key === "c") {
+    if (designMode && selectedNames.size) { handled(); copySelection(); }
+    else if (selectedDrawingId !== null) { handled(); copySelectedDrawing(); }
+    return;
+  }
+  if (mod && key === "v") {
+    if (designMode && nodeClipboard) { handled(); await pasteClipboard(); }
+    else if (drawingClipboard) { handled(); pasteDrawingClipboard(); }
+    return;
+  }
   if (mod && key === "d") { handled(); if (designMode) await duplicateSelection(); return; }
   if (mod && key === "f") { handled(); openNodeFinder(); return; }
   if (mod || evt.altKey) return;
