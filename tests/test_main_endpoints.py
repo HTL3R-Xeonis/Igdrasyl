@@ -13,6 +13,66 @@ import app.main as app_module
 from app.config_push import DeviceResult
 
 
+@pytest.fixture(autouse=True)
+def _mock_import_gns3_lookup():
+    # These endpoint tests use a fake backend; neither deploy completion nor
+    # progress polling should wait for a real GNS3 controller.
+    with (
+        patch("app.project_bundle.resolve_project_id", return_value=None),
+        patch("app.import_jobs.resolve_project_id", return_value=None),
+    ):
+        yield
+
+
+def test_config_snippet_crud(client):
+    url = "/config-snippets/router.json"
+    snippet = {"label": "Router info", "commands": ["show version"]}
+    assert client.get(url).status_code == 404
+    assert client.put(url, json=snippet).json() == snippet
+    assert client.get("/config-snippets").json() == [
+        {"name": "router.json", "label": "Router info", "command_count": 1}
+    ]
+    assert client.get(url).json() == snippet
+    assert client.put(url, json={**snippet, "commands": []}).status_code == 422
+    assert client.get(url).json() == snippet
+    assert client.put("/config-snippets/router.txt", json=snippet).status_code == 400
+    assert client.delete(url).status_code == 204
+    assert client.delete(url).status_code == 404
+    assert client.get("/config-snippets").json() == []
+
+
+def test_config_push_audit_records_direct_and_background_push_once(
+    client, app_state, monkeypatch
+):
+    monkeypatch.setattr(app_state, "push_job", None, raising=False)
+    monkeypatch.setattr(app_state, "connectivity_job", None, raising=False)
+    request = {"devices": {"R1": ["show version"]}}
+    result = [
+        DeviceResult(
+            device="R1", transport="netmiko", ok=True, executed=1, total_commands=1
+        )
+    ]
+    assert client.get("/config-push/audit").json() == []
+    with patch("app.routes.push.push_all", return_value=result):
+        assert client.post("/config-push", json=request).status_code == 200
+    with patch("app.push_jobs.push_all", return_value=result):
+        started = client.post("/config-push/jobs", json={**request, "wait_seconds": 0})
+        assert started.status_code == 202
+        job_url = f"/config-push/jobs/{started.json()['job_id']}"
+        deadline = time.monotonic() + 3
+        while (
+            client.get(job_url).json()["status"] == "running"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert client.get(job_url).json()["status"] == "done"
+    history = client.get("/config-push/audit").json()
+    assert [row["note"] for row in history] == ["Background push", "Direct push"]
+    assert all(row["devices"][0]["executed"] == 1 for row in history)
+    assert client.get("/config-push/audit?limit=1").json() == history[:1]
+    assert client.get("/config-push/audit?limit=0").status_code == 422
+
+
 def test_health_reports_degraded_state(client, app_state):
     app_state.startup_warning = "GNS3 VM not found"
     resp = client.get("/health")
@@ -580,6 +640,9 @@ def test_import_project_auto_pushes_when_the_bundle_enables_it(
         }
     ]
     assert app_state.last_config_push == {"R1": ["show version"]}
+    assert [row["note"] for row in client.get("/config-push/audit").json()] == [
+        "Automatic push after deploy"
+    ]
 
 
 def test_import_project_skips_auto_push_when_bundle_has_no_configs(

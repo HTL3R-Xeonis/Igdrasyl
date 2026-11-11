@@ -465,9 +465,21 @@ after deploy and resume** makes the app push them by itself - right after the de
 deployment bundle) and after a **Resume** from hold. Endpoints: `GET/PUT /project/configs` (the active host's project) and
 `GET/PUT /projects/{id}/configs`; limits: 200 devices, 10 000 commands per device, 4000 characters per command, 8 MB.
 
+**Insert snippet…** appends a saved snippet to one device in the editor. It preserves other devices and options such as
+`via` on the target. Review the combined commands before choosing **Push** or **Save to project**. Manage the library
+through `GET /config-snippets` (list), `GET/PUT/DELETE /config-snippets/{name}` (read, create/update, delete).
+For example, PUT `{"label":"Router info","commands":["show version"]}` to `/config-snippets/router-info.json`.
+The library is shared across projects on this Operator instance. Files are stored in `config_snippets/` by default
+(`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
+
 A push runs as a **background job** (`POST /config-push/jobs`, then `GET /config-push/jobs/{id}`): the tab shows a progress
 bar per device and the per-device results at the end; only one push runs at a time. (`POST /config-push` still answers in
 one request, for short lists.) A very long result is shortened to the failed commands plus the last 50 (`truncated`).
+
+**History** shows the last 50 config pushes on this instance, newest first, including automatic pushes after deploy and
+resume. It shows the outcome and per-device command counts without storing the commands, their output, or login details.
+`GET /config-push/audit?limit=10` returns the latest ten runs. History persists in the separate `push_audit.jsonl` file
+(`TOPOLOGYOPERATOR_PUSH_AUDIT_FILE`); the oldest entries are dropped once the cap is reached.
 
 **The push solves what it can by itself.** A device that is still booting (nothing reachable yet, no command run) is retried
 every 15 s for up to **15 minutes** - for pushes started by hand too (`"wait_seconds": 0` in the request: try once; up to 3600);

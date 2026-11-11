@@ -58,6 +58,16 @@ def _node_notes_tmp_file(tmp_path, monkeypatch):
     monkeypatch.setenv("TOPOLOGYOPERATOR_NOTES_FILE", str(tmp_path / "node_notes.json"))
 
 
+@pytest.fixture(autouse=True)
+def _push_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR", str(tmp_path / "snippets")
+    )
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_PUSH_AUDIT_FILE", str(tmp_path / "push_audit.jsonl")
+    )
+
+
 @pytest.fixture
 def temp_topology_file(tmp_path, app_state):
     """

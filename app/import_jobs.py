@@ -33,7 +33,7 @@ from loguru import logger
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
 
-from app import template_health
+from app import push_audit, template_health
 from app.gns3_state import resolve_project_id
 from app.live_lock import exclusive
 
@@ -153,7 +153,9 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
             result = _apply_import_healing_templates(app, zip_bytes)
         if result["auto_config_push"] and result["configs"]:
             app.state.last_config_push = result["configs"]
-            result["push_results"] = push_all_waiting(result["configs"], app)
+            with push_audit.track("Automatic push after deploy") as audit:
+                result["push_results"] = push_all_waiting(result["configs"], app)
+                audit.extend(result["push_results"])
         job.result = result
         job.completed = job.total
         job.status = "done"

@@ -238,7 +238,9 @@ def resume_held_project(project_id: str) -> dict[str, Any]:
         try:
             # In the background (it can be long, and devices may still be booting):
             # the client follows it through GET /config-push/jobs/{id}.
-            job = push_jobs.start_job(app, saved["devices"])
+            job = push_jobs.start_job(
+                app, saved["devices"], audit_note="Automatic push after resume"
+            )
             response["push_job_id"] = job.id
         except push_jobs.AlreadyRunning:
             response["push_job_error"] = "another config push is still running"

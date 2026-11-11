@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-40">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-41">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -241,28 +241,48 @@
     </div>
   </div>
   <div id="push-area" hidden>
-    <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
-      Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device).
-      To choose how a VM is reached, use an object instead of the list:
-      <code>{"commands": [...], "via": "serial"}</code> - <code>via</code> is
-      <code>auto</code> (default: guest operations while VMware Tools runs, else the
-      serial console), <code>guest_ops</code> or <code>serial</code>; for serial you can add
-      <code>profile</code> (<code>linux</code>, <code>routeros</code>, <code>bsd_menu</code>)
-      and <code>username</code>/<code>password</code> (default: the template catalog's login).
-      The serial console must be enabled on the VM first (click the VM, then
-      "Enable serial console").
-    </p>
-    <textarea id="push-input">{
+    <div class="push-controls" role="group" aria-label="Config Push views">
+      <button class="toolbar-btn active" id="push-editor-tab" aria-pressed="true" type="button">Config Push</button>
+      <button class="toolbar-btn" id="push-history-tab" aria-pressed="false" type="button">History</button>
+    </div>
+    <div id="push-editor">
+      <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
+        Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device).
+        To choose how a VM is reached, use an object instead of the list:
+        <code>{"commands": [...], "via": "serial"}</code> - <code>via</code> is
+        <code>auto</code> (default: guest operations while VMware Tools runs, else the
+        serial console), <code>guest_ops</code> or <code>serial</code>; for serial you can add
+        <code>profile</code> (<code>linux</code>, <code>routeros</code>, <code>bsd_menu</code>)
+        and <code>username</code>/<code>password</code> (default: the template catalog's login).
+        The serial console must be enabled on the VM first (click the VM, then
+        "Enable serial console").
+      </p>
+      <textarea id="push-input">{
   "R1": ["show version"]
 }</textarea>
-    <div id="push-project-row">
-      <button class="toolbar-btn" id="push-load-project-btn" type="button">Load from project</button>
-      <button class="toolbar-btn" id="push-save-project-btn" type="button">Save to project</button>
-      <label id="push-auto-label"><input type="checkbox" id="push-auto-checkbox"> Push automatically after deploy and resume</label>
+      <div id="push-project-row">
+        <button class="toolbar-btn" id="push-load-project-btn" type="button">Load from project</button>
+        <button class="toolbar-btn" id="push-save-project-btn" type="button">Save to project</button>
+        <button class="toolbar-btn" id="push-snippets-toggle" aria-expanded="false" aria-controls="push-snippets" type="button">Insert snippet…</button>
+        <label id="push-auto-label"><input type="checkbox" id="push-auto-checkbox"> Push automatically after deploy and resume</label>
+      </div>
+      <div class="push-controls" id="push-snippets" hidden>
+        <select id="push-snippet-name" aria-label="Config snippet"></select>
+        <select id="push-snippet-device" aria-label="Target device"></select>
+        <button class="toolbar-btn" id="push-snippet-insert" type="button" disabled>Insert</button>
+      </div>
+      <p id="push-project-note"></p>
+      <button class="push-btn" id="push-btn">Push</button>
+      <div id="push-results"></div>
     </div>
-    <p id="push-project-note"></p>
-    <button class="push-btn" id="push-btn">Push</button>
-    <div id="push-results"></div>
+    <div id="push-history" hidden>
+      <button class="toolbar-btn" id="push-history-refresh" type="button">Refresh</button>
+      <p id="push-history-note" role="status"></p>
+      <table id="push-history-table" aria-label="Config push history" hidden>
+        <thead><tr><th scope="col">Run</th><th scope="col">Result</th><th scope="col">Devices</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
   <div id="logs-area" hidden>
     <div id="logs-toolbar">
@@ -463,19 +483,19 @@
   </div>
 </div>
 
-<script src="/core.js?v=ginnungagap-40"></script>
-<script src="/canvas-state.js?v=ginnungagap-40"></script>
-<script src="/label-placement.js?v=ginnungagap-40"></script>
-<script src="/drawings.js?v=ginnungagap-40"></script>
-<script src="/canvas-render.js?v=ginnungagap-40"></script>
-<script src="/edit-actions.js?v=ginnungagap-40"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-40"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-40"></script>
-<script src="/import-and-generate.js?v=ginnungagap-40"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-40"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-40"></script>
-<script src="/projects.js?v=ginnungagap-40"></script>
-<script src="/staging.js?v=ginnungagap-40"></script>
-<script src="/snapshots.js?v=ginnungagap-40"></script>
+<script src="/core.js?v=ginnungagap-41"></script>
+<script src="/canvas-state.js?v=ginnungagap-41"></script>
+<script src="/label-placement.js?v=ginnungagap-41"></script>
+<script src="/drawings.js?v=ginnungagap-41"></script>
+<script src="/canvas-render.js?v=ginnungagap-41"></script>
+<script src="/edit-actions.js?v=ginnungagap-41"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-41"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-41"></script>
+<script src="/import-and-generate.js?v=ginnungagap-41"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-41"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-41"></script>
+<script src="/projects.js?v=ginnungagap-41"></script>
+<script src="/staging.js?v=ginnungagap-41"></script>
+<script src="/snapshots.js?v=ginnungagap-41"></script>
 </body>
 </html>

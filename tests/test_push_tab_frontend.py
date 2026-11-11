@@ -55,7 +55,7 @@ def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_versi
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/consoles-and-push.js?v=ginnungagap-40" in html
+    assert "/consoles-and-push.js?v=ginnungagap-41" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):
@@ -75,6 +75,32 @@ def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state
     assert seen and seen[0]["status"] == "running"
     assert seen[0]["waiting_for"] == ["SW-CORE", "SW-DMZ"]
     assert client.get(f"/config-push/jobs/{job.id}").json()["waiting_for"] == []
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_snippet_merge_preserves_transport_options_and_other_devices():
+    source = read_app_js()
+    match = re.search(
+        r"^function mergePushSnippet\(.*?^\}", source, re.DOTALL | re.MULTILINE
+    )
+    assert match
+    script = (
+        match.group(0)
+        + """
+const assert = require("node:assert/strict");
+const input = {R1: ["old"], VM1: {via: "serial", profile: "linux", commands: ["uname"]}};
+assert.deepEqual(mergePushSnippet(input, "VM1", ["ip addr"]), {
+  R1: ["old"], VM1: {via: "serial", profile: "linux", commands: ["uname", "ip addr"]}
+});
+assert.deepEqual(input.VM1.commands, ["uname"]);
+assert.deepEqual(mergePushSnippet(input, "R1", ["new"]).R1, ["old", "new"]);
+assert.deepEqual(mergePushSnippet({}, "SW1", ["show version"]), {SW1: ["show version"]});
+assert.throws(() => mergePushSnippet([], "R1", ["new"]), /JSON object/);
+assert.throws(() => mergePushSnippet({R1: ["old", 42]}, "R1", ["new"]), /Invalid command list/);
+assert.throws(() => mergePushSnippet({R1: Array(10000).fill("old")}, "R1", ["new"]), /10,000/);
+"""
+    )
+    subprocess.run(["node", "-e", script], check=True)
 
 
 def test_design_mode_has_a_clear_topology_menu_item():

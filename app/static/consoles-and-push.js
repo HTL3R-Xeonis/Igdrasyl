@@ -90,7 +90,10 @@ function showTab(name) {
   document.getElementById("tab-console").classList.toggle("active", name === "console");
   document.getElementById("tab-push").classList.toggle("active", name === "push");
   document.getElementById("tab-logs").classList.toggle("active", name === "logs");
-  if (name === "push" && !designMode) loadProjectConfigs(true);
+  if (name === "push" && !designMode) {
+    if (document.getElementById("push-history").hidden) loadProjectConfigs(true);
+    else loadPushHistory();
+  }
   if (name === "logs") startLogsAutoRefresh(); else stopLogsAutoRefresh();
 }
 
@@ -292,6 +295,142 @@ document.getElementById("push-save-project-btn").addEventListener("click", async
   }
 });
 
+function mergePushSnippet(devices, device, commands) {
+  if (!devices || typeof devices !== "object" || Array.isArray(devices)) {
+    throw new Error("Expected a JSON object mapping device names to commands.");
+  }
+  const current = Object.hasOwn(devices, device) ? devices[device] : [];
+  const list = Array.isArray(current) ? current : current?.commands;
+  if (!Array.isArray(list) || list.some(command => typeof command !== "string")) {
+    throw new Error(`Invalid command list for ${device}.`);
+  }
+  if (list.length + commands.length > 10000) {
+    throw new Error(`${device} would exceed 10,000 commands.`);
+  }
+  const merged = [...list, ...commands];
+  return { ...devices, [device]: Array.isArray(current) ? merged : { ...current, commands: merged } };
+}
+
+function pushSnippetTargets(input) {
+  let existing = [];
+  try {
+    const devices = JSON.parse(input);
+    if (devices && typeof devices === "object" && !Array.isArray(devices)) {
+      existing = Object.keys(devices);
+    }
+  } catch {} // Let the operator fix the JSON before inserting anything.
+  return [...new Set([...Object.keys(nodesData), ...existing])].sort();
+}
+
+const pushSnippetsToggle = document.getElementById("push-snippets-toggle");
+const pushSnippetsPanel = document.getElementById("push-snippets");
+const pushSnippetName = document.getElementById("push-snippet-name");
+const pushSnippetDevice = document.getElementById("push-snippet-device");
+const pushSnippetInsert = document.getElementById("push-snippet-insert");
+
+pushSnippetsToggle.addEventListener("click", async () => {
+  const opening = pushSnippetsPanel.hidden;
+  pushSnippetsPanel.hidden = !opening;
+  pushSnippetsToggle.setAttribute("aria-expanded", String(opening));
+  if (!opening) return;
+  pushSnippetsToggle.disabled = true;
+  pushSnippetInsert.disabled = true;
+  pushSnippetName.replaceChildren(new Option("Loading snippets…", ""));
+  try {
+    const response = await fetch("/config-snippets");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snippets = await response.json();
+    pushSnippetName.replaceChildren(...(snippets.length
+      ? snippets.map(snippet => new Option(snippet.label, snippet.name))
+      : [new Option("No saved snippets", "")]));
+    const targets = pushSnippetTargets(document.getElementById("push-input").value);
+    pushSnippetDevice.replaceChildren(...(targets.length
+      ? [new Option("Choose a device…", ""), ...targets.map(name => new Option(name, name))]
+      : [new Option("No target devices", "")]));
+  } catch (err) {
+    pushSnippetName.replaceChildren(new Option("Could not load snippets", ""));
+    setPushNote(`Couldn't load snippets: ${err.message}`, true);
+  } finally {
+    pushSnippetsToggle.disabled = false;
+  }
+});
+
+pushSnippetDevice.addEventListener("change", () => {
+  pushSnippetInsert.disabled = !pushSnippetName.value || !pushSnippetDevice.value;
+});
+pushSnippetInsert.addEventListener("click", async () => {
+  const device = pushSnippetDevice.value;
+  const name = pushSnippetName.value;
+  if (!device || !name) return;
+  pushSnippetInsert.disabled = true;
+  try {
+    const response = await fetch(`/config-snippets/${encodeURIComponent(name)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snippet = await response.json();
+    const input = document.getElementById("push-input");
+    const merged = mergePushSnippet(JSON.parse(input.value), device, snippet.commands);
+    input.value = JSON.stringify(merged, null, 2);
+    setPushNote(`Inserted ${snippet.label} for ${device}. Review the commands before pushing.`);
+  } catch (err) {
+    setPushNote(`Couldn't insert snippet: ${err.message}`, true);
+  } finally {
+    pushSnippetInsert.disabled = !pushSnippetName.value || !pushSnippetDevice.value;
+  }
+});
+
+async function loadPushHistory() {
+  const note = document.getElementById("push-history-note");
+  const table = document.getElementById("push-history-table");
+  const rows = table.tBodies[0];
+  const refresh = document.getElementById("push-history-refresh");
+  if (refresh.disabled) return;
+  refresh.disabled = true;
+  try {
+    const response = await fetch("/config-push/audit");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const entries = await response.json();
+    rows.replaceChildren();
+    for (const entry of entries) {
+      const row = rows.insertRow();
+      const run = row.insertCell();
+      run.textContent = new Date(entry.timestamp).toLocaleString();
+      const source = document.createElement("div");
+      source.textContent = entry.note || "";
+      run.appendChild(source);
+      row.insertCell().textContent = { ok: "Succeeded", failed: "Failed", interrupted: "Interrupted" }[entry.status] || entry.status;
+      const devices = row.insertCell();
+      for (const device of entry.devices) {
+        const item = document.createElement("div");
+        item.textContent = `${device.device}: ${device.executed}/${device.total_commands} · ${device.ok ? "OK" : "Failed"}`;
+        devices.appendChild(item);
+      }
+      if (!entry.devices.length) devices.textContent = "—";
+    }
+    table.hidden = entries.length === 0;
+    note.textContent = entries.length ? "" : "No config pushes recorded yet.";
+  } catch (err) {
+    table.hidden = true;
+    note.textContent = `Couldn't load push history: ${err.message}`;
+  } finally {
+    refresh.disabled = false;
+  }
+}
+
+function showPushHistory(show) {
+  document.getElementById("push-editor").hidden = show;
+  document.getElementById("push-history").hidden = !show;
+  for (const [id, active] of [["push-editor-tab", !show], ["push-history-tab", show]]) {
+    const button = document.getElementById(id);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  if (show) loadPushHistory();
+}
+
+document.getElementById("push-editor-tab").addEventListener("click", () => showPushHistory(false));
+document.getElementById("push-history-tab").addEventListener("click", () => showPushHistory(true));
+document.getElementById("push-history-refresh").addEventListener("click", loadPushHistory);
+
 // Follows a config push job (POST /config-push/jobs) until it ends: per-device progress
 // while it runs, the full per-device results afterwards.
 async function followPushJob(jobId) {
@@ -310,6 +449,9 @@ async function followPushJob(jobId) {
       renderPushProgress(body);
       await new Promise((resolve) => setTimeout(resolve, 1000));
       continue;
+    }
+    if (!document.getElementById("push-area").hidden && !document.getElementById("push-history").hidden) {
+      loadPushHistory();
     }
     if (body.status === "error") {
       resultsEl.textContent = `The push failed: ${body.error}`;

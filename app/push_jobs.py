@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import FastAPI
 from loguru import logger
 
+from app import push_audit
 from app.config_push import (
     DEFAULT_WAIT_SECONDS,
     DeviceResult,
@@ -36,6 +37,7 @@ class AlreadyRunning(Exception):
 class PushJob:
     id: str
     total_commands: int
+    audit_note: str = "Background push"
     status: str = "running"  # "running" | "done" | "error"
     # device -> {"done": int, "total": int}
     devices: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -72,16 +74,18 @@ def _run(
         job.waiting_for = names
 
     try:
-        if wait_seconds > 0:
-            job.results = push_all_waiting(
-                devices,
-                app,
-                wait_seconds=wait_seconds,
-                on_progress=on_progress,
-                on_waiting=on_waiting,
-            )
-        else:
-            job.results = push_all(devices, app, on_progress=on_progress)
+        with push_audit.track(job.audit_note) as audit:
+            if wait_seconds > 0:
+                job.results = push_all_waiting(
+                    devices,
+                    app,
+                    wait_seconds=wait_seconds,
+                    on_progress=on_progress,
+                    on_waiting=on_waiting,
+                )
+            else:
+                job.results = push_all(devices, app, on_progress=on_progress)
+            audit.extend(job.results)
         job.waiting_for = []
         job.status = "done"
     except Exception as exc:
@@ -95,6 +99,8 @@ def start_job(
     app: FastAPI,
     devices: dict[str, Any],
     wait_seconds: int | None = None,
+    *,
+    audit_note: str = "Background push",
 ) -> PushJob:
     """
     :param wait_seconds: how long to keep retrying devices that are still booting (see
@@ -115,6 +121,7 @@ def start_job(
     job = PushJob(
         id=uuid.uuid4().hex,
         total_commands=sum(len(spec.commands) for spec in specs.values()),
+        audit_note=audit_note,
         devices={
             name: {"done": 0, "total": len(spec.commands)}
             for name, spec in specs.items()

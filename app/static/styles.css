@@ -1730,6 +1730,16 @@ input:focus, select:focus, textarea:focus {
 #deployment-name-hint:empty { display: none; }
 
 #push-project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 4px; }
+.push-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+#push-snippets select { min-width: 0; max-width: 100%; }
+#push-history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#push-history-table th, #push-history-table td {
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
 #push-auto-label { color: var(--dim); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 #push-project-note { color: var(--dim); font-size: 12px; min-height: 1em; margin: 2px 0 8px; }
 #push-project-note.push-note-error { color: var(--bad); }

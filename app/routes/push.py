@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app import (
-    push_jobs,
-)
+from app import config_snippets, push_audit, push_jobs
 from app.application import app
 from app.config_push import DeviceResult, DeviceSpec, push_all
 
@@ -18,6 +16,48 @@ class PushRequest(BaseModel):
     devices: dict[str, list[str] | DeviceSpec]
     # How long a job keeps retrying devices that are still booting; omitted = 15 minutes, 0 = once.
     wait_seconds: int | None = Field(default=None, ge=0, le=3600)
+
+
+@app.get("/config-snippets")
+def list_config_snippets() -> list[dict]:
+    return config_snippets.list_snippets()
+
+
+@app.get("/config-snippets/{name}")
+def get_config_snippet(name: str) -> config_snippets.Snippet:
+    try:
+        return config_snippets.get(name)
+    except config_snippets.InvalidSnippet as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"no config snippet {name!r}") from exc
+
+
+@app.put("/config-snippets/{name}")
+def save_config_snippet(
+    name: str, request: config_snippets.Snippet
+) -> config_snippets.Snippet:
+    try:
+        return config_snippets.save(name, request.label, request.commands)
+    except config_snippets.InvalidSnippet as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/config-snippets/{name}", status_code=204)
+def delete_config_snippet(name: str) -> None:
+    try:
+        config_snippets.delete(name)
+    except config_snippets.InvalidSnippet as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"no config snippet {name!r}") from exc
+
+
+@app.get("/config-push/audit")
+def config_push_audit(
+    limit: int = Query(default=push_audit.MAX_RECORDS, ge=1, le=push_audit.MAX_RECORDS),
+) -> list[dict[str, Any]]:
+    return push_audit.read(limit)
 
 
 @app.post("/config-push/jobs", status_code=202)
@@ -62,4 +102,7 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     WebSocket proxy also needs.
     """
     app.state.last_config_push = request.devices
-    return push_all(request.devices, app)
+    with push_audit.track("Direct push") as audit:
+        results = push_all(request.devices, app)
+        audit.extend(results)
+    return results
