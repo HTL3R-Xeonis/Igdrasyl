@@ -614,6 +614,7 @@ window.addEventListener("keydown", (evt) => {
   if (closeOpenDrawingPopup) closeOpenDrawingPopup();
   closeAllMenus();
   if (!document.getElementById("node-actions").hidden || selectedNames.size) deselectNode();
+  deselectDrawing();
 });
 
 // Left device palette (GNS3 Desktop's own node-selection dock, adapted
