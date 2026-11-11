@@ -759,6 +759,53 @@ def test_generate_design_returns_job_id(client, app_state):
     assert resp.json() == {"job_id": "job-1"}
 
 
+def test_generate_design_attachments_returns_job_id(client, app_state):
+    from app import generate_jobs
+
+    fake_job = generate_jobs.GenerateJob(id="job-1", max_attempts=4)
+    with patch("app.generate_jobs.start_job", return_value=fake_job) as fake_start:
+        resp = client.post(
+            "/design/generate/attachments",
+            data={"prompt": "a small office network"},
+            files={"files": ("notes.txt", b"some content", "text/plain")},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"job_id": "job-1"}
+    assert fake_start.call_args.kwargs["attachments"] == [
+        ("notes.txt", b"some content")
+    ]
+
+
+def test_generate_design_attachments_400s_for_too_many_files(client, app_state):
+    resp = client.post(
+        "/design/generate/attachments",
+        data={"prompt": ""},
+        files=[("files", (f"f{i}.txt", b"x", "text/plain")) for i in range(6)],
+    )
+    assert resp.status_code == 400
+
+
+def test_generate_design_attachments_400s_for_empty_file(client, app_state):
+    resp = client.post(
+        "/design/generate/attachments",
+        data={"prompt": ""},
+        files={"files": ("empty.txt", b"", "text/plain")},
+    )
+    assert resp.status_code == 400
+
+
+def test_generate_design_attachments_413s_over_total_size_limit(client, app_state):
+    from app.routes.design import MAX_GENERATE_ATTACHMENT_BYTES
+
+    oversized = b"x" * (MAX_GENERATE_ATTACHMENT_BYTES + 1)
+    resp = client.post(
+        "/design/generate/attachments",
+        data={"prompt": ""},
+        files={"files": ("big.txt", oversized, "text/plain")},
+    )
+    assert resp.status_code == 413
+
+
 def test_generate_design_status_404s_for_unknown_job(client, app_state):
     resp = client.get("/design/generate/nope")
     assert resp.status_code == 404
