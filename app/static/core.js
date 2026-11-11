@@ -355,6 +355,39 @@ function openModal(config) {
     const isConfirm = config.mode === "confirm";
     const isText = config.mode === "text";
     const isTextarea = config.mode === "textarea";
+    const attachmentOptions = config.attachments;
+    let attachmentFields;
+    let fileInput;
+    let ollamaOnly;
+    let fileError;
+    if (attachmentOptions) {
+      attachmentFields = document.createElement("div");
+      const fileLabel = document.createElement("label");
+      fileLabel.textContent = "Attachments (optional)";
+      fileLabel.htmlFor = "modal-attachments";
+      fileInput = document.createElement("input");
+      fileInput.id = "modal-attachments";
+      fileInput.type = "file";
+      fileInput.multiple = true;
+      fileInput.accept = attachmentOptions.accept;
+      const hint = document.createElement("p");
+      hint.id = "modal-attachments-hint";
+      hint.textContent = attachmentOptions.hint;
+      fileInput.setAttribute("aria-describedby", hint.id);
+      fileError = document.createElement("p");
+      fileError.setAttribute("role", "alert");
+      const modelLabel = document.createElement("label");
+      ollamaOnly = document.createElement("input");
+      ollamaOnly.type = "checkbox";
+      ollamaOnly.disabled = true;
+      modelLabel.append(ollamaOnly, " Use only configured Ollama models");
+      fileInput.addEventListener("change", () => {
+        ollamaOnly.disabled = !fileInput.files.length;
+        fileError.textContent = "";
+      });
+      attachmentFields.append(fileLabel, fileInput, hint, modelLabel, fileError);
+      fieldWrap.appendChild(attachmentFields);
+    }
 
     titleEl.textContent = config.title || "";
     messageEl.textContent = config.message || "";
@@ -384,11 +417,22 @@ function openModal(config) {
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       overlay.onclick = null;
+      attachmentFields?.remove();
       resolve(result);
     }
     function doConfirm() {
       if (isAlert) return finish(undefined);
       if (isConfirm) return finish(true);
+      if (attachmentOptions) {
+        const prompt = textareaEl.value.trim();
+        const files = Array.from(fileInput.files);
+        const error = attachmentOptions.validate(prompt, files);
+        if (error) {
+          fileError.textContent = error;
+          return;
+        }
+        return finish({ prompt, files, ollamaOnly: files.length > 0 && ollamaOnly.checked });
+      }
       if (isTextarea) return finish(textareaEl.value.trim() || null);
       return finish(inputEl.value.trim() || null);
     }
@@ -403,6 +447,7 @@ function openModal(config) {
       // submitting - Ctrl/Cmd+Enter submits it, same convention as
       // most chat/comment boxes. Every other mode still submits on a
       // plain Enter.
+      else if (evt.key === "Enter" && evt.target === fileInput) return;
       else if (evt.key === "Enter" && isTextarea && !(evt.ctrlKey || evt.metaKey)) return;
       else if (evt.key === "Enter") { evt.preventDefault(); doConfirm(); }
     }
@@ -451,6 +496,7 @@ function showTextareaPrompt(message, opts = {}) {
     defaultValue: opts.defaultValue,
     placeholder: opts.placeholder,
     confirmLabel: opts.confirmLabel,
+    attachments: opts.attachments,
   });
 }
 

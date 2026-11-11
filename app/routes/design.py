@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import requests
-from fastapi import HTTPException, Response
+from fastapi import File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app import (
@@ -350,6 +350,36 @@ def generate_design(request: GenerateRequest) -> dict[str, str]:
     if not request.prompt.strip():
         raise HTTPException(400, "prompt must not be empty")
     job = generate_jobs.start_job(app, request.prompt)
+    return {"job_id": job.id}
+
+
+MAX_GENERATE_ATTACHMENT_COUNT = 5
+MAX_GENERATE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/design/generate/attachments")
+async def generate_design_from_attachments(
+    files: Annotated[list[UploadFile], File()],
+    prompt: Annotated[str, Form()] = "",
+    ollama_only: Annotated[bool, Form()] = False,
+) -> dict[str, str]:
+    if not 1 <= len(files) <= MAX_GENERATE_ATTACHMENT_COUNT:
+        raise HTTPException(400, "Choose between 1 and 5 files.")
+
+    attachments = []
+    remaining = MAX_GENERATE_ATTACHMENT_BYTES
+    for upload in files:
+        content = await upload.read(remaining + 1)
+        remaining -= len(content)
+        if remaining < 0:
+            raise HTTPException(413, "Attachments may total at most 10 MiB.")
+        if not content:
+            raise HTTPException(400, "Attachments must not be empty.")
+        attachments.append((upload.filename or "attachment", content))
+
+    job = generate_jobs.start_job(
+        app, prompt, attachments=attachments, ollama_only=ollama_only
+    )
     return {"job_id": job.id}
 
 

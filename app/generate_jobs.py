@@ -70,7 +70,42 @@ def _load_generated_topology(
     return state
 
 
-def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
+Attachment = tuple[str, bytes]
+
+
+def _generate_from_attachments(
+    prompt: str, attachments: list[Attachment], ollama_only: bool
+) -> dict:
+    try:
+        response = requests.post(
+            f"{Settings.API.TOPOLOGY_GENERATOR_URL.rstrip('/')}/api/generate-topology/attachments",
+            data={"prompt": prompt, "ollama_only": str(ollama_only).lower()},
+            files=[("files", (name, contents)) for name, contents in attachments],
+            timeout=Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 404:
+            raise RuntimeError(
+                "The Topology Generator must be updated to support attachments."
+            )
+        if response.status_code in (400, 413, 415, 503):
+            detail = response.json().get("detail")
+            if isinstance(detail, str):
+                raise RuntimeError(detail)
+        response.raise_for_status()
+        return response.json()
+    except requests.Timeout as exc:
+        raise TimeoutError("Topology generation request timed out.") from exc
+    except requests.RequestException as exc:
+        raise RuntimeError("Topology generation with attachments failed.") from exc
+
+
+def run_generate_job(
+    app: FastAPI,
+    job: GenerateJob,
+    prompt: str,
+    attachments: list[Attachment] | None = None,
+    ollama_only: bool = False,
+) -> None:
     # The reason the most recent attempt was rejected, so the final error
     # can say WHY instead of only "no valid topology" - e.g. the LLM
     # reusing an interface name, which the user can't see otherwise.
@@ -78,7 +113,11 @@ def run_generate_job(app: FastAPI, job: GenerateJob, prompt: str) -> None:
     for attempt in range(1, job.max_attempts + 1):
         job.attempt = attempt
         try:
-            result = TopologyGeneratorClient.generate_topology(prompt)
+            result = (
+                _generate_from_attachments(prompt, attachments, ollama_only)
+                if attachments
+                else TopologyGeneratorClient.generate_topology(prompt)
+            )
         except (TimeoutError, RuntimeError) as exc:
             job.status = "error"
             job.error = str(exc)
@@ -161,7 +200,13 @@ def _prune_finished(jobs: dict[str, GenerateJob]) -> None:
         del jobs[job_id]
 
 
-def start_job(app: FastAPI, prompt: str) -> GenerateJob:
+def start_job(
+    app: FastAPI,
+    prompt: str,
+    *,
+    attachments: list[Attachment] | None = None,
+    ollama_only: bool = False,
+) -> GenerateJob:
     job = GenerateJob(
         id=str(uuid.uuid4()), max_attempts=Settings.GENERATE_MAX_RETRIES + 1
     )
@@ -170,7 +215,9 @@ def start_job(app: FastAPI, prompt: str) -> GenerateJob:
     _prune_finished(app.state.generate_jobs)
     app.state.generate_jobs[job.id] = job
     thread = threading.Thread(
-        target=run_generate_job, args=(app, job, prompt), daemon=True
+        target=run_generate_job,
+        args=(app, job, prompt, attachments, ollama_only),
+        daemon=True,
     )
     thread.start()
     return job

@@ -241,3 +241,19 @@ def test_prune_finished_drops_oldest_finished_jobs_but_keeps_running_ones():
     )
     assert "finished-0" not in jobs
     assert f"finished-{generate_jobs._MAX_FINISHED_JOBS + 9}" in jobs
+
+
+def test_attachment_job_posts_multipart_and_preserves_local_model_choice(app_state):
+    app = _fake_app(app_state)
+    job = generate_jobs.GenerateJob(id="attachment-job")
+    files = [("network.pdf", b"%PDF-1.7")]
+    with patch("app.generate_jobs.requests.post") as post:
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = _valid_result()
+        generate_jobs.run_generate_job(app, job, "", files, True)
+
+    assert job.status == "done"
+    assert set(app_state.design.nodes) == {"R1", "PC1"}
+    assert post.call_args.args[0].endswith("/api/generate-topology/attachments")
+    assert post.call_args.kwargs["data"] == {"prompt": "", "ollama_only": "true"}
+    assert post.call_args.kwargs["files"] == [("files", files[0])]

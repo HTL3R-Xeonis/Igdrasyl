@@ -300,6 +300,19 @@ function setLandingGenerateStatus(text, warnings) {
   }
 }
 
+function validateGenerateAttachments(prompt, files) {
+  if (!prompt && !files.length) return "Enter a prompt or select at least one file.";
+  if (files.length > 5) return "Choose at most 5 files.";
+  if (files.some((file) => !/\.(pdf|png|jpe?g|docx|txt|md|csv)$/i.test(file.name))) {
+    return "Choose PDF, PNG, JPEG, Word (.docx), TXT, Markdown or CSV files.";
+  }
+  if (files.some((file) => file.size === 0)) return "Attachments must not be empty.";
+  if (files.reduce((total, file) => total + file.size, 0) > 10 * 1024 * 1024) {
+    return "Attachments may total at most 10 MiB.";
+  }
+  return "";
+}
+
 // POST /design/generate replaces whatever design sketch currently
 // exists (see app/generate_jobs.py) - confirm first, same as any other
 // destructive action, rather than silently discarding in-progress work.
@@ -313,20 +326,36 @@ async function promptAndGenerateTopology() {
     return;
   }
 
-  const prompt = await showTextareaPrompt("", {
+  const input = await showTextareaPrompt("", {
     title: "Generate via LLM",
     placeholder: "Describe the topology you want (e.g. \"a small office network with 2 routers, 3 switches, and 5 PCs\")…",
     confirmLabel: "Generate",
+    attachments: {
+      accept: ".pdf,.png,.jpg,.jpeg,.docx,.txt,.md,.csv",
+      hint: "PDF, PNG, JPEG, Word (.docx), TXT, Markdown or CSV. Up to 5 files and 10 MiB total. By default, attachments may be sent to Gemini.",
+      validate: validateGenerateAttachments,
+    },
   });
-  if (!prompt) return;
+  if (!input) return;
+  const { prompt, files, ollamaOnly } = input;
 
   setLandingGenerateStatus("Starting generation…");
   try {
-    const resp = await fetch("/design/generate", {
+    let endpoint = "/design/generate";
+    let request = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
-    });
+    };
+    if (files.length) {
+      const body = new FormData();
+      body.append("prompt", prompt);
+      body.append("ollama_only", String(ollamaOnly));
+      for (const file of files) body.append("files", file);
+      endpoint += "/attachments";
+      request = { method: "POST", body };
+    }
+    const resp = await fetch(endpoint, request);
     if (!resp.ok) {
       setLandingGenerateStatus(null);
       await showAlert(`Generate failed: ${(await resp.json()).detail || resp.status}`, { title: "Generate via LLM" });

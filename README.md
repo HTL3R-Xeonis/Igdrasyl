@@ -134,7 +134,12 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   Generator API (`src.connections.topology_generator_client`), mirroring
   TopologyBuilder's own CLI `generate` command's retry-until-valid loop,
   then opens the result straight into design mode instead of writing a
-  file. Runs as a background job (`POST /design/generate` → `job_id`,
+  file. You can attach up to five PDF, PNG, JPEG, Word (.docx), TXT, Markdown
+  or CSV files (10 MiB total) with an optional prompt. Select **Use only
+  configured Ollama models** to exclude Gemini for that request. Local text
+  models use extracted text and OCR. Vision models can also read diagrams. Attachment generation needs the updated
+  Topology Generator service. Runs as a background job
+  (`POST /design/generate` or `POST /design/generate/attachments` → `job_id`,
   `GET /design/generate/{job_id}` polls attempt/status/warnings). When every
   attempt is rejected, the final error names the last validation problem
   (e.g. an interface reused on a switch) instead of only "no valid topology". Every
