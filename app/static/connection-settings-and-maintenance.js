@@ -336,15 +336,6 @@ document.getElementById("reload-gns3-btn").addEventListener("click", async () =>
   }
 });
 
-// Compact text report of a /maintenance/verify result: every failed
-// check, then the pass count - the full list of passing checks would
-// only make the dialog overflow.
-function formatVerifyReport(result) {
-  const failed = result.results.filter((r) => !r.ok).map((r) => `[FAIL] ${r.description}`);
-  const summary = `${result.passed}/${result.total} checks passed`;
-  return failed.length ? `${failed.join("\n")}\n\n${summary}` : `All ${result.total} checks passed.`;
-}
-
 async function maintenanceRequest(url, options) {
   const resp = await fetch(url, options);
   const body = await resp.json().catch(() => ({}));
@@ -352,7 +343,140 @@ async function maintenanceRequest(url, options) {
   return body;
 }
 
-document.getElementById("health-check-btn").addEventListener("click", async () => {
+function showHealthCheckReport(result, { summary = "", repair } = {}) {
+  const dialog = document.getElementById("health-check-dialog");
+  const failures = document.getElementById("health-check-failures");
+  const actions = document.getElementById("health-check-actions");
+  const goal = document.getElementById("health-check-goal");
+  const repairButton = document.getElementById("health-check-review-fix");
+  const closeButton = document.getElementById("health-check-close");
+  document.getElementById("health-check-summary").textContent =
+    `${result.passed}/${result.total} checks passed.`;
+  actions.textContent = summary;
+  actions.hidden = !summary;
+  failures.replaceChildren();
+  failures.hidden = result.passed === result.total;
+  return new Promise((resolve) => {
+    const choose = (value) => {
+      dialog.oncancel = null;
+      closeButton.onclick = null;
+      repairButton.onclick = null;
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    repairButton.hidden = !repair;
+    repairButton.textContent = repair?.label || "";
+    repairButton.onclick = () => choose({ kind: "repair" });
+    let hasTargets = false;
+    for (const check of result.results.filter((item) => !item.ok)) {
+      const line = document.createElement("li");
+      const description = document.createElement("div");
+      description.textContent = check.description;
+      line.appendChild(description);
+      if (check.devices?.length) {
+        hasTargets = true;
+        const buttons = document.createElement("div");
+        buttons.className = "health-check-buttons";
+        for (const device of check.devices) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "toolbar-btn";
+          button.textContent = `Suggest fix for ${device}…`;
+          button.onclick = () => choose({
+            kind: "suggest", device, check: check.description, goal: goal.value.trim(),
+          });
+          buttons.appendChild(button);
+        }
+        line.appendChild(buttons);
+      }
+      failures.appendChild(line);
+    }
+    goal.value = "";
+    document.getElementById("health-check-goal-label").hidden = !hasTargets;
+    closeButton.onclick = () => choose(null);
+    dialog.oncancel = (event) => {
+      event.preventDefault();
+      choose(null);
+    };
+    dialog.showModal();
+  });
+}
+
+function healthCheckProjectIsCurrent(projectLabel) {
+  return !designMode && !document.getElementById("app-view").hidden
+    && document.getElementById("project-meta").textContent === projectLabel;
+}
+
+async function suggestHealthFix({ device, check, goal }, projectLabel) {
+  const title = `Fix suggestion for ${device}`;
+  const label = `Generating fix suggestion for ${device}…`;
+  setMenubarBusy(label);
+  try {
+    const { job_id: jobId } = await maintenanceRequest("/ai/suggest-fix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device, check, goal }),
+    });
+    const statusUrl = `/ai/suggest-fix/${encodeURIComponent(jobId)}`;
+    let result;
+    for (;;) {
+      if (!healthCheckProjectIsCurrent(projectLabel)) {
+        throw new Error("The project changed. Run the health check again.");
+      }
+      result = await maintenanceRequest(statusUrl);
+      if (result.status !== "running") break;
+      setMenubarProgress(label, result.attempt, result.max_attempts, `Attempt ${result.attempt || 1} of ${result.max_attempts}`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    const warnings = result.warnings?.length ? `\n\nWarnings:\n${result.warnings.join("\n")}` : "";
+    if (result.status !== "done") throw new Error((result.error || "No suggestion was returned.") + warnings);
+    if (result.device !== device || !healthCheckProjectIsCurrent(projectLabel)) {
+      throw new Error("The project or device changed. Run the health check again.");
+    }
+    setMenubarMessage(`Fix suggestion ready for ${device}.`);
+    if (!result.commands.length) {
+      await showAlert(result.explanation + warnings, { title });
+      return false;
+    }
+    const add = await showConfirm(
+      `${result.explanation}${warnings}\n\nProposed commands:\n${result.commands.join("\n")}\n\n` +
+      "Add them to the Config Push editor for review? This does not run or save any commands.",
+      { title, confirmLabel: "Add to Config Push" }
+    );
+    if (!add) return false;
+    const current = await maintenanceRequest(statusUrl);
+    if (current.status !== "done" || current.device !== device || !healthCheckProjectIsCurrent(projectLabel)) {
+      throw new Error("The project changed. Run the health check again.");
+    }
+    // Do not overwrite the operator's draft or trigger the tab's automatic load.
+    const input = document.getElementById("push-input");
+    const existing = input.value.trim() ? JSON.parse(input.value) : {};
+    input.value = JSON.stringify(mergePushSnippet(existing, device, result.commands), null, 2);
+    showPushHistory(false);
+    showTab("push", { loadConfigs: false });
+    setPushNote(`Added suggested commands for ${device}. Review them before pushing.`);
+    input.focus();
+    return true;
+  } catch (err) {
+    setMenubarMessage(`Fix suggestion unavailable for ${device}.`, { error: true });
+    await showAlert(err.message || String(err), { title });
+    return false;
+  }
+}
+
+async function reviewHealthCheck(result, projectLabel, options = {}) {
+  while (healthCheckProjectIsCurrent(projectLabel)) {
+    const choice = await showHealthCheckReport(result, options);
+    if (choice?.kind !== "suggest") return choice?.kind === "repair";
+    if (await suggestHealthFix(choice, projectLabel)) return false;
+  }
+  return false;
+}
+
+document.getElementById("health-check-btn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  const projectLabel = document.getElementById("project-meta").textContent;
   setMenubarBusy("Running health check…");
   try {
     const first = await maintenanceRequest("/maintenance/verify", {
@@ -361,18 +485,17 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
       body: JSON.stringify({ fix: false }),
     });
     setMenubarMessage(`Health check: ${first.passed}/${first.total} checks passed.`, { error: first.passed !== first.total });
-    if (first.passed === first.total) {
-      await showAlert(formatVerifyReport(first), { title: "Health Check" });
-      return;
-    }
+    const reviewFix = await reviewHealthCheck(first, projectLabel, {
+      repair: first.passed !== first.total ? { label: "Review automatic fixes…" } : null,
+    });
+    if (!reviewFix) return;
     const wantFix = await showConfirm(
-      `${formatVerifyReport(first)}\n\n` +
       `Apply the automatic fixes (start stopped GNS3 nodes, power on stopped ` +
       `ESXi VMs, create missing port groups) and check again? Anything that ` +
       `needs a real redeploy is not touched.`,
       { title: "Health Check", confirmLabel: "Fix" }
     );
-    if (!wantFix) return;
+    if (!wantFix || !healthCheckProjectIsCurrent(projectLabel)) return;
 
     setMenubarBusy("Applying fixes…");
     const second = await maintenanceRequest("/maintenance/verify", {
@@ -384,12 +507,16 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
       ? `Applied:\n${second.actions.map((a) => `- ${a}`).join("\n")}\n\n`
       : "No automatic fix was applicable.\n\n";
     setMenubarMessage(`Health check after fixes: ${second.passed}/${second.total} checks passed.`, { error: second.passed !== second.total });
-    await showAlert(applied + formatVerifyReport(second), { title: "Health Check" });
     await loadCanvas();
 
     // Never part of the automatic fixes: re-creating the Cloud nodes can briefly cut every
     // link between the GNS3 VM and the ESXi VMs, so it is its own, explicit confirmation.
-    if (!second.results.some((r) => !r.ok && /VLAN subinterfaces/i.test(r.description))) return;
+    const needsSubinterfaces = second.results.some((r) => !r.ok && /VLAN subinterfaces/i.test(r.description));
+    const reviewSubinterfaces = await reviewHealthCheck(second, projectLabel, {
+      summary: applied,
+      repair: needsSubinterfaces ? { label: "Review VLAN subinterface repair…" } : null,
+    });
+    if (!reviewSubinterfaces) return;
     const wantSubinterfaces = await showConfirm(
       "The GNS3 VM is missing VLAN subinterfaces (they are lost when it reboots), so links " +
       "between GNS3 nodes and ESXi VMs carry no traffic.\n\n" +
@@ -397,7 +524,7 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
       "Do it while nothing important is running.",
       { title: "Re-create VLAN subinterfaces", confirmLabel: "Re-create", danger: true }
     );
-    if (!wantSubinterfaces) return;
+    if (!wantSubinterfaces || !healthCheckProjectIsCurrent(projectLabel)) return;
 
     setMenubarBusy("Re-creating VLAN subinterfaces…");
     const third = await maintenanceRequest("/maintenance/verify", {
@@ -409,10 +536,12 @@ document.getElementById("health-check-btn").addEventListener("click", async () =
       ? `Applied:\n${third.actions.map((a) => `- ${a}`).join("\n")}\n\n`
       : "Nothing to re-create.\n\n";
     setMenubarMessage(`Health check after re-creating subinterfaces: ${third.passed}/${third.total} checks passed.`, { error: third.passed !== third.total });
-    await showAlert(repaired + formatVerifyReport(third), { title: "Health Check" });
     await loadCanvas();
+    await reviewHealthCheck(third, projectLabel, { summary: repaired });
   } catch (err) {
     setMenubarMessage(`Health check failed: ${err.message || err}`);
+  } finally {
+    button.disabled = false;
   }
 });
 

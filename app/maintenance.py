@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from loguru import logger
 from src.settings import Settings
 
+from app import fix_jobs
 from app.topology_write import get_or_create_backend
 
 
@@ -46,9 +47,18 @@ def run_verify(
         f"Health check finished: {len(results) - len(failed)}/{len(results)} checks "
         f"passed, {len(actions)} repair(s) applied"
     )
+    graph = getattr(app.state, "graph", None)
+    checks = []
+    for ok, description in results:
+        check = {"ok": ok, "description": description}
+        if not ok and graph is not None:
+            devices = fix_jobs.check_devices(graph, description)
+            if devices:
+                check["devices"] = devices
+        checks.append(check)
     return {
         "actions": actions,
-        "results": [{"ok": ok, "description": desc} for ok, desc in results],
+        "results": checks,
         "passed": sum(1 for ok, _ in results if ok),
         "total": len(results),
     }

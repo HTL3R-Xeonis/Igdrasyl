@@ -277,6 +277,14 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   live GNS3 nodes and tool-created ESXi VMs that no node in the topology
   file describes anymore - what a partially failed live delete leaves behind
   - and can delete them after a second, explicit confirmation (irreversible).
+- **Suggest fix** appears on failed Health Check rows that identify a device or link. Pick a target and
+  optionally describe your goal. The Operator sends the failed check, target role and image, and adjacent
+  links to the configured Topology Generator. Review its explanation, warnings and commands before
+  choosing **Add to Config Push**. This only appends to the editor; it preserves other devices and target
+  options and never saves or pushes. Some structural checks can only be addressed in the topology or
+  hypervisor, so the generator can return advice without commands.
+  This feature requires the generator to implement `POST /api/suggest-fix`; older generators report that
+  suggestions are unavailable. The existing automatic Health Check repairs are independent of this feature.
 - **Connectivity test** (`app/connectivity_test.py`): File menu > "Connectivity Test…" puts real traffic on the lab
   network, which the structural health check does not. The VMs that share one layer-2 segment (a switch or a direct link)
   get a temporary address each from 198.18.0.0/15 (one /24 per segment), every one pings every other, and the addresses
@@ -719,6 +727,9 @@ same restart flow as host changes. Import and live edits require a selected proj
   /design/drawings`, `POST /design/reset`, `GET /design/export`, `POST
   /design/generate`, `GET /design/generate/{job_id}` - design mode, all
   mirroring the equivalent live endpoint above (see Architecture above).
+- `POST /ai/suggest-fix` (body: `device`, `check`, optional `goal`; returns `job_id`),
+  `GET /ai/suggest-fix/{job_id}` (status, attempts and the draft or error). The generator request uses
+  `device_role`, `device_image`, `context` and `goal`; the reply uses `valid`, `commands`, `explanation` and `warnings`.
 - `POST /maintenance/verify` (`{"fix": bool}`; returns the repairs applied
   and every check's result), `GET /maintenance/orphans`, `POST
   /maintenance/orphans/delete` (`{"orphans": [{"type": "gns3_node" |

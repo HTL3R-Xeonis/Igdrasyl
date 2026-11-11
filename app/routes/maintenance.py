@@ -6,11 +6,12 @@ from typing import Any, Literal
 
 import requests
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import (
     connectivity_test,
     esxi_session,
+    fix_jobs,
     gns3_vm_deploy_jobs,
     gns3_vm_power,
     maintenance,
@@ -26,6 +27,55 @@ from app.routes.common import (
 class VerifyRequest(BaseModel):
     fix: bool = False
     fix_vlan_subinterfaces: bool = False
+
+
+class FixSuggestionRequest(BaseModel):
+    device: str = Field(min_length=1, max_length=200)
+    check: str = Field(min_length=1, max_length=4000)
+    goal: str = Field(default="", max_length=2000)
+
+
+@app.post("/ai/suggest-fix", status_code=202)
+def start_fix_suggestion(request: FixSuggestionRequest) -> dict[str, str]:
+    require_live_topology()
+    target = fix_jobs.current_target(app, request.device)
+    if target is None:
+        raise HTTPException(404, "The selected device is no longer in this topology.")
+    if request.device not in fix_jobs.check_devices(app.state.graph, request.check):
+        raise HTTPException(400, "This check does not identify the selected device.")
+    try:
+        job = fix_jobs.start_job(
+            app, target, target.context(request.check, request.goal)
+        )
+    except fix_jobs.AlreadyRunning as exc:
+        raise HTTPException(429, str(exc)) from exc
+    return {"job_id": job.id}
+
+
+@app.get("/ai/suggest-fix/{job_id}")
+def fix_suggestion_status(job_id: str) -> dict[str, Any]:
+    job = getattr(app.state, "fix_jobs", {}).get(job_id)
+    if job is None:
+        raise HTTPException(404, "Fix suggestion not found.")
+    if fix_jobs.current_target(app, job.target.device) != job.target:
+        raise HTTPException(
+            409, "The project or target device changed. Run the health check again."
+        )
+    status = job.status
+    result = {
+        "status": status,
+        "device": job.target.device,
+        "attempt": job.attempt,
+        "max_attempts": job.max_attempts,
+        "warnings": public_text.redact_paths(job.warnings),
+    }
+    if status == "done":
+        result.update(
+            commands=job.commands, explanation=public_text.redact_paths(job.explanation)
+        )
+    elif status == "error":
+        result["error"] = job.error
+    return result
 
 
 class OrphanItem(BaseModel):

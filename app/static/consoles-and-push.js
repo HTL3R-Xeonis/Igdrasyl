@@ -83,7 +83,7 @@ document.getElementById("draw-clear-btn").addEventListener("click", async () => 
   }
 });
 
-function showTab(name) {
+function showTab(name, { loadConfigs = true } = {}) {
   document.getElementById("right-panel").hidden = name !== "console";
   document.getElementById("push-area").hidden = name !== "push";
   document.getElementById("logs-area").hidden = name !== "logs";
@@ -91,7 +91,9 @@ function showTab(name) {
   document.getElementById("tab-push").classList.toggle("active", name === "push");
   document.getElementById("tab-logs").classList.toggle("active", name === "logs");
   if (name === "push" && !designMode) {
-    if (document.getElementById("push-history").hidden) loadProjectConfigs(true);
+    if (document.getElementById("push-history").hidden) {
+      if (loadConfigs) loadProjectConfigs(true);
+    }
     else loadPushHistory();
   }
   if (name === "logs") startLogsAutoRefresh(); else stopLogsAutoRefresh();
@@ -256,12 +258,15 @@ function setPushNote(text, isError = false) {
 }
 
 async function loadProjectConfigs(silent = false) {
+  const input = document.getElementById("push-input");
+  const previous = input.value;
   try {
     const resp = await fetch("/project/configs");
     const body = await resp.json();
     if (!resp.ok) throw new Error(body.detail || resp.status);
+    if (input.value !== previous) return;
     const count = Object.keys(body.devices).length;
-    if (count) document.getElementById("push-input").value = JSON.stringify(body.devices, null, 2);
+    if (count) input.value = JSON.stringify(body.devices, null, 2);
     document.getElementById("push-auto-checkbox").checked = !!body.auto_push;
     setPushNote(count
       ? `Loaded the configs of ${count} device${count === 1 ? "" : "s"} saved with this project.`

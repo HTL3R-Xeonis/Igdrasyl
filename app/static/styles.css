@@ -1768,6 +1768,21 @@ input:focus, select:focus, textarea:focus {
 /* Node notes: the dialog and the sticky-note mark on a node with a note. */
 #note-dialog { width: min(560px, 92vw); padding: 16px 18px; color: var(--text); }
 #note-dialog h3 { margin: 0 0 12px; }
+#health-check-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(660px, 90vw);
+  max-height: 80vh;
+  overflow: auto;
+}
+#health-check-dialog h3 { margin-top: 0; }
+#health-check-failures { padding-left: 22px; }
+#health-check-failures li { margin: 10px 0; overflow-wrap: anywhere; }
+#health-check-actions { white-space: pre-wrap; }
+#health-check-goal { display: block; box-sizing: border-box; width: 100%; margin: 6px 0 12px; }
+.health-check-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 #note-text { display: block; width: 100%; box-sizing: border-box; min-height: 160px; resize: vertical; padding: 8px 10px; font: inherit; line-height: 1.45; }
 #note-status { min-height: 1.2em; margin: 6px 0 0; font-size: 12px; color: var(--dim); }
 #note-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
