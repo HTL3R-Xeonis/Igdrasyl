@@ -488,6 +488,22 @@ For example, PUT `{"label":"Router info","commands":["show version"]}` to `/conf
 The library is shared across projects on this Operator instance. Files are stored in `config_snippets/` by default
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
+**Generate with AI** creates a draft in the snippet panel. An administrator enables exercises in the
+Operator service environment with `TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS=vlan,interface_description`.
+The exercises currently support Cisco IOS VLAN definitions and physical port descriptions. Both services
+need the same random `XEONIS_AI_SNIPPETS_TOKEN` (at least 32 printable ASCII characters without spaces).
+Set `TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL` in the Operator service environment to pin the
+destination for the token, independent of host profiles. Use an internal network or HTTPS.
+Without a configured topic, service token and generator URL, the feature is disabled. The Operator checks the topic on
+every request and builds the command list from validated fields. Save creates a new library entry
+after review. Insertion and Config Push remain explicit separate actions.
+
+Set `XEONIS_CLASSROOM_MODE=1` in **both services** for a classroom installation to turn off the general
+AI Health Check suggestions while allowing the configured exercises. This release is instance-wide.
+Before offering the shared lab to pupils, protect the Operator behind school authentication and enforce
+role and class permissions for configuration writes, project access and pushes at the API. Give the
+Generator an internal address and keep direct service access restricted to the Operator and administrators.
+
 A push runs as a **background job** (`POST /config-push/jobs`, then `GET /config-push/jobs/{id}`): the tab shows a progress
 bar per device and the per-device results at the end; only one push runs at a time. (`POST /config-push` still answers in
 one request, for short lists.) A very long result is shortened to the failed commands plus the last 50 (`truncated`).

@@ -1732,6 +1732,11 @@ input:focus, select:focus, textarea:focus {
 #push-project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 4px; }
 .push-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 #push-snippets select { min-width: 0; max-width: 100%; }
+#push-snippet-ai { flex-basis: 100%; min-width: 0; }
+#push-snippet-ai summary { cursor: pointer; }
+#push-snippet-ai-form { display: grid; gap: 6px; margin-top: 8px; }
+#push-snippet-ai-form textarea { height: auto; }
+#push-snippet-ai-commands { white-space: pre-wrap; overflow-wrap: anywhere; }
 #push-history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 #push-history-table th, #push-history-table td {
   padding: 6px;

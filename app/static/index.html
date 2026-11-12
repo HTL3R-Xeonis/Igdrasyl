@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-44">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-45">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -278,6 +278,20 @@
         <select id="push-snippet-name" aria-label="Config snippet"></select>
         <select id="push-snippet-device" aria-label="Target device"></select>
         <button class="toolbar-btn" id="push-snippet-insert" type="button" disabled>Insert</button>
+        <details id="push-snippet-ai" hidden>
+          <summary>Generate with AI</summary>
+          <form id="push-snippet-ai-form">
+            <label>Exercise <select id="push-snippet-ai-topic"></select></label>
+            <label for="push-snippet-ai-prompt">Prompt</label>
+            <textarea id="push-snippet-ai-prompt" rows="3" maxlength="1500" required placeholder="Describe the settings for this exercise"></textarea>
+            <button class="toolbar-btn" id="push-snippet-ai-generate" type="submit">Generate draft</button>
+          </form>
+          <p id="push-snippet-ai-status" role="status"></p>
+          <div id="push-snippet-ai-review" hidden>
+            <pre id="push-snippet-ai-commands"></pre>
+            <button class="toolbar-btn" id="push-snippet-ai-save" type="button">Save as snippet</button>
+          </div>
+        </details>
       </div>
       <p id="push-project-note"></p>
       <button class="push-btn" id="push-btn">Push</button>
@@ -505,19 +519,19 @@
   </div>
 </div>
 
-<script src="/core.js?v=ginnungagap-44"></script>
-<script src="/canvas-state.js?v=ginnungagap-44"></script>
-<script src="/label-placement.js?v=ginnungagap-44"></script>
-<script src="/drawings.js?v=ginnungagap-44"></script>
-<script src="/canvas-render.js?v=ginnungagap-44"></script>
-<script src="/edit-actions.js?v=ginnungagap-44"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-44"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-44"></script>
-<script src="/import-and-generate.js?v=ginnungagap-44"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-44"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-44"></script>
-<script src="/projects.js?v=ginnungagap-44"></script>
-<script src="/staging.js?v=ginnungagap-44"></script>
-<script src="/snapshots.js?v=ginnungagap-44"></script>
+<script src="/core.js?v=ginnungagap-45"></script>
+<script src="/canvas-state.js?v=ginnungagap-45"></script>
+<script src="/label-placement.js?v=ginnungagap-45"></script>
+<script src="/drawings.js?v=ginnungagap-45"></script>
+<script src="/canvas-render.js?v=ginnungagap-45"></script>
+<script src="/edit-actions.js?v=ginnungagap-45"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-45"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-45"></script>
+<script src="/import-and-generate.js?v=ginnungagap-45"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-45"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-45"></script>
+<script src="/projects.js?v=ginnungagap-45"></script>
+<script src="/staging.js?v=ginnungagap-45"></script>
+<script src="/snapshots.js?v=ginnungagap-45"></script>
 </body>
 </html>

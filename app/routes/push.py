@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app import config_snippets, push_audit, push_jobs
+from app import ai_snippets, config_snippets, push_audit, push_jobs
 from app.application import app
 from app.config_push import DeviceResult, DeviceSpec, push_all
 
@@ -16,6 +16,53 @@ class PushRequest(BaseModel):
     devices: dict[str, list[str] | DeviceSpec]
     # How long a job keeps retrying devices that are still booting; omitted = 15 minutes, 0 = once.
     wait_seconds: int | None = Field(default=None, ge=0, le=3600)
+
+
+class SaveAiSnippet(BaseModel):
+    topic: ai_snippets.Topic
+    settings: dict
+
+
+@app.get("/config-snippets/ai/topics")
+def ai_snippet_topics() -> list[dict[str, str]]:
+    return [
+        {"id": topic, "label": ai_snippets.TOPICS[topic]}
+        for topic in ai_snippets.enabled_topics()
+    ]
+
+
+def _require_ai_topic(topic: str) -> None:
+    if topic not in ai_snippets.enabled_topics():
+        raise HTTPException(
+            403,
+            "AI generation for this exercise has not been enabled by an administrator.",
+        )
+
+
+@app.post("/config-snippets/ai/generate")
+def generate_ai_snippet(request: ai_snippets.GenerateRequest) -> dict:
+    _require_ai_topic(request.topic)
+    try:
+        return ai_snippets.generate(request)
+    except ai_snippets.Busy as exc:
+        raise HTTPException(
+            429, "The snippet generator is busy. Try again shortly."
+        ) from exc
+    except ai_snippets.InvalidDraft as exc:
+        raise HTTPException(
+            422, "Describe the required settings for the selected exercise."
+        ) from exc
+    except ai_snippets.GeneratorUnavailable as exc:
+        raise HTTPException(502, "The snippet generator is unavailable.") from exc
+
+
+@app.post("/config-snippets/ai/save", status_code=201)
+def save_ai_snippet(request: SaveAiSnippet) -> dict[str, str]:
+    _require_ai_topic(request.topic)
+    try:
+        return {"name": ai_snippets.save(request.topic, request.settings)}
+    except ai_snippets.InvalidDraft as exc:
+        raise HTTPException(422, "The draft contains unsupported settings.") from exc
 
 
 @app.get("/config-snippets")

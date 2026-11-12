@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from app import (
+    ai_snippets,
     connectivity_test,
     esxi_session,
     fix_jobs,
@@ -37,6 +38,10 @@ class FixSuggestionRequest(BaseModel):
 
 @app.post("/ai/suggest-fix", status_code=202)
 def start_fix_suggestion(request: FixSuggestionRequest) -> dict[str, str]:
+    if ai_snippets.classroom_mode():
+        raise HTTPException(
+            403, "Health-check fix suggestions are disabled in classroom mode."
+        )
     require_live_topology()
     target = fix_jobs.current_target(app, request.device)
     if target is None:

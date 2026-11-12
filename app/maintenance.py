@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from loguru import logger
 from src.settings import Settings
 
-from app import fix_jobs
+from app import ai_snippets, fix_jobs
 from app.topology_write import get_or_create_backend
 
 
@@ -51,7 +51,7 @@ def run_verify(
     checks = []
     for ok, description in results:
         check = {"ok": ok, "description": description}
-        if not ok and graph is not None:
+        if not ok and graph is not None and not ai_snippets.classroom_mode():
             devices = fix_jobs.check_devices(graph, description)
             if devices:
                 check["devices"] = devices
