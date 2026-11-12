@@ -488,15 +488,17 @@ For example, PUT `{"label":"Router info","commands":["show version"]}` to `/conf
 The library is shared across projects on this Operator instance. Files are stored in `config_snippets/` by default
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
-**Generate with AI** creates a draft in the snippet panel. An administrator enables exercises in the
+**Generate with AI** creates a draft for one selected device in the snippet panel. An administrator enables exercises in the
 Operator service environment with `TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS=vlan,interface_description`.
-The exercises currently support Cisco IOS VLAN definitions and physical port descriptions. Both services
+The exercises currently support VLAN definitions on GNS3 Cisco IOSvL2 and physical port descriptions
+on GNS3 Cisco IOSv and IOSvL2 devices. Both services
 need the same random `XEONIS_AI_SNIPPETS_TOKEN` (at least 32 printable ASCII characters without spaces).
 Set `TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL` in the Operator service environment to pin the
 destination for the token, independent of host profiles. Use an internal network or HTTPS.
 Without a configured topic, service token and generator URL, the feature is disabled. The Operator checks the topic on
-every request and builds the command list from validated fields. Save creates a new library entry
-after review. Insertion and Config Push remain explicit separate actions.
+every request and builds the command list from validated fields. **Review and push…** displays the
+target and commands for confirmation, then runs the existing Config Push job and records it in
+History. Each draft can be pushed once and expires after ten minutes or when the project changes.
 
 Set `XEONIS_CLASSROOM_MODE=1` in **both services** for a classroom installation to turn off the general
 AI Health Check suggestions while allowing the configured exercises. This release is instance-wide.

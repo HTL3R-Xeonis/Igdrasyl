@@ -334,23 +334,25 @@ const pushSnippetDevice = document.getElementById("push-snippet-device");
 const pushSnippetInsert = document.getElementById("push-snippet-insert");
 const aiSnippetPanel = document.getElementById("push-snippet-ai");
 const aiSnippetTopic = document.getElementById("push-snippet-ai-topic");
+const aiSnippetDevice = document.getElementById("push-snippet-ai-device");
 const aiSnippetPrompt = document.getElementById("push-snippet-ai-prompt");
 const aiSnippetGenerate = document.getElementById("push-snippet-ai-generate");
 const aiSnippetReview = document.getElementById("push-snippet-ai-review");
 const aiSnippetStatus = document.getElementById("push-snippet-ai-status");
-const aiSnippetSave = document.getElementById("push-snippet-ai-save");
+const aiSnippetPush = document.getElementById("push-snippet-ai-push");
 let aiSnippetDraft = null;
+let aiSnippetTargetsRequest = 0;
 
-async function refreshSnippetNames(selected = "") {
+async function refreshSnippetNames() {
   const snippets = await settingsRequest("/config-snippets");
   pushSnippetName.replaceChildren(...(snippets.length
     ? snippets.map(snippet => new Option(snippet.label, snippet.name))
     : [new Option("No saved snippets", "")]));
-  if (selected) pushSnippetName.value = selected;
   pushSnippetInsert.disabled = !pushSnippetName.value || !pushSnippetDevice.value;
 }
 
 async function refreshAiSnippetTopics() {
+  if (aiSnippetTopic.disabled) return;
   try {
     const topics = await settingsRequest("/config-snippets/ai/topics");
     const selected = aiSnippetTopic.value;
@@ -358,6 +360,7 @@ async function refreshAiSnippetTopics() {
     if (topics.some(topic => topic.id === selected)) aiSnippetTopic.value = selected;
     if (selected !== aiSnippetTopic.value) clearAiSnippetDraft();
     aiSnippetPanel.hidden = !topics.length;
+    if (topics.length) await refreshAiSnippetTargets();
   } catch {
     aiSnippetPanel.hidden = true;
   }
@@ -369,67 +372,90 @@ function clearAiSnippetDraft() {
   aiSnippetStatus.textContent = "";
 }
 
-aiSnippetTopic.addEventListener("change", clearAiSnippetDraft);
+async function refreshAiSnippetTargets() {
+  clearAiSnippetDraft();
+  const request = ++aiSnippetTargetsRequest;
+  aiSnippetGenerate.disabled = true;
+  aiSnippetDevice.replaceChildren(new Option("Loading devices…", ""));
+  try {
+    const devices = await settingsRequest(`/config-snippets/ai/targets?topic=${encodeURIComponent(aiSnippetTopic.value)}`);
+    if (request !== aiSnippetTargetsRequest) return;
+    aiSnippetDevice.replaceChildren(new Option(devices.length ? "Choose a device…" : "No compatible devices", ""));
+    for (const name of devices) aiSnippetDevice.add(new Option(name, name));
+  } catch (error) {
+    if (request !== aiSnippetTargetsRequest) return;
+    aiSnippetDevice.replaceChildren(new Option("Could not load devices", ""));
+    aiSnippetStatus.textContent = error.message;
+  }
+}
+
+function setAiSnippetBusy(busy) {
+  aiSnippetPush.disabled = busy;
+  aiSnippetGenerate.disabled = busy || !aiSnippetDevice.value;
+  aiSnippetTopic.disabled = busy;
+  aiSnippetDevice.disabled = busy;
+  aiSnippetPrompt.disabled = busy;
+}
+
+aiSnippetTopic.addEventListener("change", refreshAiSnippetTargets);
+aiSnippetDevice.addEventListener("change", () => {
+  clearAiSnippetDraft();
+  aiSnippetGenerate.disabled = !aiSnippetDevice.value;
+});
 aiSnippetPrompt.addEventListener("input", clearAiSnippetDraft);
 document.getElementById("push-snippet-ai-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!aiSnippetTopic.value || aiSnippetGenerate.disabled) return;
+  if (!aiSnippetTopic.value || !aiSnippetDevice.value || aiSnippetGenerate.disabled) return;
   clearAiSnippetDraft();
   const topic = aiSnippetTopic.value;
+  const device = aiSnippetDevice.value;
   const prompt = aiSnippetPrompt.value.trim();
   if (!prompt) {
     aiSnippetStatus.textContent = "Enter a prompt.";
     return;
   }
-  aiSnippetGenerate.disabled = true;
-  aiSnippetTopic.disabled = true;
-  aiSnippetPrompt.disabled = true;
+  setAiSnippetBusy(true);
   aiSnippetStatus.textContent = "Generating draft…";
   try {
     aiSnippetDraft = await settingsRequest("/config-snippets/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, prompt }),
+      body: JSON.stringify({ topic, device, prompt }),
     });
     document.getElementById("push-snippet-ai-commands").textContent = aiSnippetDraft.commands.join("\n");
     aiSnippetReview.hidden = false;
-    aiSnippetStatus.textContent = aiSnippetDraft.label;
+    aiSnippetStatus.textContent = `${aiSnippetDraft.device} · ${aiSnippetDraft.label}`;
   } catch (error) {
     aiSnippetStatus.textContent = error.message;
   } finally {
-    aiSnippetGenerate.disabled = false;
-    aiSnippetTopic.disabled = false;
-    aiSnippetPrompt.disabled = false;
+    setAiSnippetBusy(false);
   }
 });
 
-aiSnippetSave.addEventListener("click", async () => {
-  if (!aiSnippetDraft || aiSnippetSave.disabled) return;
-  const { topic, settings } = aiSnippetDraft;
-  aiSnippetSave.disabled = true;
-  aiSnippetGenerate.disabled = true;
-  aiSnippetTopic.disabled = true;
-  aiSnippetPrompt.disabled = true;
+aiSnippetPush.addEventListener("click", async () => {
+  const manualPush = document.getElementById("push-btn");
+  if (!aiSnippetDraft || aiSnippetPush.disabled || manualPush.disabled) return;
+  const draft = aiSnippetDraft;
+  setAiSnippetBusy(true);
+  manualPush.disabled = true;
   try {
-    const { name } = await settingsRequest("/config-snippets/ai/save", {
+    if (!await showConfirm(
+      `Push these commands to ${draft.device}?\n\n${draft.commands.join("\n")}`,
+      { title: "Push AI configuration", confirmLabel: "Push", danger: true }
+    )) return;
+    const { job_id } = await settingsRequest("/config-snippets/ai/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, settings }),
+      body: JSON.stringify({ draft_id: draft.draft_id }),
     });
     clearAiSnippetDraft();
-    aiSnippetStatus.textContent = "Saved to the snippet library.";
-    try {
-      await refreshSnippetNames(name);
-    } catch {
-      aiSnippetStatus.textContent = "Saved. Reopen the snippet list to select it.";
-    }
+    document.getElementById("push-results").textContent = `Pushing to ${draft.device}…`;
+    await followPushJob(job_id);
   } catch (error) {
     aiSnippetStatus.textContent = error.message;
   } finally {
-    aiSnippetSave.disabled = false;
-    aiSnippetGenerate.disabled = false;
-    aiSnippetTopic.disabled = false;
-    aiSnippetPrompt.disabled = false;
+    manualPush.disabled = false;
+    setAiSnippetBusy(false);
   }
 });
 

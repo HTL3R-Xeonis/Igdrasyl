@@ -1,64 +1,96 @@
+import time
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from src.graph.environment import Environment
 
-from app import config_snippets
+from app import ai_snippets, config_snippets
 
 _TOKEN = "t" * 32
 _GENERATOR = "https://generator.test"
 _URL = "/config-snippets/ai"
 _VLAN = {"vlan_id": 30, "name": "Lab"}
+_REQUEST = {"topic": "vlan", "device": "SW1", "prompt": "VLAN 30 Lab"}
 
 
 @pytest.fixture
-def enable_vlan(monkeypatch):
+def enable_vlan(app_state, monkeypatch):
     monkeypatch.setenv("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS", "vlan,invalid")
     monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", _TOKEN)
     monkeypatch.setenv("TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL", _GENERATOR)
+    monkeypatch.setattr(app_state, "project_id", "test-project")
+    monkeypatch.setattr(app_state, "push_job", None, raising=False)
+    monkeypatch.setattr(app_state, "connectivity_job", None, raising=False)
+    monkeypatch.setattr(app_state, "ai_snippet_drafts", {}, raising=False)
+    monkeypatch.setitem(
+        app_state.graph.nodes,
+        "SW1",
+        SimpleNamespace(
+            image="Cisco IOSvL2 15.2", role="SWITCH", env=Environment.ON_GNS3
+        ),
+    )
 
 
-def test_generation_and_save_require_server_release(client, monkeypatch):
+def _draft(client, settings=_VLAN):
+    reply = Mock(status_code=200)
+    reply.json.return_value = settings
+    with patch("app.ai_snippets.requests.post", return_value=reply) as upstream:
+        response = client.post(f"{_URL}/generate", json=_REQUEST)
+    return response, upstream
+
+
+def test_generation_and_target_selection_require_server_release(client, monkeypatch):
     monkeypatch.delenv("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS", raising=False)
-    monkeypatch.setenv("XEONIS_AI_SNIPPETS_TOKEN", _TOKEN)
     with patch("app.ai_snippets.requests.post") as upstream:
         assert client.get(f"{_URL}/topics").json() == []
-        assert (
-            client.post(
-                f"{_URL}/generate", json={"topic": "vlan", "prompt": "VLAN 30"}
-            ).status_code
-            == 403
-        )
-        assert (
-            client.post(
-                f"{_URL}/save", json={"topic": "vlan", "settings": _VLAN}
-            ).status_code
-            == 403
-        )
+        assert client.get(f"{_URL}/targets?topic=vlan").status_code == 403
+        assert client.post(f"{_URL}/generate", json=_REQUEST).status_code == 403
     upstream.assert_not_called()
 
 
-def test_generate_drafts_then_save_creates_a_new_snippet(client, enable_vlan):
-    assert [topic["id"] for topic in client.get(f"{_URL}/topics").json()] == ["vlan"]
-    reply = Mock(status_code=200)
-    reply.json.return_value = _VLAN
-    with patch("app.ai_snippets.requests.post", return_value=reply) as upstream:
-        response = client.post(
-            f"{_URL}/generate", json={"topic": "vlan", "prompt": "VLAN 30 Lab"}
+def test_push_runs_only_after_confirmation_and_only_once(client, enable_vlan):
+    assert client.get(f"{_URL}/targets?topic=vlan").json() == ["SW1"]
+    with patch("app.push_jobs.push_all", return_value=[]) as push:
+        response, upstream = _draft(client)
+        assert response.status_code == 200, response.text
+        assert upstream.call_args.args == (
+            _GENERATOR + "/api/config-snippets/generate",
         )
-    assert response.status_code == 200, response.text
-    assert upstream.call_args.args == (_GENERATOR + "/api/config-snippets/generate",)
-    assert upstream.call_args.kwargs["headers"] == {"Authorization": f"Bearer {_TOKEN}"}
-    assert upstream.call_args.kwargs["allow_redirects"] is False
-    draft = response.json()
-    assert draft["commands"] == ["configure terminal", "vlan 30", "name Lab", "end"]
-    assert config_snippets.list_snippets() == []
-    payload = {key: draft[key] for key in ("topic", "settings")}
-    saved = client.post(f"{_URL}/save", json=payload)
-    second = client.post(f"{_URL}/save", json=payload)
-    assert saved.status_code == second.status_code == 201
-    assert saved.json()["name"] != second.json()["name"]
-    assert config_snippets.get(saved.json()["name"]).commands == draft["commands"]
-    assert client.get("/config-push/audit").json() == []
+        assert upstream.call_args.kwargs["headers"] == {
+            "Authorization": f"Bearer {_TOKEN}"
+        }
+        assert upstream.call_args.kwargs["allow_redirects"] is False
+        assert upstream.call_args.kwargs["json"] == {
+            "topic": "vlan",
+            "prompt": "VLAN 30 Lab",
+        }
+        draft = response.json()
+        assert draft["device"] == "SW1"
+        assert draft["commands"] == ["configure terminal", "vlan 30", "name Lab", "end"]
+        push.assert_not_called()
+        assert config_snippets.list_snippets() == []
+        payload = {"draft_id": draft["draft_id"]}
+        assert (
+            client.post(f"{_URL}/push", json={**payload, "device": "R1"}).status_code
+            == 422
+        )
+        started = client.post(f"{_URL}/push", json=payload)
+        assert started.status_code == 202, started.text
+        assert client.post(f"{_URL}/push", json=payload).status_code == 409
+        path = f"/config-push/jobs/{started.json()['job_id']}"
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if client.get(path).json()["status"] == "done":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("push job did not finish")
+    push.assert_called_once()
+    assert push.call_args.args[0] == {"SW1": draft["commands"]}
+    assert [row["note"] for row in client.get("/config-push/audit").json()] == [
+        "AI snippet"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -70,53 +102,58 @@ def test_generate_drafts_then_save_creates_a_new_snippet(client, enable_vlan):
         {**_VLAN, "commands": ["unexpected"]},
     ],
 )
-def test_invalid_values_cannot_become_commands(client, enable_vlan, settings):
-    reply = Mock(status_code=200)
-    reply.json.return_value = settings
-    with patch("app.ai_snippets.requests.post", return_value=reply):
-        assert (
-            client.post(
-                f"{_URL}/generate", json={"topic": "vlan", "prompt": "VLAN 30"}
-            ).status_code
-            == 422
-        )
-    assert (
-        client.post(
-            f"{_URL}/save", json={"topic": "vlan", "settings": settings}
-        ).status_code
-        == 422
-    )
-    assert config_snippets.list_snippets() == []
+def test_invalid_model_values_cannot_become_commands(
+    client, enable_vlan, app_state, settings
+):
+    response, _ = _draft(client, settings)
+    assert response.status_code == 422
+    assert app_state.ai_snippet_drafts == {}
 
 
-def test_one_topic_release_cannot_enable_another(client, enable_vlan):
+def test_vlan_exercise_rejects_router_and_unreleased_topic(client, enable_vlan):
     with patch("app.ai_snippets.requests.post") as upstream:
         assert (
             client.post(
-                f"{_URL}/generate",
-                json={"topic": "interface_description", "prompt": "Describe port"},
+                f"{_URL}/generate", json={**_REQUEST, "device": "R1"}
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                f"{_URL}/generate", json={**_REQUEST, "topic": "interface_description"}
             ).status_code
             == 403
         )
     upstream.assert_not_called()
 
 
-def test_description_exercise_accepts_only_a_single_physical_interface(
-    client, enable_vlan, monkeypatch
+def test_changed_project_or_revoked_release_blocks_push(
+    client, app_state, enable_vlan, monkeypatch
 ):
-    monkeypatch.setenv("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS", "interface_description")
+    response, _ = _draft(client)
+    payload = {"draft_id": response.json()["draft_id"]}
+    with patch("app.push_jobs.start_job") as push:
+        app_state.project_id = "changed-project"
+        try:
+            assert client.post(f"{_URL}/push", json=payload).status_code == 409
+        finally:
+            app_state.project_id = "test-project"
+        monkeypatch.delenv("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS")
+        assert client.post(f"{_URL}/push", json=payload).status_code == 403
+    push.assert_not_called()
+
+
+def test_description_exercise_accepts_only_a_single_physical_interface():
     settings = {"interface": "GigabitEthernet0/1", "description": "Uplink Raum 2"}
-    payload = {"topic": "interface_description", "settings": settings}
-    saved = client.post(f"{_URL}/save", json=payload)
-    assert saved.status_code == 201
-    assert config_snippets.get(saved.json()["name"]).commands == [
+    assert ai_snippets.compile_snippet("interface_description", settings).commands == [
         "configure terminal",
         "interface GigabitEthernet0/1",
         "description Uplink Raum 2",
         "end",
     ]
     settings["interface"] = "range GigabitEthernet0/1 - 4"
-    assert client.post(f"{_URL}/save", json=payload).status_code == 422
+    with pytest.raises(ai_snippets.InvalidDraft):
+        ai_snippets.compile_snippet("interface_description", settings)
 
 
 def test_missing_fixed_generator_url_keeps_the_feature_disabled(

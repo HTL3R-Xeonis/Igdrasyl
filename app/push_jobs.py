@@ -13,6 +13,8 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +29,7 @@ from app.config_push import (
     push_all,
     push_all_waiting,
 )
+from app.live_lock import exclusive
 
 
 class AlreadyRunning(Exception):
@@ -66,6 +69,7 @@ def _run(
     job: PushJob,
     devices: dict[str, Any],
     wait_seconds: int,
+    verify_target: Callable[[], None] | None = None,
 ) -> None:
     def on_progress(device: str, done: int, total: int) -> None:
         job.devices[device] = {"done": done, "total": total}
@@ -74,7 +78,11 @@ def _run(
         job.waiting_for = names
 
     try:
-        with push_audit.track(job.audit_note) as audit:
+        target_lock = exclusive("AI snippet push") if verify_target else nullcontext()
+        with target_lock, push_audit.track(job.audit_note) as audit:
+            if verify_target:
+                verify_target()
+                app.state.last_config_push = devices
             if wait_seconds > 0:
                 job.results = push_all_waiting(
                     devices,
@@ -101,6 +109,7 @@ def start_job(
     wait_seconds: int | None = None,
     *,
     audit_note: str = "Background push",
+    verify_target: Callable[[], None] | None = None,
 ) -> PushJob:
     """
     :param wait_seconds: how long to keep retrying devices that are still booting (see
@@ -128,9 +137,10 @@ def start_job(
         },
     )
     app.state.push_job = job
-    app.state.last_config_push = devices
+    if verify_target is None:
+        app.state.last_config_push = devices
     threading.Thread(
-        target=_run, args=(app, job, devices, wait_seconds), daemon=True
+        target=_run, args=(app, job, devices, wait_seconds, verify_target), daemon=True
     ).start()
     return job
 

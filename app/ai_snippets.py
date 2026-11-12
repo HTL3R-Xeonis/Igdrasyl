@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
+import time
 import uuid
+from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
 
 import requests
+from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import config_snippets
+from app import config_snippets, fix_jobs, push_jobs
 
 Topic = Literal["vlan", "interface_description"]
 TOPICS = {
@@ -20,6 +25,10 @@ TOPICS = {
     "interface_description": "Cisco IOS · Port description",
 }
 _SLOTS = threading.BoundedSemaphore(2)
+_DRAFT_LOCK = threading.Lock()
+_DRAFT_TTL = 600
+_MAX_DRAFTS = 100
+_IOSV_IMAGE = re.compile(r"(?:Cisco\s+)?IOSv(L2)?(?:\s+.*)?", re.IGNORECASE)
 
 
 def service_token() -> str:
@@ -65,6 +74,7 @@ def enabled_topics() -> list[str]:
 
 class GenerateRequest(BaseModel):
     topic: Topic
+    device: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=1500)
 
     @field_validator("prompt")
@@ -108,6 +118,55 @@ class Busy(Exception):
     """The generation slots are in use."""
 
 
+class TargetChanged(Exception):
+    """The device or the project changed after it was selected."""
+
+
+class DraftExpired(Exception):
+    """The reviewed draft expired or was already pushed."""
+
+
+class TopicDisabled(Exception):
+    """The topic is no longer available."""
+
+
+@dataclass(frozen=True)
+class Draft:
+    target: fix_jobs.FixTarget
+    topic: Topic
+    commands: tuple[str, ...]
+    expires: float
+
+
+def _supports(topic: Topic, node) -> bool:
+    image = _IOSV_IMAGE.fullmatch(node.image)
+    return (
+        node.env == Environment.ON_GNS3
+        and image is not None
+        and (topic != "vlan" or image[1] is not None)
+    )
+
+
+def targets(app: FastAPI, topic: Topic) -> list[str]:
+    graph = getattr(app.state, "graph", None)
+    if (
+        graph is None
+        or not getattr(app.state, "project_id", None)
+        or not getattr(app.state, "gns3_vm_ip", None)
+    ):
+        return []
+    return sorted(name for name, node in graph.nodes.items() if _supports(topic, node))
+
+
+def _target(app: FastAPI, topic: Topic, name: str) -> fix_jobs.FixTarget:
+    if name not in targets(app, topic):
+        raise TargetChanged("Choose a compatible device in the active GNS3 project.")
+    target = fix_jobs.current_target(app, name)
+    if target is None:
+        raise TargetChanged("The device is no longer available.")
+    return target
+
+
 def _generate_settings(request: GenerateRequest) -> dict:
     url = _generator_url()
     if not _SLOTS.acquire(blocking=False):
@@ -115,7 +174,7 @@ def _generate_settings(request: GenerateRequest) -> dict:
     try:
         response = requests.post(
             f"{url}/api/config-snippets/generate",
-            json=request.model_dump(),
+            json=request.model_dump(exclude={"device"}),
             headers={"Authorization": f"Bearer {service_token()}"},
             timeout=min(90, Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS),
             allow_redirects=False,
@@ -158,14 +217,51 @@ def compile_snippet(topic: Topic, settings: dict) -> config_snippets.Snippet:
         raise InvalidDraft from exc
 
 
-def generate(request: GenerateRequest) -> dict:
+def generate(app: FastAPI, request: GenerateRequest) -> dict:
+    target = _target(app, request.topic, request.device)
     settings = _generate_settings(request)
     snippet = compile_snippet(request.topic, settings)
-    return {"topic": request.topic, "settings": settings, **snippet.model_dump()}
+    if _target(app, request.topic, request.device) != target:
+        raise TargetChanged("The project or device changed. Generate a new draft.")
+    draft_id = uuid.uuid4().hex
+    with _DRAFT_LOCK:
+        if not hasattr(app.state, "ai_snippet_drafts"):
+            app.state.ai_snippet_drafts = {}
+        drafts = app.state.ai_snippet_drafts
+        now = time.monotonic()
+        for key, draft in list(drafts.items()):
+            if draft.expires <= now:
+                del drafts[key]
+        if len(drafts) >= _MAX_DRAFTS:
+            del drafts[next(iter(drafts))]
+        drafts[draft_id] = Draft(
+            target, request.topic, tuple(snippet.commands), now + _DRAFT_TTL
+        )
+    return {"draft_id": draft_id, "device": request.device, **snippet.model_dump()}
 
 
-def save(topic: Topic, settings: dict) -> str:
-    snippet = compile_snippet(topic, settings)
-    name = f"ai-{uuid.uuid4().hex}.json"
-    config_snippets.save(name, snippet.label, snippet.commands)
-    return name
+def push_draft(app: FastAPI, draft_id: str) -> push_jobs.PushJob:
+    with _DRAFT_LOCK:
+        drafts = getattr(app.state, "ai_snippet_drafts", {})
+        draft = drafts.get(draft_id)
+        if draft is None or draft.expires <= time.monotonic():
+            raise DraftExpired
+
+        def verify_target() -> None:
+            if draft.topic not in enabled_topics():
+                raise TopicDisabled("This exercise is no longer enabled.")
+            if _target(app, draft.topic, draft.target.device) != draft.target:
+                raise TargetChanged(
+                    "The project or device changed. Generate a new draft."
+                )
+
+        verify_target()
+        job = push_jobs.start_job(
+            app,
+            {draft.target.device: list(draft.commands)},
+            wait_seconds=0,
+            audit_note="AI snippet",
+            verify_target=verify_target,
+        )
+        del drafts[draft_id]
+        return job

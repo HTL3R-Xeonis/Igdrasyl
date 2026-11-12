@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import ai_snippets, config_snippets, push_audit, push_jobs
 from app.application import app
@@ -18,9 +18,9 @@ class PushRequest(BaseModel):
     wait_seconds: int | None = Field(default=None, ge=0, le=3600)
 
 
-class SaveAiSnippet(BaseModel):
-    topic: ai_snippets.Topic
-    settings: dict
+class PushAiSnippet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    draft_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
 @app.get("/config-snippets/ai/topics")
@@ -39,11 +39,19 @@ def _require_ai_topic(topic: str) -> None:
         )
 
 
+@app.get("/config-snippets/ai/targets")
+def ai_snippet_targets(topic: ai_snippets.Topic) -> list[str]:
+    _require_ai_topic(topic)
+    return ai_snippets.targets(app, topic)
+
+
 @app.post("/config-snippets/ai/generate")
 def generate_ai_snippet(request: ai_snippets.GenerateRequest) -> dict:
     _require_ai_topic(request.topic)
     try:
-        return ai_snippets.generate(request)
+        return ai_snippets.generate(app, request)
+    except ai_snippets.TargetChanged as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ai_snippets.Busy as exc:
         raise HTTPException(
             429, "The snippet generator is busy. Try again shortly."
@@ -56,13 +64,19 @@ def generate_ai_snippet(request: ai_snippets.GenerateRequest) -> dict:
         raise HTTPException(502, "The snippet generator is unavailable.") from exc
 
 
-@app.post("/config-snippets/ai/save", status_code=201)
-def save_ai_snippet(request: SaveAiSnippet) -> dict[str, str]:
-    _require_ai_topic(request.topic)
+@app.post("/config-snippets/ai/push", status_code=202)
+def push_ai_snippet(request: PushAiSnippet) -> dict[str, str]:
     try:
-        return {"name": ai_snippets.save(request.topic, request.settings)}
-    except ai_snippets.InvalidDraft as exc:
-        raise HTTPException(422, "The draft contains unsupported settings.") from exc
+        job = ai_snippets.push_draft(app, request.draft_id)
+    except ai_snippets.TopicDisabled as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ai_snippets.DraftExpired as exc:
+        raise HTTPException(
+            409, "The draft expired or was already used. Generate a new one."
+        ) from exc
+    except (ai_snippets.TargetChanged, push_jobs.AlreadyRunning) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"job_id": job.id}
 
 
 @app.get("/config-snippets")
