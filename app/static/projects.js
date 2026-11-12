@@ -170,10 +170,7 @@ const deploymentStatus = document.getElementById("deployment-preview-status");
 const deploymentConfirm = document.getElementById("deployment-confirm");
 const deploymentName = document.getElementById("deployment-project-name");
 const deploymentNameHint = document.getElementById("deployment-name-hint");
-let deploymentPreview = null;
-
 function renderDeploymentPreview(preview) {
-  deploymentPreview = preview;
   const roles = Object.entries(preview.roles).map(([role, count]) => `${role}: ${count}`).join(", ") || "None";
   const rows = [
     ["Project", preview.project.name],
@@ -217,7 +214,6 @@ function deploymentNameMode() {
 }
 
 function renderUnsavedDeployment() {
-  deploymentPreview = null;
   const nodes = Object.keys(nodesData).length;
   deploymentContent.replaceChildren();
   deploymentNameHint.textContent = deploymentNameMode() === "new"
@@ -304,34 +300,46 @@ deploymentConfirm.addEventListener("click", async () => {
     deploymentName.focus();
     return;
   }
+  const filename = deploymentHostPicker.value;
+  const nameMode = deploymentNameMode();
   deploymentConfirm.disabled = true;
   try {
     // Always deploy what is on the canvas now: save it first (named, or into its project).
-    const previewUrl = () => `/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(deploymentHostPicker.value)}`;
+    const previewUrl = () => `/projects/${encodeURIComponent(currentDesignProject.id)}/deploy-preview/${encodeURIComponent(filename)}`;
     // A project on hold is resumed exactly as it was deployed - the canvas must not overwrite it.
     let heldAlready = false;
-    if (deploymentNameMode() === "existing") heldAlready = (await settingsRequest(previewUrl())).held;
+    if (nameMode === "existing") heldAlready = (await settingsRequest(previewUrl())).held;
+    if (!deploymentDialog.open) return;
     if (!heldAlready) {
       deploymentStatus.textContent = "Saving the design…";
-      await saveDesignProject(deploymentNameMode() === "new" ? name : null);
+      await saveDesignProject(nameMode === "new" ? name : null);
     }
-    deploymentPreview = await settingsRequest(previewUrl());
-    renderDeploymentPreview(deploymentPreview);
-    if (deploymentPreview.mode === "full" && !deploymentPreview.held && !await showConfirm(
-      `“${deploymentPreview.project.name}” will be deployed in FULL mode: the topology is rebuilt and managed devices that are not in it may be removed from ${deploymentPreview.host.esxi_ip || deploymentPreview.host.filename}. Continue?`,
-      { title: "Full deployment", confirmLabel: "Deploy", danger: true }
-    )) {
-      deploymentConfirm.disabled = false;
-      return;
+    const preview = await settingsRequest(previewUrl());
+    if (!deploymentDialog.open) return;
+    renderDeploymentPreview(preview);
+    deploymentConfirm.disabled = true;
+    if (preview.mode === "full" && !preview.held) {
+      // A native modal dialog makes the confirmation overlay outside it inert.
+      deploymentDialog.close();
+      const confirmed = await showConfirm(
+        `“${preview.project.name}” will be deployed in FULL mode: the topology is rebuilt and managed devices that are not in it may be removed from ${preview.host.esxi_ip || preview.host.filename}. Continue?`,
+        { title: "Full deployment", confirmLabel: "Deploy", danger: true }
+      );
+      if (!confirmed) {
+        deploymentDialog.showModal();
+        return;
+      }
     }
-    if (deploymentPreview.requires_restart) {
-      await settingsRequest(`/settings-profiles/${encodeURIComponent(deploymentPreview.host.filename)}/project`, {
+    if (preview.requires_restart) {
+      await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/project`, {
         method:"PUT", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({project_id: currentDesignProject.id})
       });
-      sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:deploymentPreview.host.filename, resume: !!deploymentPreview.held}));
-      deploymentStatus.textContent = "Restarting with the selected host and project…";
-      try { await fetch(`/settings-profiles/${encodeURIComponent(deploymentPreview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
+      sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:preview.host.filename, resume: !!preview.held}));
+      const restarting = "Restarting with the selected host and project…";
+      if (deploymentDialog.open) deploymentStatus.textContent = restarting;
+      else setMenubarBusy(restarting);
+      try { await fetch(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
       const deadline = Date.now() + 30000;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -339,15 +347,20 @@ deploymentConfirm.addEventListener("click", async () => {
       }
       throw new Error("Server did not return after restart");
     }
-    if (deploymentPreview.held) {
+    if (preview.held) {
       deploymentDialog.close();
-      await enterHost(deploymentPreview.host.filename, true);
+      await enterHost(preview.host.filename, true);
       await resumeHeldProject(currentDesignProject);
       return;
     }
-    await startLibraryDeployment(currentDesignProject, deploymentPreview.host.filename);
+    await startLibraryDeployment(currentDesignProject, preview.host.filename);
   } catch (error) {
-    deploymentStatus.textContent = error.message;
+    if (deploymentDialog.open) deploymentStatus.textContent = error.message;
+    else {
+      setMenubarMessage(`Deployment failed: ${error.message}`, { error: true });
+      await showAlert(error.message, { title: "Deploy project" });
+    }
+  } finally {
     deploymentConfirm.disabled = false;
   }
 });

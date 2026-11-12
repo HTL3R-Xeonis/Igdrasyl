@@ -643,7 +643,9 @@ points stay reachable; Restore replaces the current sketch with a snapshot's
 50 per project, oldest dropped first (`app/project_snapshots.py`). **Clear Topology…** (File menu, design
 mode only) empties the sketch after a confirmation; Edit > Undo brings it back. **Deploy to Host…**
 shows the target ESXi address, GNS3 VM, node/link totals, role totals, and whether
-the host uses incremental or full deployment. The preview is read-only. Starting
+the host uses incremental or full deployment. The preview is read-only. For a full
+deployment, the preview closes before the final confirmation appears. Cancel
+returns to the preview with the selected host and project. Starting
 deployment selects the project for that host; if the host or project is not active,
 the app restarts once and resumes the confirmed deployment afterward.
 
