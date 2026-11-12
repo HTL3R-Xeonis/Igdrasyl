@@ -10,9 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from fastapi.testclient import TestClient
 from src.settings import Settings
 
 from app import template_health
+from app.main import app
 
 ESXI_URL = "http://templates.test:8000"
 GNS3_URL = "http://templates.test:8001"
@@ -82,7 +84,29 @@ def test_an_unreachable_service_is_named_with_a_readable_reason():
     ]
 
 
-def test_the_real_outage_zero_templates_and_the_services_own_reason():
+@pytest.mark.parametrize(
+    ("error", "expected", "excluded"),
+    [
+        (
+            "Cannot complete login due to an incorrect user name or password.",
+            "Check the ESXi credentials",
+            "Check whether ESXi is reachable",
+        ),
+        (
+            "No ESXi password stored",
+            "Check the ESXi credentials",
+            "Check whether ESXi is reachable",
+        ),
+        (
+            "Connection timed out",
+            "Check whether ESXi is reachable",
+            "Check the ESXi credentials",
+        ),
+    ],
+)
+def test_zero_templates_preserves_the_reason_and_guides_the_user(
+    error, expected, excluded
+):
     routes = {
         **HEALTHY,
         f"{GNS3_URL}/api/templates": {"templates": []},
@@ -91,19 +115,26 @@ def test_the_real_outage_zero_templates_and_the_services_own_reason():
                 {
                     "name": "gns3-server-2",
                     "status": "esxi_unreachable",
-                    "error": "Cannot complete login due to an incorrect user name or password.",
+                    "error": error,
                 }
             ]
         },
     }
-    with patch("requests.get", _fake_get(routes)):
-        result = template_health.check(force=True)
+    with (
+        patch("requests.get", _fake_get(routes)),
+        patch("app.gns3_vm_power.status", return_value=None),
+    ):
+        response = TestClient(app).get("/templates/health")
 
+    assert response.status_code == 200
+    result = response.json()
     assert result["ok"] is False
+    assert result["gns3_templates"] == 0 and result["refreshable"] is True
     joined = " | ".join(result["problems"])
     assert "lists 0 templates" in joined
-    assert "'gns3-server-2': esxi_unreachable - Cannot complete login" in joined
-    assert "changed ESXi password" in joined
+    assert f"'gns3-server-2': esxi_unreachable - {error}" in joined
+    assert expected in joined
+    assert excluded not in joined
 
 
 def test_a_service_without_a_servers_endpoint_still_gets_its_count_checked():

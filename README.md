@@ -182,7 +182,9 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   password changed and the service could no longer log in). The app now asks
   both template APIs (and the GNS3 one's own `/api/servers`, which states
   why a server is unreachable) and shows the problem in a banner on every
-  screen (`GET /templates/health`); "Image ... not found" errors get the
+  screen (`GET /templates/health`). It points to credentials when the
+  collector reports a login problem and to connectivity for other ESXi
+  connection failures. "Image ... not found" errors get the
   likely cause appended. When the service cannot be reached at all, the
   startup banner and the 503 answers of `/templates`, `/design/templates`,
   `/design/nodes` and `/topology` name the service and the reason ("The ESXi

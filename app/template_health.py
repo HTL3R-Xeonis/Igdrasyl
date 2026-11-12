@@ -72,15 +72,34 @@ def _gns3_server_problems(base_url: str, problems: list[str]) -> None:
     except (requests.RequestException, ValueError):
         return  # an older service without this endpoint - the counts say enough
     broken = [s for s in servers if s.get("status") != "ok"]
+    credentials_problem = False
+    connection_problem = False
     for server in broken:
-        detail = f" - {server['error']}" if server.get("error") else ""
+        error = str(server.get("error") or "")
+        detail = f" - {error}" if error else ""
         problems.append(
             f"GNS3 server '{server.get('name', '?')}': {server.get('status')}{detail}"
         )
-    if any(str(s.get("status", "")).startswith("esxi_") for s in broken):
+        if str(server.get("status", "")).startswith("esxi_"):
+            # The collector uses esxi_unreachable for both login failures and network errors.
+            if any(
+                hint in error.casefold()
+                for hint in (
+                    "incorrect user name or password",
+                    "invalidlogin",
+                    "no esxi password stored",
+                )
+            ):
+                credentials_problem = True
+            else:
+                connection_problem = True
+    if credentials_problem:
         problems.append(
-            "The template service cannot log in to ESXi - typically a changed "
-            "ESXi password in that service's own configuration."
+            "Check the ESXi credentials configured for the GNS3 template service."
+        )
+    if connection_problem:
+        problems.append(
+            "Check whether ESXi is reachable from the GNS3 template service."
         )
 
 
