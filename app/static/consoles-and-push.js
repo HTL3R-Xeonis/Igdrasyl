@@ -332,7 +332,9 @@ const pushSnippetsPanel = document.getElementById("push-snippets");
 const pushSnippetName = document.getElementById("push-snippet-name");
 const pushSnippetDevice = document.getElementById("push-snippet-device");
 const pushSnippetInsert = document.getElementById("push-snippet-insert");
+const aiSnippetToggle = document.getElementById("push-snippet-ai-toggle");
 const aiSnippetPanel = document.getElementById("push-snippet-ai");
+const aiSnippetForm = document.getElementById("push-snippet-ai-form");
 const aiSnippetTopic = document.getElementById("push-snippet-ai-topic");
 const aiSnippetDevice = document.getElementById("push-snippet-ai-device");
 const aiSnippetPrompt = document.getElementById("push-snippet-ai-prompt");
@@ -353,18 +355,37 @@ async function refreshSnippetNames() {
 
 async function refreshAiSnippetTopics() {
   if (aiSnippetTopic.disabled) return;
+  clearAiSnippetDraft();
+  aiSnippetForm.hidden = true;
+  aiSnippetStatus.textContent = "Checking AI availability…";
   try {
     const topics = await settingsRequest("/config-snippets/ai/topics");
     const selected = aiSnippetTopic.value;
     aiSnippetTopic.replaceChildren(...topics.map(topic => new Option(topic.label, topic.id)));
     if (topics.some(topic => topic.id === selected)) aiSnippetTopic.value = selected;
-    if (selected !== aiSnippetTopic.value) clearAiSnippetDraft();
-    aiSnippetPanel.hidden = !topics.length;
-    if (topics.length) await refreshAiSnippetTargets();
+    if (!topics.length) {
+      aiSnippetStatus.textContent = "An administrator must enable AI exercises for this installation.";
+      return;
+    }
+    aiSnippetForm.hidden = false;
+    await refreshAiSnippetTargets();
   } catch {
-    aiSnippetPanel.hidden = true;
+    aiSnippetStatus.textContent = "Could not check AI availability.";
   }
 }
+
+aiSnippetToggle.addEventListener("click", async () => {
+  const opening = aiSnippetPanel.hidden;
+  aiSnippetPanel.hidden = !opening;
+  aiSnippetToggle.setAttribute("aria-expanded", String(opening));
+  if (!opening) return;
+  aiSnippetToggle.disabled = true;
+  try {
+    await refreshAiSnippetTopics();
+  } finally {
+    aiSnippetToggle.disabled = false;
+  }
+});
 
 function clearAiSnippetDraft() {
   aiSnippetDraft = null;
@@ -403,7 +424,7 @@ aiSnippetDevice.addEventListener("change", () => {
   aiSnippetGenerate.disabled = !aiSnippetDevice.value;
 });
 aiSnippetPrompt.addEventListener("input", clearAiSnippetDraft);
-document.getElementById("push-snippet-ai-form").addEventListener("submit", async (event) => {
+aiSnippetForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!aiSnippetTopic.value || !aiSnippetDevice.value || aiSnippetGenerate.disabled) return;
   clearAiSnippetDraft();
@@ -464,7 +485,6 @@ pushSnippetsToggle.addEventListener("click", async () => {
   pushSnippetsPanel.hidden = !opening;
   pushSnippetsToggle.setAttribute("aria-expanded", String(opening));
   if (!opening) return;
-  refreshAiSnippetTopics();
   pushSnippetsToggle.disabled = true;
   pushSnippetInsert.disabled = true;
   pushSnippetName.replaceChildren(new Option("Loading snippets…", ""));

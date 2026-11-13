@@ -488,7 +488,8 @@ For example, PUT `{"label":"Router info","commands":["show version"]}` to `/conf
 The library is shared across projects on this Operator instance. Files are stored in `config_snippets/` by default
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
-**Generate with AI** creates a draft for one selected device in the snippet panel. An administrator enables exercises in the
+**View → Config Push → Generate with AI** creates a draft for one selected device. The button opens the
+availability message when no exercises are enabled. An administrator enables exercises in the
 Operator service environment with `TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS=vlan,interface_description`.
 The exercises currently support VLAN definitions on GNS3 Cisco IOSvL2 and physical port descriptions
 on GNS3 Cisco IOSv and IOSvL2 devices. Both services
