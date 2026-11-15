@@ -163,8 +163,8 @@ async def lifespan(app: FastAPI):
     if bootstrap_password:
         logger.warning(
             f"Created initial admin account - username 'admin', password: "
-            f"{bootstrap_password} - change it via the admin panel and this "
-            f"message will not repeat"
+            f"{bootstrap_password} (the default - change it via the admin "
+            f"panel as soon as possible) - this message will not repeat"
         )
 
     # A real, persistent pyvmomi session, reused for the app's lifetime rather than opened per request (same reasoning

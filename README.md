@@ -441,8 +441,10 @@ the rest of the app's theme. Passwords are hashed with salted PBKDF2-HMAC-SHA256
 library - no new dependency. Accounts live in `users.json` (gitignored, path
 overridable via `TOPOLOGYOPERATOR_USERS_FILE`); the session-signing secret is
 generated once into `session_secret.key` next to it and persists across restarts.
-If `users.json` doesn't exist at startup, one `admin` account is created with a
-random password, logged once at `WARNING` level.
+If `users.json` doesn't exist at startup, one `admin` account is created with the
+default password `admin` - deliberately predictable, not a generated secret, since
+it's meant to be the very first login on a fresh install and changed right away via
+the admin panel; logged once at `WARNING` level as a reminder.
 
 Two roles share the same login flow: `admin` and `user`. Regular users keep full
 access to everything they always had, destructive actions included (Find Orphans,

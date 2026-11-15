@@ -100,8 +100,7 @@ def test_set_role_and_delete_404_for_an_unknown_user():
 
 def test_ensure_bootstrap_admin_only_creates_once():
     password = users.ensure_bootstrap_admin()
-    assert password is not None
-    assert len(password) >= 12
+    assert password == "admin"
     assert users.authenticate("admin", password) == "admin"
 
     assert users.ensure_bootstrap_admin() is None  # already has accounts

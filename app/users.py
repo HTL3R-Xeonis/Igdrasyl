@@ -194,15 +194,18 @@ def authenticate(username: str, password: str) -> str | None:
 
 def ensure_bootstrap_admin() -> str | None:
     """
-    Creates a first 'admin' account with a random password if no users
-    exist yet at all - called once from app/startup.py's lifespan.
-    :return: the generated password (to be logged once by the caller), or
-        None if accounts already exist and nothing was created.
+    Creates a first 'admin' account with the default password 'admin' if no
+    users exist yet at all - called once from app/startup.py's lifespan.
+    Deliberately predictable rather than random: this is meant to be the
+    very first login on a fresh install, changed via the admin panel right
+    after - not a secret handed out once.
+    :return: the password just set ("admin"), to be logged once by the
+        caller, or None if accounts already exist and nothing was created.
     """
     with _LOCK:
         if _read():
             return None
-        password = secrets.token_urlsafe(12)
+        password = "admin"
         users = {
             "admin": {
                 "password_hash": hash_password(password),
