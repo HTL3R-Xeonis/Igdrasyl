@@ -411,7 +411,7 @@ async function loadLandingHostGrid() {
   const hostDesign = document.createElement("button");
   hostDesign.type = "button";
   hostDesign.className = "landing-host-tile add-tile";
-  appendTileText(hostDesign, "Design a host configuration");
+  appendTileText(hostDesign, "Create/Design a Host");
   hostDesign.addEventListener("click", () => openConnectionSettings());
   actionsGrid.appendChild(hostDesign);
 }

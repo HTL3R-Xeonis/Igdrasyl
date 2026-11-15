@@ -54,7 +54,7 @@ async function openConnectionSettings(filename = null) {
   connectionResults.textContent = "Loading settings…";
   connectionApply.hidden = true;
   document.getElementById("connection-yaml").textContent = "";
-  document.getElementById("connection-title").textContent = filename ? `Settings — ${filename}` : "Design a host configuration";
+  document.getElementById("connection-title").textContent = filename ? `Settings — ${filename}` : "Create/Design a Host";
   document.getElementById("connection-name-wrap").hidden = !!filename;
   document.getElementById("connection-name").value = "my-host.yml";
   connectionFields.replaceChildren();
@@ -79,6 +79,7 @@ async function openConnectionSettings(filename = null) {
         title.textContent = field.key.split(".").pop().replaceAll("_", " ").replace(/\b(esxi|gns3|api|vm|ova|mac|ip)\b/g, word => word.toUpperCase());
         label.appendChild(title);
         const input = document.createElement(field.type === "boolean" || field.type === "ova-template" ? "select" : field.type === "list" ? "textarea" : "input");
+        let fieldDefault = field.default;
         if (field.type === "boolean") {
           for (const [value, text] of [["true", "Enabled"], ["false", "Disabled"]]) {
             const option = document.createElement("option"); option.value = value; option.textContent = text; input.appendChild(option);
@@ -89,7 +90,14 @@ async function openConnectionSettings(filename = null) {
             const details = [template.category, template.size].filter(Boolean).join(" · ");
             input.appendChild(new Option(details ? `${template.name} (${details})` : template.name, template.id));
           }
-          const selected = body.fields[field.key] ?? field.default;
+          // A brand-new host with exactly one GNS3 template in the catalog has nothing to
+          // pick between - prefill it (still just a suggestion, shown selected in the form,
+          // not silently saved until Create host is clicked). Leave untouched otherwise:
+          // an existing host's stored value, or an ambiguous catalog, is never overridden.
+          if (!filename && !fieldDefault && ovaCatalog.templates.length === 1) {
+            fieldDefault = ovaCatalog.templates[0].id;
+          }
+          const selected = body.fields[field.key] ?? fieldDefault;
           if (selected && ![...input.options].some(option => option.value === selected)) {
             input.appendChild(new Option("Selected template is unavailable", selected));
           }
@@ -99,7 +107,7 @@ async function openConnectionSettings(filename = null) {
           if (field.type === "number") { input.min = field.key.endsWith(".port") ? "1" : "0"; input.step = "1"; if (field.key.endsWith(".port")) input.max = "65535"; }
         }
         input.name = field.key;
-        input.value = body.fields[field.key] ?? field.default;
+        input.value = body.fields[field.key] ?? fieldDefault;
         input.required = !field.optional;
         input.placeholder = field.optional ? "Automatic / not configured" : field.default;
         label.appendChild(input);

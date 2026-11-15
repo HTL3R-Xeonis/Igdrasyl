@@ -373,7 +373,7 @@ has something to click into immediately.
 
 ## Host configuration designer and settings
 
-Choose **Design a host configuration** on the home screen to build a host
+Choose **Create/Design a Host** on the home screen to build a host
 profile. The whole form is one scrollable page: General, ESXi host, Networking, GNS3, API services and
 Credentials cover 22 host/runtime settings plus both passwords, with
 TopologyBuilder defaults filled in and automatic options left blank.
@@ -387,6 +387,19 @@ set `TOPOLOGYOPERATOR_HOST_DEFAULTS`), keep only the lines to change - same
 layout as a host settings file, no passwords. It is read each time the form is
 opened (no restart); an invalid file is ignored as a whole and the reason is
 logged. Existing hosts still show the real default for anything they don't set.
+The GNS3 VM template field prefills itself too, but only on a brand-new host
+whose catalog has exactly one GNS3-tagged template - it still has to be typed
+(or confirmed/changed) whenever that's ambiguous, and an existing host's own
+stored choice is never touched.
+
+The vSwitch and trunk port group fields default to a fixed name
+(`internal_network`/`PG_GNS3_TRUNK`) that gets created automatically - by that
+name - the first time the GNS3 VM is deployed to this host, so a new host
+normally needs no changes there either. The one thing that genuinely can't be
+guessed is which existing ESXi network is the **management** network for the
+GNS3 VM's first adapter - that has to already exist (it's how the host stays
+reachable at all), so picking the wrong one risks cutting off access; it stays
+a manual choice.
 
 Each host tile's **Settings** button opens the same page for an existing
 profile. Optional values, booleans, ports, protected port-group lists, and MAC
@@ -421,7 +434,9 @@ redirects HTML requests to `/login` and returns 401 JSON for everything else, wi
 a short allow-list (`/login`, `/logout`, `/health`, static assets needed to render
 the login page). `/login` is a plain HTML form (no JS framework, no browser-native
 auth popup) with a "Stay logged in" checkbox - unchecked sessions last 12 hours,
-checked ones last 30 days. Passwords are hashed with salted PBKDF2-HMAC-SHA256
+checked ones last 30 days; its background is a blurred photo (`app/static/login-bg.jpg`)
+behind a glass-panel card, still styled from `styles.css` so it stays in sync with
+the rest of the app's theme. Passwords are hashed with salted PBKDF2-HMAC-SHA256
 (600,000 iterations); sessions are HMAC-signed cookies. Both use only the standard
 library - no new dependency. Accounts live in `users.json` (gitignored, path
 overridable via `TOPOLOGYOPERATOR_USERS_FILE`); the session-signing secret is

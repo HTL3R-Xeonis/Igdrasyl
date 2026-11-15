@@ -63,20 +63,81 @@ def _login_page(error: bool) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Sign in</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-48">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-49">
 <style>
-  body {{ display: flex; align-items: center; justify-content: center; height: 100vh; }}
-  .login-box {{ width: 320px; padding: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }}
-  .login-box h1 {{ font-size: 18px; font-weight: 500; margin: 0 0 18px; text-align: center; }}
-  .login-box label {{ display: block; margin-bottom: 12px; font-size: 13px; color: var(--dim); }}
-  .login-box input[type="text"], .login-box input[type="password"] {{ width: 100%; margin-top: 4px; }}
-  .login-box .remember {{ display: flex; align-items: center; gap: 6px; font-size: 13px; }}
+  html, body {{ height: 100%; }}
+  body {{
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden; isolation: isolate;
+  }}
+  body::before {{
+    content: ""; position: fixed; inset: -20px;
+    background: url("/login-bg.jpg") center center / cover no-repeat;
+    filter: blur(14px) brightness(0.55) saturate(1.1);
+    transform: scale(1.05);
+    z-index: -2;
+  }}
+  body::after {{
+    content: ""; position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(43,43,43,0.35) 0%, rgba(20,22,20,0.72) 100%);
+    z-index: -1;
+  }}
+  .login-brand {{
+    position: fixed; top: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    color: #f0f0f0; font-size: 15px; font-weight: 500;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }}
+  .login-brand img {{ width: 26px; height: 26px; }}
+  .login-box {{
+    display: block; flex: none; width: 340px; padding: 36px 32px; border-radius: 14px;
+    background: rgba(51,51,51,0.62);
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    backdrop-filter: blur(22px) saturate(1.2);
+    -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  }}
+  .login-box h1 {{
+    font-size: 19px; font-weight: 500; margin: 0 0 22px; text-align: center;
+    color: #f5f5f5;
+  }}
+  .login-box label {{
+    display: block; margin-bottom: 14px; font-size: 12.5px;
+    color: #c8c8c8; letter-spacing: 0.02em;
+  }}
+  .login-box input[type="text"], .login-box input[type="password"] {{
+    width: 100%; margin-top: 6px; box-sizing: border-box;
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.14);
+    color: #f0f0f0; border-radius: 7px; padding: 9px 11px; font-size: 14px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }}
+  .login-box input[type="text"]:focus, .login-box input[type="password"]:focus {{
+    outline: none; border-color: #7cb342; background: rgba(0,0,0,0.35);
+  }}
+  .login-box .remember {{
+    display: flex; align-items: center; gap: 7px; font-size: 13px; color: #d4d4d4;
+  }}
   .login-box .remember input {{ margin: 0; }}
-  .login-box button {{ width: 100%; margin-top: 8px; }}
-  .login-error {{ color: var(--bad); font-size: 13px; margin: 0 0 12px; }}
+  .login-box button {{
+    width: 100%; margin-top: 18px; padding: 10px; font-size: 14px;
+    border-radius: 7px; border: none; cursor: pointer; font-weight: 500;
+    background: #7cb342; color: #1c1c1c;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }}
+  .login-box button:hover {{ background: #8fc954; }}
+  .login-box button:active {{ transform: scale(0.98); }}
+  .login-error {{
+    color: #ffb4b4; font-size: 13px; margin: 0 0 16px; text-align: center;
+    background: rgba(224,90,90,0.15); border: 1px solid rgba(224,90,90,0.35);
+    border-radius: 6px; padding: 8px 10px;
+  }}
 </style>
 </head>
 <body>
+<div class="login-brand">
+  <img src="/ginnungagap-mark.svg" alt="">
+  Ginnungagap
+</div>
 <main class="login-box">
   <h1>Sign in to Ginnungagap</h1>
   {message}
@@ -84,7 +145,7 @@ def _login_page(error: bool) -> str:
     <label>Username<input type="text" name="username" autocomplete="username" required autofocus></label>
     <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
     <label class="remember"><input type="checkbox" name="remember" value="1"> Stay logged in</label>
-    <button class="toolbar-btn primary" type="submit">Sign in</button>
+    <button type="submit">Sign in</button>
   </form>
 </main>
 </body>

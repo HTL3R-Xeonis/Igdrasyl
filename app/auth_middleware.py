@@ -22,6 +22,7 @@ _ALLOWED_PATHS = frozenset(
         "/favicon.ico",
         "/styles.css",
         "/ginnungagap-mark.svg",
+        "/login-bg.jpg",
     }
 )
 
