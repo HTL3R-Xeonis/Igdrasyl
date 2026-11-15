@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ginnungagap - Admin</title>
+<link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-48">
+<style>
+  /* styles.css lays <body> out for the single-page app (full height, no scrolling) - this page is its own document. */
+  body { display: block; height: auto; min-height: 100vh; overflow: auto; }
+  #ap { max-width: 760px; margin: 0 auto; padding: 18px 20px 40px; box-sizing: border-box; }
+  #ap-head { display: flex; align-items: baseline; gap: 16px; }
+  #ap-head h1 { margin: 0; font-size: 18px; font-weight: 500; }
+  #ap-head a { color: var(--dim); font-size: 12px; }
+  #ap section { margin-top: 28px; }
+  #ap h2 { font-size: 15px; font-weight: 500; margin: 0 0 10px; }
+  #ap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #ap th, #ap td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  #ap-create-user, #ap-topics-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  #ap-create-user input, #ap-create-user select { min-height: 27px; }
+  #ap-topics-form label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+  .ap-status { color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 1em; }
+  .ap-status.ap-error { color: var(--bad); }
+  #ap-denied { display: none; color: var(--bad); margin-top: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="ap">
+  <div id="ap-head">
+    <h1>Admin Panel</h1>
+    <a href="/">Back to Ginnungagap</a>
+  </div>
+
+  <div id="ap-denied">You are not an admin on this installation.</div>
+
+  <div id="ap-content">
+    <section id="ap-users-section">
+      <h2>User accounts</h2>
+      <table>
+        <thead><tr><th>Username</th><th>Role</th><th></th></tr></thead>
+        <tbody id="ap-users-body"></tbody>
+      </table>
+      <form id="ap-create-user">
+        <input type="text" id="ap-new-username" placeholder="Username" required autocomplete="off">
+        <input type="password" id="ap-new-password" placeholder="Password (min. 8 characters)" required autocomplete="new-password">
+        <select id="ap-new-role">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+        <button class="toolbar-btn primary" type="submit">Add user</button>
+      </form>
+      <p class="ap-status" id="ap-users-status"></p>
+    </section>
+
+    <section id="ap-topics-section">
+      <h2>AI snippet exercises enabled for students</h2>
+      <form id="ap-topics-form"></form>
+      <button class="toolbar-btn primary" id="ap-topics-save" type="button">Save</button>
+      <p class="ap-status" id="ap-topics-status"></p>
+    </section>
+  </div>
+</div>
+<script src="/admin.js?v=ginnungagap-48"></script>
+</body>
+</html>

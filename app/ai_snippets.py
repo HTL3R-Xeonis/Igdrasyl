@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import tempfile
 import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -57,6 +60,41 @@ def _generator_url() -> str:
     return ""
 
 
+def _stored_topics_path() -> Path:
+    return Path(
+        os.getenv("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS_FILE", "ai_snippet_topics.json")
+    )
+
+
+def get_stored_topics() -> list[str]:
+    """The admin-editable topic allow-list (app/routes/admin.py), on top of the env-var one below."""
+    path = _stored_topics_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return (
+        [topic for topic in data if topic in TOPICS] if isinstance(data, list) else []
+    )
+
+
+def set_stored_topics(topics: list[str]) -> list[str]:
+    valid = [topic for topic in topics if topic in TOPICS]
+    path = _stored_topics_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".ai-topics-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(valid, stream)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return valid
+
+
 def enabled_topics() -> list[str]:
     token = service_token()
     if (
@@ -68,7 +106,7 @@ def enabled_topics() -> list[str]:
     ):
         return []
     configured = os.environ.get("TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS", "").split(",")
-    requested = {value.strip() for value in configured}
+    requested = {value.strip() for value in configured} | set(get_stored_topics())
     return [topic for topic in TOPICS if topic in requested]
 
 

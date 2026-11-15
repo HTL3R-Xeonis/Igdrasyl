@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from src.settings import Settings
 
 import app.main as main_module
-from app import design
+from app import auth, design
 from app.topology import load_graph, resolve_project_name
 
 _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
@@ -66,6 +66,29 @@ def _push_storage(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "TOPOLOGYOPERATOR_PUSH_AUDIT_FILE", str(tmp_path / "push_audit.jsonl")
     )
+
+
+@pytest.fixture(autouse=True)
+def _auth_storage_tmp_file(tmp_path, monkeypatch):
+    """
+    Accounts (app/users.py), the signed-session secret (app/auth.py) and
+    the AI snippet topic allow-list (app/ai_snippets.py) each persist to a
+    file - never the repo root during a test. auth._cached_secret is a
+    module-level cache (the whole point is to avoid re-reading the secret
+    file on every request), so it's reset here too, or every test after
+    the first one in a pytest run would silently keep reusing whatever
+    secret the very first test happened to generate instead of its own
+    fresh tmp_path.
+    """
+    monkeypatch.setenv("TOPOLOGYOPERATOR_USERS_FILE", str(tmp_path / "users.json"))
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SESSION_SECRET_FILE", str(tmp_path / "session_secret.key")
+    )
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS_FILE",
+        str(tmp_path / "ai_snippet_topics.json"),
+    )
+    monkeypatch.setattr(auth, "_cached_secret", None)
 
 
 @pytest.fixture
@@ -124,7 +147,29 @@ def app_state(graph):
 
 @pytest.fixture
 def client(app_state):
-    return TestClient(main_module.app)
+    """
+    An admin-authenticated client - almost every endpoint now needs a
+    logged-in session (app/auth_middleware.py), and most of this test
+    suite predates accounts/roles entirely, so the default client stays
+    able to reach everything it always could. Tests that specifically
+    exercise role restrictions use `user_client` or log in as a
+    deliberately unauthenticated/non-admin client themselves.
+    """
+    test_client = TestClient(main_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-admin", "admin")
+    )
+    return test_client
+
+
+@pytest.fixture
+def user_client(app_state):
+    """Same as `client`, but logged in as a non-admin - for tests that check a regular user is refused an admin action."""
+    test_client = TestClient(main_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-user", "user")
+    )
+    return test_client
 
 
 def _start_fake_tcp_server(

@@ -13,7 +13,7 @@ import requests
 from fastapi.testclient import TestClient
 from src.settings import Settings
 
-from app import template_health
+from app import auth, template_health
 from app.main import app
 
 ESXI_URL = "http://templates.test:8000"
@@ -120,11 +120,15 @@ def test_zero_templates_preserves_the_reason_and_guides_the_user(
             ]
         },
     }
+    test_client = TestClient(app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-admin", "admin")
+    )
     with (
         patch("requests.get", _fake_get(routes)),
         patch("app.gns3_vm_power.status", return_value=None),
     ):
-        response = TestClient(app).get("/templates/health")
+        response = test_client.get("/templates/health")
 
     assert response.status_code == 200
     result = response.json()

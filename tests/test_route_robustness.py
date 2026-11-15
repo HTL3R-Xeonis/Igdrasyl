@@ -20,7 +20,17 @@ from fastapi.testclient import TestClient
 from src.settings import Settings
 
 import app.main as main_module
-from app import esxi_session
+from app import auth, esxi_session
+
+
+def _authenticated_client(**kwargs) -> TestClient:
+    """A raw TestClient logged in as an admin - every route here now needs a session (app/auth_middleware.py)."""
+    client = TestClient(main_module.app, **kwargs)
+    client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-admin", "admin")
+    )
+    return client
+
 
 _SKIP = {
     "/openapi.json",
@@ -143,7 +153,7 @@ def robust_client(app_state, tmp_path, monkeypatch):
     )  # files the app writes relative to its folder stay in the test folder
     monkeypatch.setattr(socket.socket, "connect", _no_network)
     monkeypatch.setattr(socket, "create_connection", _no_network)
-    return TestClient(main_module.app, raise_server_exceptions=True)
+    return _authenticated_client(raise_server_exceptions=True)
 
 
 def test_no_route_answers_500_when_the_backends_are_unreachable(
@@ -208,7 +218,7 @@ def test_no_route_answers_500_when_gns3_answers_wrongly(
         app_state.gns3_vm_ip = "127.0.0.1"
         app_state.project_id = "11111111-1111-1111-1111-111111111111"
         app_state.esxi_connection = MagicMock()
-        client = TestClient(main_module.app, raise_server_exceptions=True)
+        client = _authenticated_client(raise_server_exceptions=True)
         failures = _crawl(client)
     finally:
         server.shutdown()
@@ -244,7 +254,7 @@ def test_the_design_canvas_survives_random_operations_with_odd_names(
     import zipfile
 
     monkeypatch.chdir(tmp_path)
-    client = TestClient(main_module.app, raise_server_exceptions=True)
+    client = _authenticated_client(raise_server_exceptions=True)
     images = client.get("/design/templates").json()
     flat = [
         (role, image)

@@ -103,9 +103,22 @@ async function openConnectionSettings(filename = null) {
         input.required = !field.optional;
         input.placeholder = field.optional ? "Automatic / not configured" : field.default;
         label.appendChild(input);
-        const help = document.createElement("small");
-        help.textContent = field.help || field.key;
-        label.appendChild(help);
+        if (field.help) {
+          const row = document.createElement("span");
+          row.className = "info-row";
+          const infoBtn = document.createElement("button");
+          infoBtn.type = "button";
+          infoBtn.className = "info-btn";
+          infoBtn.setAttribute("aria-label", "More information");
+          infoBtn.title = field.help;
+          infoBtn.textContent = "?";
+          const popover = document.createElement("span");
+          popover.className = "info-popover";
+          popover.hidden = true;
+          popover.textContent = field.help;
+          row.append(infoBtn, popover);
+          label.appendChild(row);
+        }
         section.appendChild(label);
       }
       connectionFields.appendChild(section);
@@ -134,9 +147,21 @@ function buildCredentialsSection() {
     input.name = SECRET_PREFIX + key;
     input.autocomplete = "new-password";
     input.spellcheck = false;
-    const note = document.createElement("small");
-    note.textContent = `${help} Stored on the server only, never shown again.`;
-    label.append(text, input, note);
+    const row = document.createElement("span");
+    row.className = "info-row";
+    const infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.className = "info-btn";
+    infoBtn.setAttribute("aria-label", "More information");
+    const fullHelp = `${help} Stored on the server only, never shown again.`;
+    infoBtn.title = fullHelp;
+    infoBtn.textContent = "?";
+    const popover = document.createElement("span");
+    popover.className = "info-popover";
+    popover.hidden = true;
+    popover.textContent = fullHelp;
+    row.append(infoBtn, popover);
+    label.append(text, input, row);
     section.appendChild(label);
   }
   return section;

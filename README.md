@@ -414,6 +414,37 @@ address is known for the selected host.
 open consoles disconnect. The active settings file is included even when it
 lives outside the uploaded profiles directory.
 
+## Accounts, roles and the admin panel
+
+Every page and API request requires a signed-in session; `app/auth_middleware.py`
+redirects HTML requests to `/login` and returns 401 JSON for everything else, with
+a short allow-list (`/login`, `/logout`, `/health`, static assets needed to render
+the login page). `/login` is a plain HTML form (no JS framework, no browser-native
+auth popup) with a "Stay logged in" checkbox - unchecked sessions last 12 hours,
+checked ones last 30 days. Passwords are hashed with salted PBKDF2-HMAC-SHA256
+(600,000 iterations); sessions are HMAC-signed cookies. Both use only the standard
+library - no new dependency. Accounts live in `users.json` (gitignored, path
+overridable via `TOPOLOGYOPERATOR_USERS_FILE`); the session-signing secret is
+generated once into `session_secret.key` next to it and persists across restarts.
+If `users.json` doesn't exist at startup, one `admin` account is created with a
+random password, logged once at `WARNING` level.
+
+Two roles share the same login flow: `admin` and `user`. Regular users keep full
+access to everything they always had, destructive actions included (Find Orphans,
+Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only:
+creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
+user account management, and which AI snippet exercise topics are enabled
+(`app/ai_snippets.py`'s stored override, unioned with the
+`TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS` env var). The menu bar shows the signed-in
+username and role (`GET /me`) and a **Log out** button; admins also get an
+**Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
+of the canvas SPA) for user CRUD and the AI-topic checkboxes.
+
+Long instructional text that used to sit permanently under a field (Config Push's
+command-format notes, the host-config dialog's per-field captions) now collapses
+behind a small "?" button instead - `app/static/info-popover.js`, one
+document-level delegated click listener shared by every such button.
+
 ## Working on the canvas
 
 Modelled on GNS3's own GUI. Everything below works in the offline design canvas;
@@ -681,6 +712,12 @@ same restart flow as host changes. Import and live edits require a selected proj
 
 ## Endpoints
 
+- `GET/POST /login`, `POST /logout`, `GET /me` - session login/logout and the
+  signed-in username/role; see Accounts above. Everything else requires a
+  session.
+- `GET/POST /admin/users`, `PUT /admin/users/{username}/role`, `DELETE
+  /admin/users/{username}` - admin-only user management.
+- `GET/PUT /admin/ai-snippet-topics` - admin-only AI snippet topic allow-list.
 - `GET /projects`, `POST /projects` (name plus optional topology_yaml),
   `GET /projects/{id}/download`: managed project library, with no deployment.
 - `POST /design/project/{id}/open`, `PUT /design/project/{id}`: open and save a

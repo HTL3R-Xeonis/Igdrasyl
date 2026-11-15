@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import HTTPException, UploadFile
+from fastapi import Depends, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
 from app import (
@@ -15,9 +15,12 @@ from app import (
     settings_profiles,
 )
 from app.application import app
+from app.auth import require_admin
 from app.routes.common import (
     settings_call,
 )
+
+AdminUser = Annotated[tuple[str, str], Depends(require_admin)]
 from app.routes.models import (
     ConnectionSettingsUpdate,
 )
@@ -33,7 +36,9 @@ def list_settings_profiles() -> list[dict[str, Any]]:
 
 
 @app.post("/settings-profiles")
-async def upload_settings_profile(file: UploadFile) -> dict[str, str]:
+async def upload_settings_profile(
+    file: UploadFile, _admin: AdminUser
+) -> dict[str, str]:
     """Saves an uploaded settings.yml under its own filename - doesn't activate it."""
     data = await file.read()
     try:
@@ -88,7 +93,7 @@ class CreateHostConfig(ConnectionSettingsUpdate):
 
 
 @app.post("/host-config/create")
-def create_host_config(body: CreateHostConfig):
+def create_host_config(body: CreateHostConfig, _admin: AdminUser):
     settings_call(profile_secrets.validate, body.secrets)
     try:
         created = settings_call(
@@ -120,7 +125,9 @@ def get_connection_settings(filename: str):
 
 
 @app.put("/settings-profiles/{filename}/connections")
-def save_connection_settings(filename: str, body: ConnectionSettingsUpdate):
+def save_connection_settings(
+    filename: str, body: ConnectionSettingsUpdate, _admin: AdminUser
+):
     settings_call(profile_secrets.validate, body.secrets)
     settings_call(connection_settings.update_fields, filename, body.fields)
     settings_call(profile_secrets.save, filename, body.secrets)
@@ -140,7 +147,7 @@ def test_connection_settings(filename: str, body: ConnectionSettingsUpdate):
 
 
 @app.delete("/settings-profiles/{filename}")
-def delete_settings_profile(filename: str) -> dict[str, str]:
+def delete_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str]:
     try:
         settings_profiles.delete_profile(filename)
         profile_secrets.delete(filename)
@@ -152,7 +159,7 @@ def delete_settings_profile(filename: str) -> dict[str, str]:
 
 
 @app.post("/settings-profiles/{filename}/activate")
-def activate_settings_profile(filename: str) -> dict[str, str]:
+def activate_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str]:
     """
     Restarts this same server process against the given profile - see
     settings_profiles.restart_into_profile's own docstring for why this

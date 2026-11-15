@@ -16,6 +16,9 @@ design_state.json
 settings_profiles/
 config_snippets/
 push_audit.jsonl
+users.json
+session_secret.key
+ai_snippet_topics.json
 handoff/
 
 # Proprietary Broadcom/VMware WMKS SDK files - not ours to redistribute,

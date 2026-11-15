@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
+from app import auth, main
 
 HTML = {"accept": "text/html,application/xhtml+xml"}
 
@@ -43,6 +43,9 @@ def test_unexpected_error_is_a_generic_page_without_details():
     try:
         # No "with": that would run the real lifespan (connects to ESXi).
         c = TestClient(main.app, raise_server_exceptions=False)
+        c.cookies.set(
+            auth.SESSION_COOKIE, auth.create_session_token("test-admin", "admin")
+        )
         page = c.get("/_boom_for_test", headers=HTML)
         api = c.get("/_boom_for_test")
     finally:

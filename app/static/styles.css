@@ -1729,6 +1729,23 @@ input:focus, select:focus, textarea:focus {
 #deployment-name-hint { color: var(--dim); font-size: 12px; margin: 0 0 8px; }
 #deployment-name-hint:empty { display: none; }
 
+/* A "?" button that reveals a popover with the full text right after it -
+   used for help text that would otherwise sit permanently on screen (see
+   app/static/info-popover.js for the click-toggle behavior). */
+.info-row { position: relative; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.info-btn {
+  width: 18px; height: 18px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--dim); font-size: 12px; line-height: 1; cursor: pointer;
+}
+.info-btn:hover { color: var(--text); border-color: var(--accent); }
+.info-popover {
+  position: absolute; top: 100%; left: 0; z-index: 5; margin-top: 4px;
+  width: min(420px, 90vw); padding: 10px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--text); font-size: 13px; line-height: 1.5; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 #push-project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 4px; }
 .push-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 #push-snippets select { min-width: 0; max-width: 100%; }

@@ -27,6 +27,7 @@ from app import (
     settings_profiles,
     startup_retry,
     template_health,
+    users,
 )
 from app.application import app
 from app.gns3_state import (
@@ -154,6 +155,17 @@ async def lifespan(app: FastAPI):
     if stored_secrets:
         # Names only - never the values.
         logger.info(f"Using stored credentials for: {', '.join(stored_secrets)}")
+
+    # First boot with no accounts yet at all - create one admin so there is
+    # ever a way in. See app/users.py's own docstring on why this is logged
+    # rather than written to a new secrets file.
+    bootstrap_password = users.ensure_bootstrap_admin()
+    if bootstrap_password:
+        logger.warning(
+            f"Created initial admin account - username 'admin', password: "
+            f"{bootstrap_password} - change it via the admin panel and this "
+            f"message will not repeat"
+        )
 
     # A real, persistent pyvmomi session, reused for the app's lifetime rather than opened per request (same reasoning
     # as TopologyBuilder's own CLI commands) - but opened on first use, so a host that is down or not set up yet does

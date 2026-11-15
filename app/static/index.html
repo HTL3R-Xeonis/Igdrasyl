@@ -6,7 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-47">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-48">
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
@@ -142,6 +142,11 @@
     <button id="staging-discard-btn" class="menu-btn">Discard</button>
     <button id="staging-apply-btn" class="menu-btn">Review &amp; Apply…</button>
   </span>
+  <span id="user-menu">
+    <span id="user-menu-name"></span>
+    <a id="user-menu-admin-link" href="/admin.html" class="menu-btn" hidden>Admin Panel</a>
+    <button id="user-menu-logout-btn" class="menu-btn">Log out</button>
+  </span>
   <div id="menubar-status"></div>
 </header>
 <div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button><button id="warning-resume-btn" hidden>Resume project</button><button id="warning-gns3vm-btn" hidden>Start GNS3 VM</button></div>
@@ -254,16 +259,20 @@
       <button class="toolbar-btn" id="push-history-tab" aria-pressed="false" type="button">History</button>
     </div>
     <div id="push-editor">
-      <p style="color: var(--dim); font-size: 13px; margin-top: 0;">
-        Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device).
-        To choose how a VM is reached, use an object instead of the list:
-        <code>{"commands": [...], "via": "serial"}</code> - <code>via</code> is
-        <code>auto</code> (default: guest operations while VMware Tools runs, else the
-        serial console), <code>guest_ops</code> or <code>serial</code>; for serial you can add
-        <code>profile</code> (<code>linux</code>, <code>routeros</code>, <code>bsd_menu</code>)
-        and <code>username</code>/<code>password</code> (default: the template catalog's login).
-        The serial console must be enabled on the VM first (click the VM, then
-        "Enable serial console").
+      <p class="info-row" style="color: var(--dim); font-size: 13px; margin-top: 0;">
+        Device name → list of raw commands, sent verbatim.
+        <button class="info-btn" type="button" aria-label="More information" title="Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device). To choose how a VM is reached, use an object instead of the list, with a via field.">?</button>
+        <span class="info-popover" hidden>
+          JSON; up to 10 000 per device.
+          To choose how a VM is reached, use an object instead of the list:
+          <code>{"commands": [...], "via": "serial"}</code> - <code>via</code> is
+          <code>auto</code> (default: guest operations while VMware Tools runs, else the
+          serial console), <code>guest_ops</code> or <code>serial</code>; for serial you can add
+          <code>profile</code> (<code>linux</code>, <code>routeros</code>, <code>bsd_menu</code>)
+          and <code>username</code>/<code>password</code> (default: the template catalog's login).
+          The serial console must be enabled on the VM first (click the VM, then
+          "Enable serial console").
+        </span>
       </p>
       <textarea id="push-input">{
   "R1": ["show version"]
@@ -520,19 +529,21 @@
   </div>
 </div>
 
-<script src="/core.js?v=ginnungagap-47"></script>
-<script src="/canvas-state.js?v=ginnungagap-47"></script>
-<script src="/label-placement.js?v=ginnungagap-47"></script>
-<script src="/drawings.js?v=ginnungagap-47"></script>
-<script src="/canvas-render.js?v=ginnungagap-47"></script>
-<script src="/edit-actions.js?v=ginnungagap-47"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-47"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-47"></script>
-<script src="/import-and-generate.js?v=ginnungagap-47"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-47"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-47"></script>
-<script src="/projects.js?v=ginnungagap-47"></script>
-<script src="/staging.js?v=ginnungagap-47"></script>
-<script src="/snapshots.js?v=ginnungagap-47"></script>
+<script src="/core.js?v=ginnungagap-48"></script>
+<script src="/canvas-state.js?v=ginnungagap-48"></script>
+<script src="/label-placement.js?v=ginnungagap-48"></script>
+<script src="/drawings.js?v=ginnungagap-48"></script>
+<script src="/canvas-render.js?v=ginnungagap-48"></script>
+<script src="/edit-actions.js?v=ginnungagap-48"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-48"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-48"></script>
+<script src="/import-and-generate.js?v=ginnungagap-48"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-48"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-48"></script>
+<script src="/projects.js?v=ginnungagap-48"></script>
+<script src="/staging.js?v=ginnungagap-48"></script>
+<script src="/snapshots.js?v=ginnungagap-48"></script>
+<script src="/info-popover.js?v=ginnungagap-48"></script>
+<script src="/user-menu.js?v=ginnungagap-48"></script>
 </body>
 </html>

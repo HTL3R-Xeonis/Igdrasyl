@@ -34,12 +34,15 @@ from app import (
     vm_screen,
 )
 from app.application import app
+from app.auth_middleware import AuthMiddleware
 from app.request_logging import RequestLoggingMiddleware
 
 # Importing a route module registers its routes. Starlette tries routes in registration order, so this
 # order is the matching order; the frontend mount below must stay last.
 for _module in (
     "system",
+    "auth",
+    "admin",
     "live",
     "staging",
     "push",
@@ -54,6 +57,11 @@ _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _LICENSE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "LICENSE")
 
 
+# Middleware added later wraps the ones added earlier (Starlette builds the
+# stack outermost-last), so AuthMiddleware (added first here) runs INSIDE
+# RequestLoggingMiddleware - a request blocked by AuthMiddleware still gets
+# logged, same as everything else.
+app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(console.router)
 app.include_router(serial_console.router)
