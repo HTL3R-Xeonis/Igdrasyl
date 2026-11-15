@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from app import ai_snippets, users
+from app import ai_snippets, log_summary, users
 from app.application import app
 from app.auth import require_admin
 
@@ -99,3 +99,13 @@ def set_ai_snippet_topics(
     body: AiSnippetTopicsRequest, _admin: AdminUser
 ) -> dict[str, Any]:
     return {"enabled": ai_snippets.set_stored_topics(body.topics)}
+
+
+@app.post("/admin/logs/summarize")
+def summarize_logs(_admin: AdminUser) -> dict[str, str]:
+    try:
+        return {"summary": log_summary.summarize(log_summary.recent_log_text())}
+    except TimeoutError as exc:
+        raise HTTPException(504, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc

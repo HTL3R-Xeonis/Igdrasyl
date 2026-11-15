@@ -455,7 +455,18 @@ user account management, and which AI snippet exercise topics are enabled
 `TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS` env var). The menu bar shows the signed-in
 username and role (`GET /me`) and a **Log out** button; admins also get an
 **Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
-of the canvas SPA) for user CRUD and the AI-topic checkboxes.
+of the canvas SPA) for user CRUD, the AI-topic checkboxes, and logs (below).
+
+The admin panel's **Logs** section has an **Export logs** link (just the
+existing `GET /logs/download`, open to every signed-in user like the Logs
+page's own Download button - not admin-only, so this is a shortcut, not a
+restriction) and a **Summarize with AI** button (`POST
+/admin/logs/summarize`, admin-only): sends the most recent 2,000 log lines,
+path-redacted (`app/public_text.redact_log_text`, same redaction already
+used for `/logs/entries`/`/logs/download`), to the configured Topology
+Generator's `POST /api/summarize-text` (mirrors `/api/suggest-fix`'s shape -
+one best-effort attempt, no internal retry) and shows the plain-text summary
+below the button.
 
 Long instructional text that used to sit permanently under a field (Config Push's
 command-format notes, the host-config dialog's per-field captions) now collapses
@@ -735,6 +746,9 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET/POST /admin/users`, `PUT /admin/users/{username}/role`, `DELETE
   /admin/users/{username}` - admin-only user management.
 - `GET/PUT /admin/ai-snippet-topics` - admin-only AI snippet topic allow-list.
+- `POST /admin/logs/summarize` - admin-only AI summary of the last 2,000 log
+  lines (see Accounts above); `GET /logs/download` remains open to every
+  signed-in user, unchanged.
 - `GET /projects`, `POST /projects` (name plus optional topology_yaml),
   `GET /projects/{id}/download`: managed project library, with no deployment.
 - `POST /design/project/{id}/open`, `PUT /design/project/{id}`: open and save a

@@ -2,6 +2,43 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+from app import log_summary
+
+
+def test_regular_user_cannot_summarize_logs(user_client):
+    assert user_client.post("/admin/logs/summarize").status_code == 403
+
+
+def test_admin_can_summarize_logs(client, monkeypatch):
+    monkeypatch.setattr(log_summary, "recent_log_text", lambda: "log text")
+    monkeypatch.setattr(log_summary, "summarize", Mock(return_value="short summary"))
+    resp = client.post("/admin/logs/summarize")
+    assert resp.status_code == 200
+    assert resp.json() == {"summary": "short summary"}
+    log_summary.summarize.assert_called_once_with("log text")
+
+
+def test_summarize_logs_maps_timeout_to_504(client, monkeypatch):
+    monkeypatch.setattr(log_summary, "recent_log_text", lambda: "log text")
+
+    def _raise(_text):
+        raise TimeoutError("took too long")
+
+    monkeypatch.setattr(log_summary, "summarize", _raise)
+    assert client.post("/admin/logs/summarize").status_code == 504
+
+
+def test_summarize_logs_maps_a_generator_failure_to_502(client, monkeypatch):
+    monkeypatch.setattr(log_summary, "recent_log_text", lambda: "log text")
+
+    def _raise(_text):
+        raise RuntimeError("generator unreachable")
+
+    monkeypatch.setattr(log_summary, "summarize", _raise)
+    assert client.post("/admin/logs/summarize").status_code == 502
+
 
 def test_regular_user_cannot_list_or_create_users(user_client):
     assert user_client.get("/admin/users").status_code == 403

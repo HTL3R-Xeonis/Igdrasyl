@@ -114,6 +114,24 @@ document.getElementById("ap-topics-save").addEventListener("click", async () => 
   }
 });
 
+const summarizeBtn = document.getElementById("ap-logs-summarize");
+summarizeBtn.addEventListener("click", async () => {
+  const summaryEl = document.getElementById("ap-logs-summary");
+  summarizeBtn.disabled = true;
+  summaryEl.hidden = true;
+  setStatus("ap-logs-status", "Summarizing the last 2,000 log lines with AI - this can take a while…");
+  try {
+    const { summary } = await request("/admin/logs/summarize", { method: "POST" });
+    summaryEl.textContent = summary;
+    summaryEl.hidden = false;
+    setStatus("ap-logs-status", "");
+  } catch (error) {
+    setStatus("ap-logs-status", error.message, true);
+  } finally {
+    summarizeBtn.disabled = false;
+  }
+});
+
 (async () => {
   try {
     const me = await request("/me");

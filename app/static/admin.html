@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Admin</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-49">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-50">
 <style>
   /* styles.css lays <body> out for the single-page app (full height, no scrolling) - this page is its own document. */
   body { display: block; height: auto; min-height: 100vh; overflow: auto; }
@@ -23,6 +23,12 @@
   .ap-status { color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 1em; }
   .ap-status.ap-error { color: var(--bad); }
   #ap-denied { display: none; color: var(--bad); margin-top: 40px; text-align: center; }
+  #ap-logs-section .toolbar-btn { margin-right: 8px; }
+  #ap-logs-summary {
+    white-space: pre-wrap; margin-top: 12px; padding: 12px; border-radius: 5px;
+    background: var(--panel-2); border: 1px solid var(--border); font-family: inherit;
+    font-size: 13px; line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -59,8 +65,16 @@
       <button class="toolbar-btn primary" id="ap-topics-save" type="button">Save</button>
       <p class="ap-status" id="ap-topics-status"></p>
     </section>
+
+    <section id="ap-logs-section">
+      <h2>Logs</h2>
+      <a class="toolbar-btn" id="ap-logs-export" href="/logs/download" download="topologyoperator.log">Export logs</a>
+      <button class="toolbar-btn primary" id="ap-logs-summarize" type="button">Summarize with AI</button>
+      <p class="ap-status" id="ap-logs-status"></p>
+      <pre id="ap-logs-summary" hidden></pre>
+    </section>
   </div>
 </div>
-<script src="/admin.js?v=ginnungagap-49"></script>
+<script src="/admin.js?v=ginnungagap-50"></script>
 </body>
 </html>
