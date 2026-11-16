@@ -560,7 +560,9 @@ Set `TOPOLOGYOPERATOR_AI_CONFIG_FILE` to an absolute writable path for a service
 Both services need the same random `XEONIS_AI_SNIPPETS_TOKEN` (at least 32 printable ASCII
 characters without spaces). Set `TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL` in the Operator service
 environment to pin the destination for the token, independent of host profiles. Use an internal
-network or HTTPS. Update the Generator before enabling the switch.
+network or HTTPS. Update the Generator before enabling the switch. When the Operator's
+variables are stored in its own `.env` file, start Uvicorn in the installation directory
+with `--env-file .env`, or load the file from the service manager.
 
 Set `XEONIS_CLASSROOM_MODE=1` in **both services** for a classroom installation to turn off the general
 AI Health Check suggestions. The AI configuration switch applies to the whole Operator instance.
