@@ -38,6 +38,11 @@ risk is editing one file's paths later and forgetting the other.
    sudo useradd --system --create-home --shell /usr/sbin/nologin xeonis
    sudo loginctl enable-linger xeonis
    ```
+   (On Debian 13 `loginctl enable-linger` fails with "Read-only file
+   system" because `systemd-logind` may not write `/var/lib/systemd/linger`;
+   create the file directly instead:
+   `sudo mkdir -p /var/lib/systemd/linger && sudo touch /var/lib/systemd/linger/xeonis`,
+   then `sudo systemctl restart systemd-logind` or reboot.)
    `enable-linger` is required - without it, `--user` units stop the
    moment nobody is logged in as `xeonis`, which on a headless box is
    always.
