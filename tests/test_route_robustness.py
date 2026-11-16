@@ -38,7 +38,6 @@ _SKIP = {
     "/docs/oauth2-redirect",
     "/redoc",
     "/links/{node1}/{node2}/capture/stream",  # an endless stream by design
-    "/settings-profiles/{filename}/activate",  # switches the process-wide host
 }
 _PATH_VALUES = ["R1", "nope", "..%2Fx"]
 _VALID_BODIES: dict = {}

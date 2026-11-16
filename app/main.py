@@ -7,6 +7,17 @@ routes, every route module and the frontend, and nothing else.
 Everything else (GNS3 console proxy, config push, embedded VM screens)
 plugs into the connections/graph this module resolves once at startup.
 
+Phase 3 (app/gateway_main.py, see TopologyBuilder/handoff/plans/
+PLAN_login_multiserver.md): the plan is for this module to eventually
+become a *backend* reachable only through the gateway's proxy, with no
+login of its own. **That cutover has NOT happened and must not happen
+silently** - this is still the one process real installs run directly
+(login included), exactly as before Phase 3's own code was written. The
+new gateway/proxy/routes_gateway modules exist alongside this file,
+ready for the deliberate migration step described in the plan, but this
+module keeps registering "auth" and AuthMiddleware itself until that
+migration actually happens.
+
 Run with: uvicorn app.main:app --reload
 Point TOPOLOGYOPERATOR_SETTINGS at a settings.yml first (see
 settings.example.yml) - without one, TopologyBuilder's own hardcoded
@@ -36,12 +47,15 @@ from app import (
 from app.application import app
 from app.auth_middleware import AuthMiddleware
 from app.request_logging import RequestLoggingMiddleware
+from app.routes import auth as _auth_routes
 
 # Importing a route module registers its routes. Starlette tries routes in registration order, so this
-# order is the matching order; the frontend mount below must stay last.
+# order is the matching order; the frontend mount below must stay last. "auth" registers itself via
+# register() (see its own docstring - this lets the same code also mount onto app/gateway_main.py's
+# app once Phase 3's migration actually happens), everything else still registers on import.
+_auth_routes.register(app)
 for _module in (
     "system",
-    "auth",
     "admin",
     "live",
     "staging",

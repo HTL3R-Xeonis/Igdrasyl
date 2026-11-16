@@ -22,6 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 from src.settings import Settings
 
+import app.gateway_main as gateway_module
 import app.main as main_module
 from app import auth, design
 from app.topology import load_graph, resolve_project_name
@@ -170,6 +171,38 @@ def user_client(app_state):
         auth.SESSION_COOKIE, auth.create_session_token("test-user", "user")
     )
     return test_client
+
+
+@pytest.fixture
+def gateway_client():
+    """
+    Phase 3's gateway (app/gateway_main.py), admin-authenticated - the
+    counterpart to `client` above for everything that moved there (see
+    app/routes_gateway.py). Never entered as a context manager, for the
+    same reason `client` isn't: that would run the real lifespan
+    (users.ensure_bootstrap_admin(), real logging setup).
+    """
+    test_client = TestClient(gateway_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-admin", "admin")
+    )
+    return test_client
+
+
+@pytest.fixture
+def gateway_user_client():
+    """Same as `gateway_client`, but logged in as a non-admin."""
+    test_client = TestClient(gateway_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-user", "user")
+    )
+    return test_client
+
+
+@pytest.fixture
+def gateway_anonymous_client():
+    """Same gateway app, no session cookie at all - for the "not logged in" paths (AuthMiddleware's redirect)."""
+    return TestClient(gateway_module.app)
 
 
 def _start_fake_tcp_server(

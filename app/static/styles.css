@@ -1814,6 +1814,67 @@ input:focus, select:focus, textarea:focus {
 /* Node notes: the dialog and the sticky-note mark on a node with a note. */
 #note-dialog { width: min(560px, 92vw); padding: 16px 18px; color: var(--text); }
 #note-dialog h3 { margin: 0 0 12px; }
+/* Stage Live Edits: without this the dialog simply grows to fit however many nodes/links are
+   staged, with no scroll of its own - past a handful of nodes the Links section and every action
+   button (Review & Apply, Discard, Close) end up below the viewport and unreachable. The two
+   lists get their own bounded, independently scrolling area instead, so the dialog's own height
+   stays constant and the buttons stay on screen regardless of how much is staged. */
+#staging-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(640px, 92vw);
+  max-height: 85vh;
+  padding: 20px;
+  overflow: hidden;
+}
+/* Scoped to [open], not just #staging-dialog: an ID selector beats the UA stylesheet's own
+   dialog:not([open]) { display: none }, so an unscoped `display: flex` here would make a
+   *closed* dialog visible - see #connection-dialog[open] just below for the same reasoning. */
+#staging-dialog[open] { display: flex; flex-direction: column; }
+#staging-dialog h4 { margin: 14px 0 6px; flex-shrink: 0; }
+#staging-nodes-list, #staging-links-list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0 0 10px;
+  padding-left: 20px;
+  flex-shrink: 0;
+}
+#staging-nodes-list li, #staging-links-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0;
+  padding-right: 4px;
+}
+#staging-add-node-form, #staging-add-link-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+#staging-add-node-form input, #staging-add-link-form input {
+  flex: 1 1 100px;
+  min-width: 90px;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 9px;
+}
+#staging-dialog-status { flex-shrink: 0; }
+#staging-dialog #staging-dialog-discard,
+#staging-dialog #staging-dialog-review,
+#staging-dialog #staging-dialog-close {
+  flex-shrink: 0;
+  margin-top: 4px;
+  margin-right: 8px;
+}
+
 #health-check-dialog {
   background: var(--panel);
   color: var(--text);

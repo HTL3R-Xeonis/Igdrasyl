@@ -2,8 +2,15 @@
 Login/logout for the signed-cookie sessions in app/auth.py, and GET /me.
 The login page is a plain HTML form, rendered server-side (no JS, no
 fetch()) - "no browser popups" is trivially true, and it works even if the
-main app's own JS has a problem. See app/auth_middleware.py for how every
-other route is gated behind having a valid session.
+main app's own JS has a problem.
+
+Phase 3 (app/gateway_main.py): these routes are registered on whichever
+FastAPI app calls `register()` below, rather than decorating a fixed
+`app` at import time like every other route module - they live on the
+gateway exclusively there (see app/main.py's own comment on why it no
+longer imports this module, and app/auth_middleware.py for how every
+other route on a *single-process* deployment is still gated behind
+having a valid session).
 """
 
 from __future__ import annotations
@@ -13,11 +20,10 @@ import threading
 import time
 from typing import Annotated
 
-from fastapi import Depends, Form, Query
+from fastapi import Depends, FastAPI, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app import users
-from app.application import app
 from app.auth import SESSION_COOKIE, create_session_token, current_user
 
 _failed_attempts: dict[str, tuple[int, float]] = {}
@@ -152,45 +158,45 @@ def _login_page(error: bool) -> str:
 </html>"""
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(error: Annotated[bool, Query()] = False) -> str:
-    return _login_page(error)
+def register(app: FastAPI) -> None:
+    """Registers /login (GET+POST), /logout and /me onto the given app."""
 
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(error: Annotated[bool, Query()] = False) -> str:
+        return _login_page(error)
 
-@app.post("/login")
-async def login_submit(
-    username: Annotated[str, Form()],
-    password: Annotated[str, Form()],
-    remember: Annotated[str, Form()] = "",
-) -> Response:
-    delay = _pending_delay(username)
-    if delay:
-        await asyncio.sleep(delay)
-    role = users.authenticate(username, password)
-    if role is None:
-        _record_failure(username)
-        return RedirectResponse("/login?error=1", status_code=303)
-    _record_success(username)
-    token = create_session_token(username, role, remember=bool(remember))
-    response = RedirectResponse("/", status_code=303)
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        httponly=True,
-        samesite="lax",
-        max_age=30 * 24 * 60 * 60 if remember else None,
-    )
-    return response
+    @app.post("/login")
+    async def login_submit(
+        username: Annotated[str, Form()],
+        password: Annotated[str, Form()],
+        remember: Annotated[str, Form()] = "",
+    ) -> Response:
+        delay = _pending_delay(username)
+        if delay:
+            await asyncio.sleep(delay)
+        role = users.authenticate(username, password)
+        if role is None:
+            _record_failure(username)
+            return RedirectResponse("/login?error=1", status_code=303)
+        _record_success(username)
+        token = create_session_token(username, role, remember=bool(remember))
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            samesite="lax",
+            max_age=30 * 24 * 60 * 60 if remember else None,
+        )
+        return response
 
+    @app.post("/logout")
+    def logout() -> Response:
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE)
+        return response
 
-@app.post("/logout")
-def logout() -> Response:
-    response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie(SESSION_COOKIE)
-    return response
-
-
-@app.get("/me")
-def me(user: Annotated[tuple[str, str], Depends(current_user)]) -> dict[str, str]:
-    username, role = user
-    return {"username": username, "role": role}
+    @app.get("/me")
+    def me(user: Annotated[tuple[str, str], Depends(current_user)]) -> dict[str, str]:
+        username, role = user
+        return {"username": username, "role": role}

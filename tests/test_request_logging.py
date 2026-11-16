@@ -140,3 +140,37 @@ def test_a_websocket_session_is_logged_on_accept_and_end(client, records):
         "WS /ws/console/R1 ended after" in m and "closed with code 1013" in m
         for m in messages
     )
+
+
+def test_x_forwarded_for_replaces_the_loopback_address_a_proxy_would_otherwise_show(
+    client, records
+):
+    # Phase 3: a backend behind app/gateway_main.py's proxy would otherwise only ever see the
+    # gateway's own loopback address as scope["client"] - this header is how it learns the real one.
+    client.get("/nodes", headers={"X-Forwarded-For": "203.0.113.7"})
+
+    [(_, message)] = [r for r in records if "HTTP GET /nodes" in r[1]]
+    assert "(client 203.0.113.7)" in message
+
+
+def test_the_session_cookie_is_shown_as_the_user_when_present(client, records):
+    from app.auth import SESSION_COOKIE, create_session_token
+
+    token = create_session_token("alice", "admin")
+    client.cookies.set(SESSION_COOKIE, token)
+    client.get("/nodes")
+
+    [(_, message)] = [r for r in records if "HTTP GET /nodes" in r[1]]
+    assert ", user alice)" in message
+
+
+def test_a_tampered_session_cookie_is_ignored_rather_than_shown_as_a_user(
+    client, records
+):
+    from app.auth import SESSION_COOKIE
+
+    client.cookies.set(SESSION_COOKIE, "not-a-real-token")
+    client.get("/nodes")
+
+    [(_, message)] = [r for r in records if "HTTP GET /nodes" in r[1]]
+    assert "user" not in message

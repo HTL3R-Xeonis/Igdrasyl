@@ -21,6 +21,8 @@ import time
 
 from loguru import logger
 
+from app.auth import SESSION_COOKIE, verify_session_token
+
 _SKIPPED_PREFIXES = ("/logs",)
 _STATIC_SUFFIXES = (
     ".js",
@@ -50,9 +52,46 @@ def _http_level(method: str, path: str, status: int | None) -> str | None:
     return "DEBUG" if method in _READ_METHODS else "INFO"
 
 
+def _header(scope, name: bytes) -> str | None:
+    for key, value in scope.get("headers", ()):
+        if key == name:
+            return value.decode("latin-1")
+    return None
+
+
 def _client(scope) -> str:
+    # Phase 3 (app/gateway_main.py's proxy): every request a backend sees otherwise comes from the
+    # gateway's own loopback address, which would lose per-user audit fidelity in exactly the logs
+    # the admin panel summarizes - the gateway sets this header, trusted since a backend is only
+    # ever reachable through it. app/proxy.py sets the same header when forwarding.
+    forwarded = _header(scope, b"x-forwarded-for")
+    if forwarded:
+        return forwarded
     client = scope.get("client")
     return client[0] if client else "-"
+
+
+def _trusted_user(scope) -> str | None:
+    # Phase 3 (app/gateway_main.py's proxy): a backend is only ever reachable through the gateway,
+    # and the gateway forwards the original session cookie unchanged (it isn't hop-by-hop), so the
+    # same cookie this process would otherwise use for its own login check also tells it who's
+    # asking - cheaper and simpler than a separate trust header, and it works unchanged in Phase
+    # 1/2's single-process deployment too (there the cookie was always local to begin with).
+    raw = _header(scope, b"cookie")
+    if not raw:
+        return None
+    for part in raw.split(";"):
+        part = part.strip()
+        if part.startswith(f"{SESSION_COOKIE}="):
+            user = verify_session_token(part[len(SESSION_COOKIE) + 1 :])
+            return user[0] if user else None
+    return None
+
+
+def _who(scope) -> str:
+    user = _trusted_user(scope)
+    client = _client(scope)
+    return f"{client}, user {user}" if user else client
 
 
 class RequestLoggingMiddleware:
@@ -85,7 +124,7 @@ class RequestLoggingMiddleware:
             if not path.startswith(_SKIPPED_PREFIXES):
                 logger.opt(exception=exc).error(
                     f"HTTP {method} {path} raised {type(exc).__name__}: {exc} "
-                    f"after {time.monotonic() - started:.3f}s (client {_client(scope)})"
+                    f"after {time.monotonic() - started:.3f}s (client {_who(scope)})"
                 )
             raise
 
@@ -94,13 +133,13 @@ class RequestLoggingMiddleware:
             logger.log(
                 level,
                 f"HTTP {method} {path} -> {status} in "
-                f"{time.monotonic() - started:.3f}s (client {_client(scope)})",
+                f"{time.monotonic() - started:.3f}s (client {_who(scope)})",
             )
 
     async def _websocket(self, scope, receive, send) -> None:
         path = scope["path"]
         started = time.monotonic()
-        client = _client(scope)
+        client = _who(scope)
         close_code: int | None = None
 
         async def send_wrapper(message) -> None:
