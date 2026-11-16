@@ -32,15 +32,17 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 - **Layout of the backend**: `app/main.py` only wires things together (middleware, error handlers, the WebSocket routes, the
   frontend mount). The FastAPI instance is in `app/application.py`, the startup (topology and GNS3 project resolution, retry
   loop, lifespan, banner state) in `app/startup.py`, and the HTTP endpoints in `app/routes/`, one module per area: `system`
-  (health, reload, logs, template status), `live` (topology, nodes, layout, labels, notes, links, capture, serial, start/stop),
-  `push` (config push), `design` (the offline design canvas and canvas annotations), `projects` (bundles, project library,
+  (health, reload, logs, template status), `auth` (login/logout/`GET /me`), `admin` (admin-only user accounts, AI
+  configuration policy, log summaries, audit log), `live` (topology, nodes, layout, labels, notes, links, capture, serial, start/stop),
+  `staging` (review/apply staged live edits), `push` (config push), `design` (the offline design canvas and canvas annotations), `projects` (bundles, project library,
   hold/resume, saved configs, deploy), `maintenance` (health check, connectivity test, orphans, GNS3 VM deploy) and
   `host_settings` (settings profiles, host configuration, connections, OVA templates). `app/main.py` imports the route
   modules in a fixed order, because Starlette tries routes in registration order.
 - **Layout of the frontend**: no bundler. The scripts are plain classic scripts that `index.html` loads in a fixed order and
   that share one global scope: `core.js`, `canvas-state.js`, `label-placement.js`, `drawings.js`, `canvas-render.js`,
   `edit-actions.js`, `link-actions-and-capture.js`, `palette-and-screenshot.js`, `import-and-generate.js`,
-  `connection-settings-and-maintenance.js`, `consoles-and-push.js`, then `projects.js` (each starts with a comment saying what
+  `connection-settings-and-maintenance.js`, `consoles-and-push.js`, `projects.js`, `staging.js`, `snapshots.js`,
+  `info-popover.js`, then `user-menu.js` (each starts with a comment saying what
   it holds). Because of the shared scope the order matters only for code that runs while a file loads; a function defined in a
   later file can be used by a callback at any time. Tests that look at the frontend read all of them in load order
   (`tests/frontend_js.py`).
@@ -80,8 +82,11 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   and a running serial config push (or another console) blocks the connect - the tab then says so. It needs the VM to
   be powered on; if the screen stays empty, press Enter. (An earlier interactive serial console was removed on
   2026-09-22; this one reuses the port setup the config push brought back.)
-- VM screens: a direct VNC server enabled on the VM itself
-  (`RemoteDisplay.vnc.*`), bridged the same way (`app/vm_screen.py`),
+- VM screens: vSphere's own built-in WebMKS console-ticket API (not a
+  VM-side `RemoteDisplay.vnc.*` setting - that approach was tried and
+  hit a dead end on this project's infrastructure, see
+  `app/vm_screen.py`'s own docstring), whose transport already carries
+  raw RFB/VNC protocol bytes, bridged the same way (`app/vm_screen.py`),
   rendered in the browser with open-source `noVNC`.
 - Config push: a second YAML file (raw CLI commands per device, not a
   structured schema - a uniform "send this verbatim" transport works
@@ -260,8 +265,8 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   `POST /reload`), and only the live topology view is unavailable; the
   landing page, design mode, and the Logs panel all keep working
   regardless, since none of them touch `app.state.graph`. The app also
-  **retries by itself** in the background (every 15 s at first, then every
-  minute, never while another change to the lab runs or a project is on hold)
+  **retries by itself** in the background (15s, 15s, 30s, 30s, then every
+  60s, never while another change to the lab runs or a project is on hold)
   until the warning is gone - after a host reboot nobody has to press Retry or
   restart the process once the GNS3 VM has finished booting. It never replaces
   the GNS3 VM on its own (that stays with the startup check and the File menu).
@@ -378,7 +383,7 @@ has something to click into immediately.
 
 Choose **Create/Design a Host** on the home screen to build a host
 profile. The whole form is one scrollable page: General, ESXi host, Networking, GNS3, API services and
-Credentials cover 22 host/runtime settings plus both passwords, with
+Credentials cover 21 host/runtime settings plus both passwords, with
 TopologyBuilder defaults filled in and automatic options left blank.
 The generated YAML at the bottom updates while you type. **Download YAML**
 saves a local copy; **Create host** adds a named profile without activating it
@@ -451,10 +456,13 @@ the admin panel; logged once at `WARNING` level as a reminder.
 
 Three roles share the same login flow: `admin`, `user` and `readonly`. Regular
 users keep full access to everything they always had, destructive actions
-included (Find Orphans, Deploy Fresh GNS3 VM, etc. are not role-gated). Only
-three things are admin-only: creating/deleting/activating a settings profile
-(`app/routes/host_settings.py`), user account management, and enabling AI
-configuration in Config Push. The right panel's status bar (above the node
+included (Find Orphans, Deploy Fresh GNS3 VM, etc. are not role-gated).
+Admin-only: creating/deleting/activating a settings profile and editing its
+connection settings (`app/routes/host_settings.py`), user account
+management, and enabling AI configuration in Config Push - plus, on the
+Phase 3 gateway only, explicitly restarting a backend (`POST
+/settings-profiles/{filename}/restart`, separate from activate, which any
+logged-in user may do there). The right panel's status bar (above the node
 list, next to the "Connected: N nodes" text) shows the signed-in username
 (`GET /me`). The host overview also has a **Log out** button. Hover over the
 canvas username or activate it with the keyboard or a tap to open **Log
@@ -570,7 +578,7 @@ and then runs the same job as File > Deploy to Host. `GET /health` reports it as
 **Start GNS3 VM**. It powers the VM on, then asks the server every few seconds (`POST /reload`) until VMware Tools report
 an address (up to 5 minutes) and reloads the canvas. A VM that is on but reports no address gets **Restart GNS3 VM**
 instead (a hard reset, behind a confirmation). `GET /health` reports the state as `gns3_vm` (`name`, `power_state`,
-`action`: `start`, `restart` or null; only asked while something is wrong, and never waits for an ESXi connect),
+`action`: `start`, `restart`, `deploy` (VM missing entirely) or null; only asked while something is wrong, and never waits for an ESXi connect),
 `POST /gns3-vm/start` does the action. A GNS3 VM that does not exist on the host at all (and a template for a new one is
 selected) gets **Deploy GNS3 VM...** instead, which runs the File menu's deploy flow. The same buttons sit in the
 template-service banner at the top of every screen (`/templates/health` carries `gns3_vm` while that service has a
@@ -636,7 +644,7 @@ every 15 s for up to **15 minutes** - for pushes started by hand too (`"wait_sec
 the job's status lists the devices it is waiting for (`waiting_for`; the tab shows "Waiting for: ..." under the progress). A Windows VM that went to sleep is woken with a key
 press, a VM that ESXi suspended is resumed, and a device that raises something unforeseen ends only its own entry - the others
 still run. When it still cannot get in it says why instead of dumping a fault: no VMware Tools / stuck before the OS starts
-(look at the VM's screen), or a GNS3 VM whose CPU is at 100 % (too few vCPUs - its router/switch images never finish booting).
+(look at the VM's screen), or a GNS3 VM whose CPU is at 95 % or higher (too few vCPUs - its router/switch images never finish booting).
 
 **How a device is reached**
 - GNS3 consoles (routers, VPCS): Telnet through Netmiko. No login is attempted - a console that asks for one fails.
@@ -814,7 +822,12 @@ same restart flow as host changes. Import and live edits require a selected proj
   lines (see Accounts above); `GET /logs/download` remains open to every
   signed-in user, unchanged.
 - `GET /projects`, `POST /projects` (name plus optional topology_yaml),
-  `GET /projects/{id}/download`: managed project library, with no deployment.
+  `DELETE /projects/{id}`, `GET /projects/{id}/download`: managed project
+  library, with no deployment.
+- `POST /project/hold` (parks the active host's live project), `POST
+  /projects/{id}/resume`; `GET/PUT /projects/{id}/configs` and `GET/PUT
+  /project/configs`: per-device saved commands, for a library project and
+  the active host's live one respectively.
 - `POST /design/project/{id}/open`, `PUT /design/project/{id}`: open and save a
   library project in the offline design canvas.
 - `GET /projects/{id}/deploy-preview/{host}`, `POST /projects/{id}/deploy/{host}`:
@@ -825,6 +838,10 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET/PUT /settings-profiles/{filename}/connections`, `POST /host-config/create`:
   host settings; the optional `secrets` body field (`esxi_password`,
   `gns3_password`) is write-only - GET returns `passwords_set` (booleans) only.
+- `GET /host-config/schema` (the form's field groups), `POST /host-config/preview`
+  (renders the YAML without saving), `POST /host-config/test` and `POST
+  /settings-profiles/{filename}/connections/test` (the same connection checks,
+  for a not-yet-created host and an existing one respectively).
 - Browsers navigating to an unknown address, a wrong method or a failing page get
   a readable 404/405/5xx page (`app/error_pages.py`); requests that don't ask for
   HTML (fetch, curl) keep getting the JSON `{"detail": ...}` body. There is no
@@ -833,6 +850,11 @@ same restart flow as host changes. Import and live edits require a selected proj
   `POST /design/layout/batch` (group move), `POST /design/delete` (selection),
   `POST /design/paste`; live: `POST /layout/batch`, `PUT /links/{a}/{b}/options`
   (delay/jitter/loss/corruption/suspend; `GET /links` reports them back).
+- `GET /design/templates`, `GET/POST /design/labels`, `GET /design/notes`,
+  `PUT /design/notes/{name}`, `GET /design/nodes/{name}/credentials` - design
+  mode's own copies of the equivalent live endpoints below.
+- `GET /nodes/{name}/ports`, `GET/POST /labels`, `GET /notes`, `PUT
+  /notes/{name}`, `GET /nodes/{name}/credentials`.
 - `POST /design/project` `{name}`: saves the current design as a new library project (the deploy
   dialog names and saves it itself, then deploys it).
 - `GET /design/project/{id}/snapshots`, `POST .../snapshots` `{name}`, `POST
@@ -851,6 +873,9 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET /templates`, `POST /nodes`, `DELETE /nodes/{name}`, `POST
   /links`, `DELETE /links/{node1}/{node2}[?if1=..&if2=..]` - live add/remove.
 - `POST /nodes/{name}/start`, `.../stop`, `.../reload` - node lifecycle.
+- `GET /nodes/{name}/serial`, `POST /nodes/{name}/serial/enable` - the ESXi
+  VM serial port setup "Serial console agent" above needs; `WS
+  /ws/serial/{name}` is the terminal connection itself, once enabled.
 - `GET/POST /live/stage` (open/check a staging session), `POST /live/stage/discard`,
   `GET /live/stage/topology`, `POST /live/stage/nodes`, `DELETE /live/stage/nodes/{name}`,
   `POST /live/stage/links`, `DELETE /live/stage/links/{node1}/{node2}`, `GET /live/stage/diff`,
@@ -867,10 +892,17 @@ same restart flow as host changes. Import and live edits require a selected proj
   their commands and checks (e.g. a ping to the internet) need a network that carries traffic. Results keep the order asked for.
 - `GET /logs?lines=N` (the in-project panel), `GET /logs/entries?lines=N&level=L&search=S` (entries with
   tracebacks kept together, plus how full the log is), `GET /logs/download` (the whole retained log as text),
-  `GET /templates/health` - see Architecture above.
+  `GET /templates/health`, `POST /templates/refresh` - see Architecture above.
+- `GET /config-snippets`, `GET/PUT/DELETE /config-snippets/{name}` - the saved-command
+  snippet library (see Device configs above). `GET /config-snippets/ai/status`,
+  `GET /config-snippets/ai/targets`, `POST /config-snippets/ai/generate`, `POST
+  /config-snippets/ai/push` - the AI config-draft flow, admin-gated by `GET/PUT
+  /admin/ai-config` above. `GET /config-push/audit?limit=N` - the last pushes'
+  outcomes (see Device configs above).
 - `GET /export/gns3project` streams the selected live GNS3 project's native archive.
-- `GET /project/export`, `POST /project/import` (kicks off a background
-  job, returns `{job_id, total}`), `GET /project/import/{job_id}`
+- `GET /project/export`, `POST /project/import/preview` (dry-run: what a
+  `.topoproj` import would remove), `POST /project/import` (kicks off a
+  background job, returns `{job_id, total}`), `GET /project/import/{job_id}`
   (progress + final result), `POST /project/reload-gns3` (closes and
   reopens the live GNS3 project, restarting whichever nodes were
   running - refreshes GNS3's own state without redeploying anything).
@@ -880,8 +912,11 @@ same restart flow as host changes. Import and live edits require a selected proj
   /design/nodes/{name}`, `POST /design/links`, `DELETE
   /design/links/{node1}/{node2}`, `GET/POST /design/layout`, `GET/POST
   /design/drawings`, `POST /design/reset`, `GET /design/export`, `POST
-  /design/generate`, `GET /design/generate/{job_id}` - design mode, all
-  mirroring the equivalent live endpoint above (see Architecture above).
+  /design/generate`, `POST /design/generate/attachments`, `GET
+  /design/generate/{job_id}` - design mode, all mirroring the equivalent
+  live endpoint above (see Architecture above).
+- `GET /design/project` (the design canvas's own project-library list, as
+  opposed to `POST /design/project/{id}/open` above which opens one of them).
 - `POST /ai/suggest-fix` (body: `device`, `check`, optional `goal`; returns `job_id`),
   `GET /ai/suggest-fix/{job_id}` (status, attempts and the draft or error). The generator request uses
   `device_role`, `device_image`, `context` and `goal`; the reply uses `valid`, `commands`, `explanation` and `warnings`.
@@ -891,9 +926,11 @@ same restart flow as host changes. Import and live edits require a selected proj
   "esxi_vm", "name": ...}]}`, permanent) - see Architecture above.
 - `POST /maintenance/connectivity-test`, `GET
   /maintenance/connectivity-test/{job_id}` (see Architecture above).
-- `POST /gns3-vm/deploy`, `GET /gns3-vm/deploy/{job_id}` (see GNS3 VM
-  Deploy above).
-- `WS /ws/console/{node}`, `WS /ws/vm-screen/{node}`.
+- `POST /gns3-vm/deploy`, `GET /gns3-vm/deploy/{job_id}`, `POST /gns3-vm/start`
+  (the warning banner's Start/Restart GNS3 VM button) - see GNS3 VM Deploy above.
+- `WS /ws/console/{node}`, `WS /ws/vm-screen/{node}`, `WS /ws/serial/{node}`.
+- `GET /license` - the repo's LICENSE file as plain text, for the landing page's
+  own "View License" link.
 
 The frontend at `/` covers all of these.
 
@@ -904,7 +941,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-845 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
+1065 tests, all offline (mocked ESXi/pyvmomi, real local TCP servers
 standing in for GNS3 consoles/Netmiko targets - no real infrastructure
 needed).
 
