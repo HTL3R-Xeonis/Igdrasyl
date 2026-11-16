@@ -16,10 +16,10 @@ rather than duplicating its ESXi/GNS3 connection code.
 **Status: feature-complete and verified end-to-end against real
 infrastructure** - GNS3 console embedding, VM screens (direct VNC),
 config-push, project import/export, multi-host switching, design mode,
-Generate via LLM, packet capture, and the template-outage degrade path
-have all been exercised live, not just in the test suite. The GNS3 VM
-Deploy feature (below) is thoroughly unit-tested but not yet exercised
-against a real OVA import from the sister template API.
+Generate via LLM, packet capture, the template-outage degrade path, and
+the GNS3 VM Deploy feature (below, including a real OVA import through the
+sister template API and a full project redeploy onto the resulting VM)
+have all been exercised live, not just in the test suite.
 
 Start-up does not need the ESXi host: the session is opened on first use (`app/esxi_session.py`), so a host that is down
 or not set up yet still lets the app start (landing page, design mode, host settings); the host's calls answer 503 with the
