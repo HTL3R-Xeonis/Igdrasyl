@@ -54,6 +54,7 @@ def main() -> None:
         )
 
     os.environ["TOPOLOGYOPERATOR_SETTINGS"] = str(profiles_dir / filename)
+    os.environ["TOPOLOGYOPERATOR_GATEWAY_BACKEND"] = "1"
     uvicorn = str(Path(sys.executable).parent / "uvicorn")
     os.execv(
         uvicorn,

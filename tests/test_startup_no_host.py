@@ -6,7 +6,12 @@ on it.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 import app.main as main_module
+from app import gateway_main, startup
 from app.routes.common import SETTINGS_ENV_VAR
 from app.startup import refresh_startup_state
 
@@ -57,3 +62,33 @@ def test_with_an_active_host_the_gns3_vm_is_looked_for_as_before(
     app_state.esxi_connection.get_vm_ip_address.assert_called_once()
     auto_deploy.assert_called_once()
     assert "not found or has no IP" in app_state.startup_warning
+
+
+@pytest.mark.parametrize("behind_gateway", [False, True])
+def test_initial_admin_belongs_to_whichever_app_handles_first_boot(
+    tmp_path, monkeypatch, behind_gateway
+):
+    user_store = tmp_path / "users.json"
+    monkeypatch.setenv("TOPOLOGYOPERATOR_USERS_FILE", str(user_store))
+    monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
+    monkeypatch.delenv("TOPOLOGYOPERATOR_GATEWAY_BACKEND", raising=False)
+    if behind_gateway:
+        monkeypatch.setenv("TOPOLOGYOPERATOR_GATEWAY_BACKEND", "1")
+    monkeypatch.setattr(startup, "configure_logging", lambda: None)
+    monkeypatch.setattr(startup, "refresh_startup_state", lambda _app: None)
+    monkeypatch.setattr(startup.ova_templates, "initialise", lambda _path: None)
+    monkeypatch.setattr(startup.project_selection, "initialise", lambda _path: None)
+    monkeypatch.setattr(startup.design_store, "load", lambda: None)
+    monkeypatch.setattr(startup.startup_retry, "start", lambda *_args: None)
+    monkeypatch.setattr(gateway_main.logging_setup, "configure_logging", lambda: None)
+    monkeypatch.setattr(
+        gateway_main.Settings, "LOG_FILE_PATH", str(tmp_path / "gateway.log")
+    )
+    with TestClient(FastAPI(lifespan=startup.lifespan)):
+        assert user_store.exists() == (not behind_gateway)
+
+    if behind_gateway:
+        with TestClient(FastAPI(lifespan=gateway_main._lifespan)):
+            assert [record["username"] for record in startup.users.list_users()] == [
+                "admin"
+            ]

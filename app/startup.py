@@ -156,16 +156,16 @@ async def lifespan(app: FastAPI):
         # Names only - never the values.
         logger.info(f"Using stored credentials for: {', '.join(stored_secrets)}")
 
-    # First boot with no accounts yet at all - create one admin so there is
-    # ever a way in. See app/users.py's own docstring on why this is logged
-    # rather than written to a new secrets file.
-    bootstrap_password = users.ensure_bootstrap_admin()
-    if bootstrap_password:
-        logger.warning(
-            f"Created initial admin account - username 'admin', password: "
-            f"{bootstrap_password} (the default - change it via the admin "
-            f"panel as soon as possible) - this message will not repeat"
-        )
+    # The gateway owns initial accounts for units started by its launcher.
+    # Standalone installs need their own admin on first boot.
+    if os.getenv("TOPOLOGYOPERATOR_GATEWAY_BACKEND") != "1":
+        bootstrap_password = users.ensure_bootstrap_admin()
+        if bootstrap_password:
+            logger.warning(
+                f"Created initial admin account - username 'admin', password: "
+                f"{bootstrap_password} (the default - change it via the admin "
+                f"panel as soon as possible) - this message will not repeat"
+            )
 
     # A real, persistent pyvmomi session, reused for the app's lifetime rather than opened per request (same reasoning
     # as TopologyBuilder's own CLI commands) - but opened on first use, so a host that is down or not set up yet does

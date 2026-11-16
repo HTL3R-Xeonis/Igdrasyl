@@ -20,11 +20,9 @@ instance - must set the **exact same absolute paths** for:
   reads this itself, but keep it in the same state directory as the rest)
 
 Today's bare relative-path defaults (`users.json`, `session_secret.key`, ...)
-resolve against whatever `WorkingDirectory=` happens to be - fine for one
-process, actively wrong the moment there's more than one. Get this wrong
-and each backend silently bootstraps its **own** separate `admin`/`admin`
-account instead of sharing the one install-wide store, and nobody notices
-until two users on two different profiles can't see each other's accounts.
+resolve against whatever `WorkingDirectory=` happens to be. The gateway
+creates the initial account in the shared store. Each managed backend needs
+that same store to authenticate gateway sessions.
 
 The two `.service` files here already set all of these identically - if
 you copy them as-is and just change the `/opt/ginnungagap/...` prefix
@@ -46,7 +44,8 @@ risk is editing one file's paths later and forgetting the other.
 
 2. **The shared state directory**, owned by that account:
    ```bash
-   sudo -u xeonis mkdir -p /opt/ginnungagap/state/settings_profiles /opt/ginnungagap/state/logs
+   sudo install -d -m 750 -o xeonis -g xeonis /opt/ginnungagap/state \
+     /opt/ginnungagap/state/settings_profiles /opt/ginnungagap/state/logs
    ```
    (adjust the path if you don't use `/opt/ginnungagap` - just change it
    consistently in both `.service` files, see above).
@@ -86,7 +85,8 @@ A plain `.service` file can't read JSON to pick its own `--port` - and the
 port is only known *after* the gateway's `backend_ports.assign_port()` has
 run (first activation of that profile), not at unit-install time. The
 wrapper resolves the profile stem (`%i`) to its filename and port, sets
-`TOPOLOGYOPERATOR_SETTINGS`, then `exec`s uvicorn - no extra process stays
+`TOPOLOGYOPERATOR_SETTINGS` and `TOPOLOGYOPERATOR_GATEWAY_BACKEND=1`, then
+`exec`s uvicorn - no extra process stays
 around once it has (`os.execv`, same reasoning as this project's own
 `settings_profiles.restart_into_profile`).
 
