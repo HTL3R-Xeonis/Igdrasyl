@@ -1,0 +1,44 @@
+
+# Phase 3: the one gateway process - owns login and the shared user/AI-config
+# stores exclusively, proxies everything else to whichever backend a session has
+# picked (see app/gateway_main.py's own docstring). Copy to
+# ~/.config/systemd/user/xeonis-gateway.service for the SAME dedicated,
+# unprivileged service account every xeonis-backend@.service instance runs as.
+#
+# See deploy/README.md for why every *_FILE/*_DIR path below must be an identical
+# absolute path on this unit and on every xeonis-backend@.service instance.
+
+[Unit]
+Description=Ginnungagap gateway (Phase 3)
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/opt/ginnungagap/TopologyOperator
+ExecStart=/opt/ginnungagap/TopologyOperator/.venv/bin/uvicorn app.gateway_main:app --host 0.0.0.0 --port 80
+Restart=on-failure
+RestartSec=2
+
+# Shared, install-wide state - IDENTICAL absolute paths on every xeonis-backend@.service
+# instance (see deploy/README.md) - getting this wrong means each backend silently
+# bootstraps its own separate admin/admin account instead of sharing this one.
+Environment=TOPOLOGYOPERATOR_USERS_FILE=/opt/ginnungagap/state/users.json
+Environment=TOPOLOGYOPERATOR_SESSION_SECRET_FILE=/opt/ginnungagap/state/session_secret.key
+Environment=TOPOLOGYOPERATOR_AI_CONFIG_FILE=/opt/ginnungagap/state/ai_config.json
+Environment=TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR=/opt/ginnungagap/state/settings_profiles
+Environment=TOPOLOGYOPERATOR_BACKEND_PORTS_FILE=/opt/ginnungagap/state/settings_profiles_ports.json
+
+# The gateway's own log - never shared with a backend's (see app/gateway_main.py's
+# own lifespan, which sets Settings.LOG_FILE_PATH from this before any backend-style
+# settings.yml could).
+Environment=TOPOLOGYOPERATOR_GATEWAY_LOG_FILE=/opt/ginnungagap/state/logs/gateway.log
+
+# Same per-install secrets file as every backend unit.
+EnvironmentFile=/opt/ginnungagap/state/xeonis.env
+
+# Binding port 80 as an unprivileged user needs this (or run behind a real
+# reverse proxy/load balancer instead and drop it, and change --port above).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=default.target

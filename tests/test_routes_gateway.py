@@ -9,6 +9,7 @@ restart action, and app/proxy.py's get_target callback.
 from __future__ import annotations
 
 import pytest
+from fastapi import FastAPI
 
 from app import backend_manager, backend_ports, routes_gateway
 
@@ -295,3 +296,26 @@ def test_a_browser_with_no_backend_selected_is_redirected_to_the_picker(
     )
     assert resp.status_code == 303
     assert resp.headers["location"] == "/pick-backend"
+
+
+# --- /health must reach a backend, not be swallowed by the gateway ------
+#
+# Found by actually running a gateway and a backend together (deploy/README.md's
+# own verification section) - a /health registered directly on the gateway app
+# would always win over app/proxy.py's catch-all mount, silently stopping the
+# real per-backend /health (gns3_vm_ip, warning, ...) the frontend's own JS
+# depends on from ever reaching a backend through the gateway at all.
+
+
+def test_health_is_not_an_explicit_gateway_route():
+    app = FastAPI()
+    routes_gateway.register(app)
+    paths = {getattr(route, "path", None) for route in app.router.routes}
+    assert "/health" not in paths
+    assert "/gateway/health" in paths
+
+
+def test_gateway_health_is_reachable_without_login():
+    from app.auth_middleware import _ALLOWED_PATHS
+
+    assert "/gateway/health" in _ALLOWED_PATHS

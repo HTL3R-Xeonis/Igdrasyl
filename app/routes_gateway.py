@@ -175,8 +175,17 @@ class CreateHostConfig(ConnectionSettingsUpdate):
 def register(app: FastAPI) -> None:
     auth_routes.register(app)
 
-    @app.get("/health")
+    @app.get("/gateway/health")
     def gateway_health() -> dict[str, str]:
+        """
+        The gateway process's own liveness - deliberately NOT "/health":
+        that path is an explicit route too, which would otherwise always
+        win over app/proxy.py's catch-all mount and silently stop the
+        real, per-backend /health (gns3_vm_ip, warning, ...) the
+        frontend's own JS depends on from ever reaching a backend at
+        all - found by actually running both processes together, not by
+        a unit test (see deploy/README.md's own verification section).
+        """
         return {"status": "ok"}
 
     @app.get("/pick-backend", response_class=HTMLResponse)

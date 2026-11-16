@@ -19,6 +19,7 @@ _ALLOWED_PATHS = frozenset(
         "/login",
         "/logout",
         "/health",
+        "/gateway/health",  # the gateway's own process liveness - see app/routes_gateway.py
         "/favicon.ico",
         "/styles.css",
         "/ginnungagap-mark.svg",

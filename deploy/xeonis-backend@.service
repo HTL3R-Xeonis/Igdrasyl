@@ -1,0 +1,47 @@
+
+# Phase 3: one instance of this unit per settings profile - app/backend_manager.py
+# starts/stops/restarts "xeonis-backend@<profile-stem>.service" (the part before
+# ".yml"/".yaml" in the profile's filename). Copy this file (unchanged) to
+# ~/.config/systemd/user/xeonis-backend@.service for the dedicated, unprivileged
+# service account every unit (this one and xeonis-gateway.service) runs as - never
+# the gateway's own account, never root. Then:
+#   systemctl --user daemon-reload
+#   loginctl enable-linger <that account>   # keeps --user units running without a login session
+#
+# See deploy/README.md for why every *_FILE/*_DIR path below must be an identical
+# absolute path on this unit and on xeonis-gateway.service - getting that wrong is
+# the single most consequential mistake in this whole setup.
+
+[Unit]
+Description=Ginnungagap backend for settings profile %i
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=/opt/ginnungagap/TopologyOperator
+ExecStart=/opt/ginnungagap/TopologyOperator/.venv/bin/python3 /opt/ginnungagap/TopologyOperator/deploy/xeonis-backend-launch.py %i
+Restart=on-failure
+RestartSec=2
+
+# Shared, install-wide state - IDENTICAL absolute paths on every backend unit and on
+# xeonis-gateway.service (see deploy/README.md):
+Environment=TOPOLOGYOPERATOR_USERS_FILE=/opt/ginnungagap/state/users.json
+Environment=TOPOLOGYOPERATOR_SESSION_SECRET_FILE=/opt/ginnungagap/state/session_secret.key
+Environment=TOPOLOGYOPERATOR_AI_CONFIG_FILE=/opt/ginnungagap/state/ai_config.json
+Environment=TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR=/opt/ginnungagap/state/settings_profiles
+Environment=TOPOLOGYOPERATOR_BACKEND_PORTS_FILE=/opt/ginnungagap/state/settings_profiles_ports.json
+
+# This backend's own log file is NOT set here - there is no env var for it
+# (Settings.LOG_FILE_PATH only takes a settings.yml's own log_file_path key, see
+# app/logging_setup.py). Every profile's settings.yml needs its own log_file_path
+# set to a distinct path - otherwise every backend defaults to the same
+# "./logs/app.log" relative to WorkingDirectory above and they overwrite each
+# other's log, the one thing every *_FILE env var above exists specifically to
+# avoid for everything else.
+
+# Per-install secrets (ESXI_PASSWORD/GNS3_PASSWORD, the AI-snippet service token) -
+# same .env file every backend and the gateway load, never typed into this unit file.
+EnvironmentFile=/opt/ginnungagap/state/xeonis.env
+
+[Install]
+WantedBy=default.target
