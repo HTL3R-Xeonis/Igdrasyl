@@ -36,6 +36,9 @@ class _Echo(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("X-Stub-Header", "yes")
+        self.send_header(
+            "X-Upstream-Framing", self.headers.get("Transfer-Encoding", "fixed")
+        )
         # A Content-Length is required here regardless: without one, HTTP/1.x has no way to
         # frame the body other than closing the connection, which "Connection: keep-alive"
         # (deliberately sent so the test below can check it's stripped) would then prevent -
@@ -82,6 +85,7 @@ def test_forwards_method_path_and_body_and_strips_hop_by_hop(echo_server):
     )
     assert response.status_code == 200
     assert response.headers.get("X-Stub-Header") == "yes"
+    assert response.headers["X-Upstream-Framing"] == "fixed"
     assert "Connection" not in response.headers  # stripped on the way back
     text = response.text
     assert text.startswith("POST /some/path?x=1 seen=yep")

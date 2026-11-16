@@ -84,6 +84,10 @@ def _serve_static(filename: str):
 for _path, _filename in _PRE_LOGIN_ASSETS.items():
     app.get(_path, include_in_schema=False)(_serve_static(_filename))
 
+app.get("/gateway/host-deploy.js", include_in_schema=False)(
+    _serve_static("gateway-host-deploy.js")
+)
+
 app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 

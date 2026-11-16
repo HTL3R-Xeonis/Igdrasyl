@@ -106,6 +106,18 @@ def wait_healthy(
     timeout_seconds: float = 90.0,
     http_get: Callable[..., requests.Response] = requests.get,
 ) -> bool:
+    return (
+        wait_for_health(port, timeout_seconds=timeout_seconds, http_get=http_get)
+        is not None
+    )
+
+
+def wait_for_health(
+    port: int,
+    *,
+    timeout_seconds: float = 90.0,
+    http_get: Callable[..., requests.Response] = requests.get,
+) -> requests.Response | None:
     """
     Polls the backend's own GET /health until it answers 200 or the
     timeout elapses. systemd reporting the unit "active (running)" only
@@ -116,12 +128,10 @@ def wait_healthy(
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         try:
-            if (
-                http_get(f"http://127.0.0.1:{port}/health", timeout=3).status_code
-                == 200
-            ):
-                return True
+            response = http_get(f"http://127.0.0.1:{port}/health", timeout=3)
+            if response.status_code == 200:
+                return response
         except requests.RequestException:
             pass
         time.sleep(max(0.0, min(1.0, deadline - time.monotonic())))
-    return False
+    return None

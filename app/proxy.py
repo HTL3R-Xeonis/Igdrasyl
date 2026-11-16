@@ -88,6 +88,18 @@ def _request_body_chunks(
             yield body
 
 
+class _SizedBody:
+    def __init__(self, chunks: Iterator[bytes], length: int) -> None:
+        self.chunks = chunks
+        self.length = length
+
+    def __iter__(self) -> Iterator[bytes]:
+        return self.chunks
+
+    def __len__(self) -> int:
+        return self.length
+
+
 def _do_http_proxy(
     *,
     method: str,
@@ -107,9 +119,13 @@ def _do_http_proxy(
     def send_async(message: dict) -> None:
         asyncio.run_coroutine_threadsafe(send(message), loop).result()
 
-    body = (
-        _request_body_chunks(receive, loop) if method not in ("GET", "HEAD") else None
-    )
+    length = headers.pop("content-length", None)
+    body = None
+    if method not in ("GET", "HEAD") and length != "0":
+        chunks = _request_body_chunks(receive, loop)
+        # Requests adds chunked framing to unsized iterables. Give it the
+        # declared length when known so both framings never go upstream.
+        body = _SizedBody(chunks, int(length)) if length else chunks
     try:
         with requests.request(
             method,

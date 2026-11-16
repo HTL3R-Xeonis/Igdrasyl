@@ -111,6 +111,21 @@ Then open the gateway in a browser, log in, pick a profile on
 sudo -u xeonis XDG_RUNTIME_DIR=/run/user/$(id -u xeonis) systemctl --user status xeonis-backend@<profile-stem>.service
 ```
 
+For a parallel rollout, verify that edits in one profile do not affect the
+other. Use separate backend working directories for relative state such as
+design drafts. Configure any intended shared project data with absolute
+paths and include it in the migration backup.
+
+## Prepare a GNS3 VM before selecting a host
+
+Administrators can use **Deploy GNS3 VM…** on the gateway's host picker.
+Select the GNS3 OVA in the host settings first. The gateway starts the
+profile's backend if needed and checks its startup result. The existing
+startup logic imports the OVA only when the VM is missing. The action
+keeps the caller's host selection and leaves the backend running. For an
+already-running backend, it reports the current VM state. If configuration
+was corrected after a failed startup, restart that backend to retry startup.
+
 ## What this does *not* cover
 
 - Migrating an existing single-process install's *current* state

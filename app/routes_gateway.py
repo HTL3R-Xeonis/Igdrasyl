@@ -33,10 +33,20 @@ a backend's own log file genuinely is its own, not install-wide.
 from __future__ import annotations
 
 from html import escape
+from threading import Lock
 from typing import Annotated, Any
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from app import (
@@ -136,11 +146,18 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
             who = f": {escape(', '.join(active))}" if role == "admin" else ""
             noun = "user" if len(active) == 1 else "users"
             presence = f"<br><span>{len(active)} active {noun}{who}</span>"
+        deploy = (
+            f'<button type="button" data-deploy-profile="{escape(filename)}">Deploy GNS3 VM…</button>'
+            '<span data-deploy-status role="status"></span>'
+            if role == "admin" and not profile.get("error")
+            else ""
+        )
         tiles += (
-            '<form method="post" action="/settings-profiles/'
-            f'{escape(filename)}/activate" class="backend-tile">'
+            '<div class="backend-tile">'
             f"<div><strong>{escape(filename)}</strong><br><span>{escape(str(detail))}</span>{presence}</div>"
-            '<button type="submit">Activate</button></form>'
+            '<div class="backend-tile-actions"><form method="post" action="/settings-profiles/'
+            f'{escape(filename)}/activate"><button type="submit">Activate</button></form>'
+            f"{deploy}</div></div>"
         )
     if not tiles:
         tiles = "<p>No host profiles exist yet - an admin creates one under Host Settings.</p>"
@@ -163,6 +180,8 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
     background: #333; border: 1px solid #444;
   }}
   .backend-tile span {{ color: #aaa; font-size: 13px; }}
+  .backend-tile-actions {{ display: grid; gap: 8px; justify-items: end; text-align: right; }}
+  .backend-tile button:disabled {{ cursor: wait; opacity: .6; }}
   .backend-tile button {{
     padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer;
     background: #7cb342; color: #1c1c1c; font-weight: 500;
@@ -177,6 +196,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
   </form>
 </header>
 {tiles}
+<script src="/gateway/host-deploy.js?v=1" defer></script>
 </body>
 </html>"""
 
@@ -228,6 +248,8 @@ class CreateHostConfig(ConnectionSettingsUpdate):
 
 def register(app: FastAPI) -> None:
     auth_routes.register(app, logout_cookies=(BACKEND_COOKIE,))
+    deploy_jobs: dict[str, dict[str, Any]] = {}
+    deploy_lock = Lock()
 
     @app.get("/gateway/health")
     def gateway_health() -> dict[str, str]:
@@ -370,14 +392,13 @@ def register(app: FastAPI) -> None:
 
     @app.delete("/settings-profiles/{filename}")
     def delete_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str]:
-        try:
-            settings_profiles.delete_profile(filename)
-            profile_secrets.delete(filename)
-        except settings_profiles.InvalidProfileName as exc:
-            raise HTTPException(400, str(exc)) from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(404, str(exc)) from exc
-        backend_ports.forget_port(filename)
+        with deploy_lock:
+            if deploy_jobs.get(filename, {}).get("status") == "running":
+                raise HTTPException(409, "The GNS3 VM deploy check is in progress.")
+            settings_call(settings_profiles.delete_profile, filename)
+            settings_call(profile_secrets.delete, filename)
+            backend_ports.forget_port(filename)
+            deploy_jobs.pop(filename, None)
         return {"status": "ok"}
 
     @app.get("/host-config/schema")
@@ -445,7 +466,69 @@ def register(app: FastAPI) -> None:
             )
         }
 
-    # --- Activate / restart a backend ------------------------------------
+    # --- Provision, activate or restart a backend ------------------------
+
+    def provision_gns3_vm(filename: str, job_id: str) -> None:
+        try:
+            port = backend_manager.ensure_running(filename)
+            response = backend_manager.wait_for_health(port, timeout_seconds=900)
+            if response is None:
+                result = {
+                    "status": "error",
+                    "detail": f"{filename} did not answer healthy in time.",
+                }
+            else:
+                health = response.json()
+                if not isinstance(health, dict) or "gns3_vm_ip" not in health:
+                    raise ValueError("Invalid backend health response")
+                result = {
+                    "status": "ready" if health["gns3_vm_ip"] else "unavailable",
+                    "gns3_vm_ip": health["gns3_vm_ip"],
+                    "gns3_vm": health.get("gns3_vm"),
+                    "warning": health.get("warning"),
+                }
+        except backend_ports.NoFreePort as exc:
+            result = {"status": "error", "detail": str(exc)}
+        except Exception:
+            logger.exception(f"Could not check the GNS3 VM on {filename}")
+            result = {"status": "error", "detail": "Could not check the backend."}
+        with deploy_lock:
+            deploy_jobs[filename] = {"job_id": job_id, **result}
+
+    @app.post("/settings-profiles/{filename}/deploy-gns3-vm", status_code=202)
+    def start_profile_gns3_vm_deploy(
+        filename: str, tasks: BackgroundTasks, _admin: AdminUser
+    ) -> dict[str, str]:
+        with deploy_lock:
+            fields = settings_call(connection_settings.read_document, filename)
+            job = deploy_jobs.get(filename)
+            if job and job["status"] == "running":
+                return {"job_id": job["job_id"]}
+            esxi = fields.get("esxi") or {}
+            if not (
+                esxi.get("gns3_vm_template_id") or esxi.get("gns3_vm_ova_path")
+            ) and not (
+                backend_ports.get_port(filename) and backend_manager.is_active(filename)
+            ):
+                raise HTTPException(
+                    409, "Select a GNS3 VM template in this host's settings first."
+                )
+            job_id = uuid4().hex
+            deploy_jobs[filename] = {"job_id": job_id, "status": "running"}
+            tasks.add_task(provision_gns3_vm, filename, job_id)
+            return {"job_id": job_id}
+
+    @app.get("/settings-profiles/{filename}/deploy-gns3-vm/{job_id}")
+    def profile_gns3_vm_deploy_status(
+        filename: str, job_id: str, _admin: AdminUser
+    ) -> dict[str, Any]:
+        with deploy_lock:
+            job = deploy_jobs.get(filename)
+        if not job or job["job_id"] != job_id:
+            raise HTTPException(404, "No such GNS3 VM deploy job.")
+        if job["status"] == "error":
+            raise HTTPException(503, job["detail"])
+        return job
 
     @app.post("/settings-profiles/{filename}/activate")
     def activate_settings_profile(

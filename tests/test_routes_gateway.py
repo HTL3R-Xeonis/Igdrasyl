@@ -9,6 +9,7 @@ restart action, and app/proxy.py's get_target callback.
 from __future__ import annotations
 
 import pytest
+import requests
 from fastapi import FastAPI
 
 from app import (
@@ -45,6 +46,95 @@ def _upload(gateway_client, filename="host-a.yml", content=b"esxi:\n  ip: 10.0.0
         "/settings-profiles",
         files={"file": (filename, content, "application/x-yaml")},
     )
+
+
+# --- GNS3 VM provisioning ---------------------------------------------
+
+
+def test_profile_gns3_vm_deploy_keeps_the_current_host(gateway_client, monkeypatch):
+    _upload(
+        gateway_client,
+        content=b"esxi:\n  ip: 10.0.0.1\n  gns3_vm_template_id: gns3-vm\n",
+    )
+    gateway_client.cookies.set(routes_gateway.BACKEND_COOKIE, "host-b.yml")
+    started = []
+
+    def start(filename):
+        started.append(filename)
+        return 9200
+
+    def read_health(port, **_kwargs):
+        assert port == 9200
+        response = requests.Response()
+        response._content = b'{"gns3_vm_ip":"10.0.0.20","warning":null}'
+        return response
+
+    monkeypatch.setattr(backend_manager, "ensure_running", start)
+    monkeypatch.setattr(backend_manager, "wait_for_health", read_health)
+    url = "/settings-profiles/host-a.yml/deploy-gns3-vm"
+    response = gateway_client.post(url)
+
+    assert response.status_code == 202
+    assert "set-cookie" not in response.headers
+    assert gateway_client.cookies.get(routes_gateway.BACKEND_COOKIE) == "host-b.yml"
+    assert started == ["host-a.yml"]
+    status = gateway_client.get(f"{url}/{response.json()['job_id']}")
+    assert status.status_code == 200
+    assert status.json()["status"] == "ready"
+    assert status.json()["gns3_vm_ip"] == "10.0.0.20"
+
+
+def test_profile_gns3_vm_deploy_requires_an_admin_and_template(
+    gateway_client, gateway_user_client, monkeypatch
+):
+    _upload(gateway_client)
+
+    def unexpected_start(_filename):
+        pytest.fail("A request rejected at preflight started the backend")
+
+    monkeypatch.setattr(backend_manager, "ensure_running", unexpected_start)
+    url = "/settings-profiles/host-a.yml/deploy-gns3-vm"
+    assert gateway_user_client.post(url).status_code == 403
+    assert gateway_user_client.get(f"{url}/unknown").status_code == 403
+    response = gateway_client.post(url)
+    assert response.status_code == 409
+    assert "Select a GNS3 VM template" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("backend_answers", [True, False])
+def test_profile_gns3_vm_deploy_distinguishes_backend_and_vm_health(
+    gateway_client, monkeypatch, backend_answers
+):
+    _upload(gateway_client)
+    backend_ports.assign_port("host-a.yml")
+    monkeypatch.setattr(
+        backend_manager,
+        "is_active",
+        lambda filename, **_kwargs: filename == "host-a.yml",
+    )
+
+    def unexpected_start(_filename, **_kwargs):
+        pytest.fail("An already running backend was started again")
+
+    monkeypatch.setattr(backend_manager, "start", unexpected_start)
+    health = requests.Response()
+    health._content = b'{"gns3_vm_ip":null,"warning":"Management IP pending"}'
+    monkeypatch.setattr(
+        backend_manager,
+        "wait_for_health",
+        lambda _port, **_kwargs: health if backend_answers else None,
+    )
+    url = "/settings-profiles/host-a.yml/deploy-gns3-vm"
+    response = gateway_client.post(url)
+    assert response.status_code == 202
+    status = gateway_client.get(f"{url}/{response.json()['job_id']}")
+    if backend_answers:
+        assert status.status_code == 200
+        assert status.json()["status"] == "unavailable"
+        assert status.json()["warning"] == "Management IP pending"
+    else:
+        assert status.status_code == 503
+        assert "did not answer healthy" in status.json()["detail"]
 
 
 # --- User accounts ----------------------------------------------------
