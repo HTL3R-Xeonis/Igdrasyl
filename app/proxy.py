@@ -182,9 +182,13 @@ async def _proxy_websocket(scope, receive, send, target: Target) -> None:
         "?" + query_string.decode("latin-1") if query_string else ""
     )
     subprotocols = scope.get("subprotocols") or None
+    # The backend still checks signed sessions alongside the single-process app.
+    cookie = websocket.headers.get("cookie")
     try:
         upstream = await websockets.connect(
-            f"ws://{host}:{port}{path}", subprotocols=subprotocols
+            f"ws://{host}:{port}{path}",
+            subprotocols=subprotocols,
+            additional_headers={"Cookie": cookie} if cookie else None,
         )
     except Exception as exc:
         # Any upstream failure (refused, wrong subprotocol, DNS, ...) must become a clean close,
@@ -194,7 +198,7 @@ async def _proxy_websocket(scope, receive, send, target: Target) -> None:
         return
 
     await websocket.accept(subprotocol=upstream.subprotocol)
-    await bridge_ws(websocket, upstream, label=f"proxy {path}")
+    await bridge_ws(websocket, upstream, label=f"proxy {path}", preserve_text=True)
 
 
 def _wants_html(scope) -> bool:

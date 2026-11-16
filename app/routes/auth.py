@@ -163,7 +163,7 @@ def _login_page(error: bool) -> str:
 </html>"""
 
 
-def register(app: FastAPI) -> None:
+def register(app: FastAPI, *, logout_cookies: tuple[str, ...] = ()) -> None:
     """Registers /login (GET+POST), /logout and /me onto the given app."""
 
     @app.get("/login", response_class=HTMLResponse)
@@ -205,6 +205,8 @@ def register(app: FastAPI) -> None:
             audit_log.record("logout", user[0])
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(SESSION_COOKIE)
+        for cookie in logout_cookies:
+            response.delete_cookie(cookie)
         return response
 
     @app.get("/me")

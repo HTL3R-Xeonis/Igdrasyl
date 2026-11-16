@@ -10,9 +10,9 @@ claimed.
 
 Run with: uvicorn app.gateway_main:app
 Needs TOPOLOGYOPERATOR_USERS_FILE/TOPOLOGYOPERATOR_SESSION_SECRET_FILE/
-TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS_FILE/
-TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR pinned to the *same* absolute
-paths every backend unit uses (see deploy/README.md) - getting this
+TOPOLOGYOPERATOR_AI_CONFIG_FILE/
+TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR pinned to the same absolute paths
+every backend uses (see deploy/README.md) - getting this
 wrong means each backend silently bootstraps its own separate
 admin/admin account instead of sharing the one install-wide store.
 """

@@ -10,7 +10,7 @@ gateway now.
 
 What moved and why, one line each (the full reasoning for each is in
 the Phase 3 section of TopologyBuilder/handoff/plans/PLAN_login_multiserver.md):
-- user accounts, AI snippet topics (both read+write): shared across every
+- user accounts and AI configuration: shared across every
   backend, so there is exactly one place to manage them - here.
 - settings-profile CRUD, connection settings, host-config create/preview/
   test, OVA templates: profile *files* are install-wide, independent of
@@ -32,10 +32,11 @@ a backend's own log file genuinely is its own, not install-wide.
 
 from __future__ import annotations
 
+from html import escape
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 from app import (
@@ -45,6 +46,7 @@ from app import (
     backend_ports,
     backend_presence,
     connection_settings,
+    error_pages,
     ova_templates,
     profile_secrets,
     settings_profiles,
@@ -98,19 +100,18 @@ def get_target(scope) -> tuple[str, int] | None:
     """
     app/proxy.py's GetTarget: the (host, port) of the caller's selected
     backend, or None when there isn't one picked yet or its unit isn't
-    actually running right now - both cases get the same "pick/activate
+    actually running or permitted - those cases get the same "pick/activate
     a backend" response from the proxy, since from a caller's point of
     view they're the same problem.
     """
     filename = selected_backend(scope)
-    if not filename or not backend_manager.is_active(filename):
+    username = _caller_username(scope)
+    if not filename or not username or not users.can_access_host(username, filename):
         return None
     port = backend_ports.get_port(filename)
-    if port is None:
+    if port is None or not backend_manager.is_active(filename):
         return None
-    username = _caller_username(scope)
-    if username:
-        backend_presence.record(filename, username)
+    backend_presence.record(filename, username)
     return ("127.0.0.1", port)
 
 
@@ -132,13 +133,13 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
             # A plain count for everyone; admins additionally see who, since
             # that's exactly what's useful before deciding to restart a
             # shared host someone else might be looking at right now.
-            who = f": {', '.join(active)}" if role == "admin" else ""
+            who = f": {escape(', '.join(active))}" if role == "admin" else ""
             noun = "user" if len(active) == 1 else "users"
             presence = f"<br><span>{len(active)} active {noun}{who}</span>"
         tiles += (
             '<form method="post" action="/settings-profiles/'
-            f'{filename}/activate" class="backend-tile">'
-            f"<div><strong>{filename}</strong><br><span>{detail}</span>{presence}</div>"
+            f'{escape(filename)}/activate" class="backend-tile">'
+            f"<div><strong>{escape(filename)}</strong><br><span>{escape(str(detail))}</span>{presence}</div>"
             '<button type="submit">Activate</button></form>'
         )
     if not tiles:
@@ -153,7 +154,9 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <link rel="stylesheet" href="/styles.css?v=ginnungagap-55">
 <style>
   body {{ display: block; padding: 48px; }}
-  h1 {{ font-size: 18px; margin-bottom: 20px; }}
+  .backend-picker-header {{ display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+    justify-content: space-between; max-width: 518px; margin-bottom: 20px; }}
+  .backend-picker-header h1 {{ font-size: 18px; margin: 0; }}
   .backend-tile {{
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
     max-width: 480px; margin-bottom: 10px; padding: 14px 18px; border-radius: 10px;
@@ -167,7 +170,12 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 </style>
 </head>
 <body>
-<h1>Choose which server to work on</h1>
+<header class="backend-picker-header">
+  <h1>Choose which server to work on</h1>
+  <form action="/logout" method="post">
+    <button type="submit" class="toolbar-btn">Log out</button>
+  </form>
+</header>
 {tiles}
 </body>
 </html>"""
@@ -219,7 +227,7 @@ class CreateHostConfig(ConnectionSettingsUpdate):
 
 
 def register(app: FastAPI) -> None:
-    auth_routes.register(app)
+    auth_routes.register(app, logout_cookies=(BACKEND_COOKIE,))
 
     @app.get("/gateway/health")
     def gateway_health() -> dict[str, str]:
@@ -339,11 +347,12 @@ def register(app: FastAPI) -> None:
     # --- Settings profiles, connections, host-config, OVA templates -----
 
     @app.get("/settings-profiles")
-    def list_settings_profiles(user: AnyUser) -> list[dict[str, Any]]:
+    def list_settings_profiles(request: Request, user: AnyUser) -> list[dict[str, Any]]:
         username, role = user
         record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+        selected = selected_backend(request.scope)
         return [
-            profile
+            {**profile, "active": profile["filename"] == selected}
             for profile in settings_profiles.list_profiles()
             if users.can_access_host(record, profile["filename"])
         ]
@@ -439,7 +448,9 @@ def register(app: FastAPI) -> None:
     # --- Activate / restart a backend ------------------------------------
 
     @app.post("/settings-profiles/{filename}/activate")
-    def activate_settings_profile(filename: str, user: AnyUser) -> Response:
+    def activate_settings_profile(
+        filename: str, request: Request, user: AnyUser
+    ) -> Response:
         """
         Makes sure this profile's backend is running (starting it if
         needed, assigning its port the first time), waits for it to
@@ -469,7 +480,11 @@ def register(app: FastAPI) -> None:
                 503, f"{filename} started but didn't answer healthy in time"
             )
         audit_log.record("host_activate", username, filename)
-        response = JSONResponse({"status": "active"})
+        response = (
+            RedirectResponse("/", status_code=303)
+            if error_pages.wants_html(request)
+            else JSONResponse({"status": "active"})
+        )
         response.set_cookie(BACKEND_COOKIE, filename, httponly=True, samesite="lax")
         return response
 

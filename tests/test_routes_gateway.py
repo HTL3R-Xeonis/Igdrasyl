@@ -17,6 +17,7 @@ from app import (
     backend_ports,
     backend_presence,
     routes_gateway,
+    users,
 )
 
 
@@ -198,6 +199,50 @@ def test_activate_starts_the_backend_waits_healthy_and_sets_the_cookie(
     assert gateway_client.cookies.get(routes_gateway.BACKEND_COOKIE) == "host-a.yml"
 
 
+def test_picker_form_redirects_to_backend_and_logout_clears_selection(
+    gateway_client, gateway_anonymous_client, monkeypatch
+):
+    assert _upload(gateway_client).status_code == 200
+    monkeypatch.setattr(backend_manager, "ensure_running", lambda _filename: 9200)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda _port: True)
+
+    assert (
+        gateway_client.post(
+            "/admin/users",
+            json={"username": "picker", "password": "correct-horse", "role": "user"},
+        ).status_code
+        == 201
+    )
+    session = gateway_anonymous_client
+    assert (
+        session.post(
+            "/login",
+            data={"username": "picker", "password": "correct-horse"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+
+    picker = session.get("/pick-backend")
+    assert 'action="/logout" method="post"' in picker.text
+    response = session.post(
+        "/settings-profiles/host-a.yml/activate",
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert session.cookies.get(routes_gateway.BACKEND_COOKIE) == "host-a.yml"
+    assert session.get("/settings-profiles").json()[0]["active"] is True
+    assert gateway_client.get("/settings-profiles").json()[0]["active"] is False
+
+    response = session.post("/logout", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+    assert session.cookies.get(routes_gateway.BACKEND_COOKIE) is None
+    assert session.get("/me").status_code == 401
+
+
 def test_regular_user_can_activate_a_backend(
     gateway_client, gateway_user_client, monkeypatch
 ):
@@ -299,7 +344,8 @@ def test_get_target_is_none_when_the_backend_is_not_active(monkeypatch):
 def test_get_target_resolves_to_127_0_0_1_and_the_assigned_port(monkeypatch):
     monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
     backend_ports.assign_port("host-a.yml")
-    target = routes_gateway.get_target(_scope_with_cookie("host-a.yml"))
+    users.create_user("alice", "correct-horse", "user")
+    target = routes_gateway.get_target(_scope_with_both_cookies("host-a.yml", "alice"))
     assert target == ("127.0.0.1", backend_ports.get_port("host-a.yml"))
 
 
@@ -314,8 +360,19 @@ def _scope_with_both_cookies(backend: str, username: str, role: str = "user") ->
 def test_get_target_records_presence_on_a_successful_resolve(monkeypatch):
     monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
     backend_ports.assign_port("host-a.yml")
+    users.create_user("alice", "correct-horse", "user")
     routes_gateway.get_target(_scope_with_both_cookies("host-a.yml", "alice"))
     assert backend_presence.active_users("host-a.yml") == ["alice"]
+
+
+def test_get_target_applies_current_host_permissions(monkeypatch):
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    backend_ports.assign_port("host-a.yml")
+    users.create_user("alice", "correct-horse", "user")
+    scope = _scope_with_both_cookies("host-a.yml", "alice")
+    assert routes_gateway.get_target(scope) is not None
+    users.set_allowed_hosts("alice", ["host-b.yml"])
+    assert routes_gateway.get_target(scope) is None
 
 
 def test_get_target_records_nothing_when_it_returns_none(monkeypatch):

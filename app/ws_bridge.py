@@ -27,20 +27,27 @@ _EXPECTED_PUMP_EXCEPTIONS = (
 
 
 async def _pump_upstream_to_browser(
-    upstream: websockets.ClientConnection, websocket: WebSocket
+    upstream: websockets.ClientConnection, websocket: WebSocket, preserve_text: bool
 ) -> None:
     async for data in upstream:
-        if isinstance(data, str):
-            data = data.encode()
-        await websocket.send_bytes(data)
+        if isinstance(data, str) and preserve_text:
+            await websocket.send_text(data)
+        else:
+            await websocket.send_bytes(data.encode() if isinstance(data, str) else data)
 
 
 async def _pump_browser_to_upstream(
-    websocket: WebSocket, upstream: websockets.ClientConnection
+    websocket: WebSocket, upstream: websockets.ClientConnection, preserve_text: bool
 ) -> None:
     while True:
-        data = await websocket.receive_bytes()
-        await upstream.send(data)
+        if not preserve_text:
+            await upstream.send(await websocket.receive_bytes())
+            continue
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+        data = message.get("bytes")
+        await upstream.send(message["text"] if data is None else data)
 
 
 async def bridge_ws(
@@ -48,9 +55,14 @@ async def bridge_ws(
     upstream: websockets.ClientConnection,
     *,
     label: str,
+    preserve_text: bool = False,
 ) -> None:
-    up_to_browser = asyncio.create_task(_pump_upstream_to_browser(upstream, websocket))
-    browser_to_up = asyncio.create_task(_pump_browser_to_upstream(websocket, upstream))
+    up_to_browser = asyncio.create_task(
+        _pump_upstream_to_browser(upstream, websocket, preserve_text)
+    )
+    browser_to_up = asyncio.create_task(
+        _pump_browser_to_upstream(websocket, upstream, preserve_text)
+    )
     try:
         done, pending = await asyncio.wait(
             {up_to_browser, browser_to_up}, return_when=asyncio.FIRST_COMPLETED

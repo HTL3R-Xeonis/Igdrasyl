@@ -155,20 +155,21 @@ def test_upstream_down_answers_502():
     assert response.status_code == 502
 
 
-async def _echo_ws(connection):
-    async for message in connection:
-        await connection.send(message)
-
-
 @pytest.fixture
 def ws_echo_server():
     loop_ready = threading.Event()
     state: dict[str, object] = {}
+    cookies = []
+
+    async def echo(connection):
+        cookies.append(connection.request.headers.get("Cookie"))
+        async for message in connection:
+            await connection.send(message)
 
     def run():
         async def main():
             server = await websockets.serve(
-                _echo_ws, "127.0.0.1", 0, subprotocols=["binary"]
+                echo, "127.0.0.1", 0, subprotocols=["binary"]
             )
             state["server"] = server
             state["port"] = server.sockets[0].getsockname()[1]
@@ -181,20 +182,28 @@ def ws_echo_server():
     thread.start()
     loop_ready.wait(timeout=5)
     try:
-        yield state["port"]
+        yield state["port"], cookies
     finally:
         server = state.get("server")
         if server is not None:
             server.close()
 
 
-def test_websocket_proxy_bridges_bytes_and_subprotocol(ws_echo_server):
+def test_websocket_proxy_bridges_frame_types_subprotocol_and_session_cookie(
+    ws_echo_server,
+):
+    port, cookies = ws_echo_server
     app = FastAPI()
-    app.mount("/", make_proxy_app(lambda scope: ("127.0.0.1", ws_echo_server)))
+    app.mount("/", make_proxy_app(lambda scope: ("127.0.0.1", port)))
     client = TestClient(app)
-    with client.websocket_connect("/ws", subprotocols=["binary"]) as websocket:
+    with client.websocket_connect(
+        "/ws", subprotocols=["binary"], headers={"cookie": "xeonis_session=test"}
+    ) as websocket:
         websocket.send_bytes(b"ping")
         assert websocket.receive_bytes() == b"ping"
+        websocket.send_text("ping")
+        assert websocket.receive_text() == "ping"
+    assert cookies == ["xeonis_session=test"]
 
 
 def test_websocket_proxy_closes_when_no_target():

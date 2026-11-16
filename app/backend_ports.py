@@ -5,7 +5,7 @@ not a key inside the profile's own YAML - app/settings_profiles.py's
 save_profile() does a verbatim raw-bytes overwrite with no merge, so a
 re-uploaded profile would silently wipe a port stored inside it. Same
 single-JSON-file-with-mkstemp-swap convention as
-app/ai_snippets.py's stored topics and app/project_selection.py.
+app/ai_snippets.py's stored settings and app/project_selection.py.
 
 Only the gateway (app/gateway_main.py, app/backend_manager.py) reads
 or writes this - a backend process never needs its own port from
