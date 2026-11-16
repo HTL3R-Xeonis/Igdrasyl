@@ -454,7 +454,8 @@ access to everything they always had, destructive actions included (Find Orphans
 Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only:
 creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
 user account management, and enabling AI configuration in Config Push. The upper-right corner of the canvas
-shows the signed-in username (`GET /me`). Hover over it or activate it with the
+shows the signed-in username (`GET /me`). The host overview also has a **Log out** button.
+Hover over the canvas username or activate it with the
 keyboard or a tap to open **Log out**. Admins also get an
 **Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
 of the canvas SPA) for user CRUD, the AI configuration switch, and logs (below).

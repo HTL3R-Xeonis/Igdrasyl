@@ -1805,8 +1805,9 @@ input:focus, select:focus, textarea:focus {
 }
 .landing-brand-mark { flex: none; width: 44px; height: 44px; }
 .landing-brand-text h1 { margin: 0 0 4px; font-size: 26px; font-weight: 600; letter-spacing: .01em; line-height: 1.1; }
+#landing-logout { margin-inline-start: auto; }
 @media (max-width: 600px) {
-  #landing-header { padding-left: 0; }
+  #landing-header { padding-left: 0; flex-wrap: wrap; gap: 10px; }
   .landing-brand-text h1 { font-size: 22px; }
 }
 
