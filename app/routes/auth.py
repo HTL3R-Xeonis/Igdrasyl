@@ -63,7 +63,7 @@ def _login_page(error: bool) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Sign in</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-52">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-53">
 <style>
   html, body {{ height: 100%; }}
   body {{

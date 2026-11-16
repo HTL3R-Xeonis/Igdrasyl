@@ -335,7 +335,6 @@ const pushSnippetInsert = document.getElementById("push-snippet-insert");
 const aiSnippetToggle = document.getElementById("push-snippet-ai-toggle");
 const aiSnippetPanel = document.getElementById("push-snippet-ai");
 const aiSnippetForm = document.getElementById("push-snippet-ai-form");
-const aiSnippetTopic = document.getElementById("push-snippet-ai-topic");
 const aiSnippetDevice = document.getElementById("push-snippet-ai-device");
 const aiSnippetPrompt = document.getElementById("push-snippet-ai-prompt");
 const aiSnippetGenerate = document.getElementById("push-snippet-ai-generate");
@@ -343,7 +342,6 @@ const aiSnippetReview = document.getElementById("push-snippet-ai-review");
 const aiSnippetStatus = document.getElementById("push-snippet-ai-status");
 const aiSnippetPush = document.getElementById("push-snippet-ai-push");
 let aiSnippetDraft = null;
-let aiSnippetTargetsRequest = 0;
 
 async function refreshSnippetNames() {
   const snippets = await settingsRequest("/config-snippets");
@@ -353,18 +351,16 @@ async function refreshSnippetNames() {
   pushSnippetInsert.disabled = !pushSnippetName.value || !pushSnippetDevice.value;
 }
 
-async function refreshAiSnippetTopics() {
-  if (aiSnippetTopic.disabled) return;
+async function refreshAiSnippetAvailability() {
+  if (aiSnippetDevice.disabled) return;
   clearAiSnippetDraft();
   aiSnippetForm.hidden = true;
   aiSnippetStatus.textContent = "Checking AI availability…";
   try {
-    const topics = await settingsRequest("/config-snippets/ai/topics");
-    const selected = aiSnippetTopic.value;
-    aiSnippetTopic.replaceChildren(...topics.map(topic => new Option(topic.label, topic.id)));
-    if (topics.some(topic => topic.id === selected)) aiSnippetTopic.value = selected;
-    if (!topics.length) {
-      aiSnippetStatus.textContent = "An administrator must enable AI exercises for this installation.";
+    const { enabled, available } = await settingsRequest("/config-snippets/ai/status");
+    if (!enabled || !available) {
+      aiSnippetStatus.textContent = enabled ? "The configuration generator is not configured." :
+        "An administrator must enable AI configuration.";
       return;
     }
     aiSnippetForm.hidden = false;
@@ -381,7 +377,7 @@ aiSnippetToggle.addEventListener("click", async () => {
   if (!opening) return;
   aiSnippetToggle.disabled = true;
   try {
-    await refreshAiSnippetTopics();
+    await refreshAiSnippetAvailability();
   } finally {
     aiSnippetToggle.disabled = false;
   }
@@ -395,16 +391,13 @@ function clearAiSnippetDraft() {
 
 async function refreshAiSnippetTargets() {
   clearAiSnippetDraft();
-  const request = ++aiSnippetTargetsRequest;
   aiSnippetGenerate.disabled = true;
   aiSnippetDevice.replaceChildren(new Option("Loading devices…", ""));
   try {
-    const devices = await settingsRequest(`/config-snippets/ai/targets?topic=${encodeURIComponent(aiSnippetTopic.value)}`);
-    if (request !== aiSnippetTargetsRequest) return;
+    const devices = await settingsRequest("/config-snippets/ai/targets");
     aiSnippetDevice.replaceChildren(new Option(devices.length ? "Choose a device…" : "No compatible devices", ""));
     for (const name of devices) aiSnippetDevice.add(new Option(name, name));
   } catch (error) {
-    if (request !== aiSnippetTargetsRequest) return;
     aiSnippetDevice.replaceChildren(new Option("Could not load devices", ""));
     aiSnippetStatus.textContent = error.message;
   }
@@ -413,12 +406,10 @@ async function refreshAiSnippetTargets() {
 function setAiSnippetBusy(busy) {
   aiSnippetPush.disabled = busy;
   aiSnippetGenerate.disabled = busy || !aiSnippetDevice.value;
-  aiSnippetTopic.disabled = busy;
   aiSnippetDevice.disabled = busy;
   aiSnippetPrompt.disabled = busy;
 }
 
-aiSnippetTopic.addEventListener("change", refreshAiSnippetTargets);
 aiSnippetDevice.addEventListener("change", () => {
   clearAiSnippetDraft();
   aiSnippetGenerate.disabled = !aiSnippetDevice.value;
@@ -426,9 +417,8 @@ aiSnippetDevice.addEventListener("change", () => {
 aiSnippetPrompt.addEventListener("input", clearAiSnippetDraft);
 aiSnippetForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!aiSnippetTopic.value || !aiSnippetDevice.value || aiSnippetGenerate.disabled) return;
+  if (!aiSnippetDevice.value || aiSnippetGenerate.disabled) return;
   clearAiSnippetDraft();
-  const topic = aiSnippetTopic.value;
   const device = aiSnippetDevice.value;
   const prompt = aiSnippetPrompt.value.trim();
   if (!prompt) {
@@ -441,11 +431,11 @@ aiSnippetForm.addEventListener("submit", async (event) => {
     aiSnippetDraft = await settingsRequest("/config-snippets/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, device, prompt }),
+      body: JSON.stringify({ device, prompt }),
     });
     document.getElementById("push-snippet-ai-commands").textContent = aiSnippetDraft.commands.join("\n");
     aiSnippetReview.hidden = false;
-    aiSnippetStatus.textContent = `${aiSnippetDraft.device} · ${aiSnippetDraft.label}`;
+    aiSnippetStatus.textContent = "Draft for " + aiSnippetDraft.device;
   } catch (error) {
     aiSnippetStatus.textContent = error.message;
   } finally {

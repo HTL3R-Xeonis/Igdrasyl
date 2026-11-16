@@ -94,18 +94,18 @@ def test_set_role_and_set_password(client):
     assert resp.status_code == 200
 
 
-def test_ai_snippet_topics_round_trip_and_are_admin_only(client, user_client):
-    assert user_client.get("/admin/ai-snippet-topics").status_code == 403
+def test_ai_config_round_trip_and_is_admin_only(client, user_client):
+    url = "/admin/ai-config"
+    assert user_client.get(url).status_code == 403
+    assert user_client.put(url, json={"enabled": True}).status_code == 403
+    assert client.get(url).json()["enabled"] is False
+    assert client.put(url, json={"enabled": "true"}).status_code == 422
 
-    initial = client.get("/admin/ai-snippet-topics").json()
-    assert initial["enabled"] == []
-    assert "vlan" in initial["topics"]
-
-    updated = client.put("/admin/ai-snippet-topics", json={"topics": ["vlan", "bogus"]})
+    updated = client.put(url, json={"enabled": True})
     assert updated.status_code == 200
-    assert updated.json()["enabled"] == ["vlan"]  # "bogus" silently dropped
-
-    assert client.get("/admin/ai-snippet-topics").json()["enabled"] == ["vlan"]
+    assert updated.json()["enabled"] is True
+    assert client.get(url).json()["enabled"] is True
+    assert client.put(url, json={"enabled": False}).json()["enabled"] is False
 
 
 def test_regular_user_cannot_upload_create_edit_delete_or_activate_a_host_profile(

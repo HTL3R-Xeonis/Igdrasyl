@@ -19,6 +19,7 @@ push_audit.jsonl
 users.json
 session_secret.key
 ai_snippet_topics.json
+ai_config.json
 handoff/
 
 # Proprietary Broadcom/VMware WMKS SDK files - not ours to redistribute,

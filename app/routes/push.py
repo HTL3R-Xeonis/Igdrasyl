@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import ai_snippets, config_snippets, push_audit, push_jobs
 from app.application import app
+from app.auth import current_user
 from app.config_push import DeviceResult, DeviceSpec, push_all
 
 
@@ -23,33 +24,34 @@ class PushAiSnippet(BaseModel):
     draft_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
-@app.get("/config-snippets/ai/topics")
-def ai_snippet_topics() -> list[dict[str, str]]:
-    return [
-        {"id": topic, "label": ai_snippets.TOPICS[topic]}
-        for topic in ai_snippets.enabled_topics()
-    ]
+AiUser = Annotated[tuple[str, str], Depends(current_user)]
 
 
-def _require_ai_topic(topic: str) -> None:
-    if topic not in ai_snippets.enabled_topics():
-        raise HTTPException(
-            403,
-            "AI generation for this exercise has not been enabled by an administrator.",
-        )
+@app.get("/config-snippets/ai/status")
+def ai_config_status(_user: AiUser) -> dict[str, bool]:
+    return {"enabled": ai_snippets.get_enabled(), "available": ai_snippets.available()}
+
+
+def _require_ai_config() -> None:
+    if not ai_snippets.get_enabled():
+        raise HTTPException(403, "An administrator must enable AI configuration.")
+    if not ai_snippets.available():
+        raise HTTPException(503, "The configuration generator is not configured.")
 
 
 @app.get("/config-snippets/ai/targets")
-def ai_snippet_targets(topic: ai_snippets.Topic) -> list[str]:
-    _require_ai_topic(topic)
-    return ai_snippets.targets(app, topic)
+def ai_snippet_targets(_user: AiUser) -> list[str]:
+    _require_ai_config()
+    return ai_snippets.targets(app)
 
 
 @app.post("/config-snippets/ai/generate")
-def generate_ai_snippet(request: ai_snippets.GenerateRequest) -> dict:
-    _require_ai_topic(request.topic)
+def generate_ai_snippet(request: ai_snippets.GenerateRequest, user: AiUser) -> dict:
+    _require_ai_config()
     try:
-        return ai_snippets.generate(app, request)
+        return ai_snippets.generate(app, request, user[0])
+    except ai_snippets.GenerationDisabled as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ai_snippets.TargetChanged as exc:
         raise HTTPException(409, str(exc)) from exc
     except ai_snippets.Busy as exc:
@@ -58,17 +60,17 @@ def generate_ai_snippet(request: ai_snippets.GenerateRequest) -> dict:
         ) from exc
     except ai_snippets.InvalidDraft as exc:
         raise HTTPException(
-            422, "Describe the required settings for the selected exercise."
+            422, str(exc) or "Describe supported settings for the selected device."
         ) from exc
     except ai_snippets.GeneratorUnavailable as exc:
         raise HTTPException(502, "The snippet generator is unavailable.") from exc
 
 
 @app.post("/config-snippets/ai/push", status_code=202)
-def push_ai_snippet(request: PushAiSnippet) -> dict[str, str]:
+def push_ai_snippet(request: PushAiSnippet, user: AiUser) -> dict[str, str]:
     try:
-        job = ai_snippets.push_draft(app, request.draft_id)
-    except ai_snippets.TopicDisabled as exc:
+        job = ai_snippets.push_draft(app, request.draft_id, user[0])
+    except ai_snippets.GenerationDisabled as exc:
         raise HTTPException(403, str(exc)) from exc
     except ai_snippets.DraftExpired as exc:
         raise HTTPException(

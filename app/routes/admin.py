@@ -1,4 +1,4 @@
-"""Admin-only: user accounts and the AI snippet topic allow-list. See app/users.py/app/ai_snippets.py."""
+"""Admin-only user accounts, AI configuration policy and log summaries."""
 
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ class SetPasswordRequest(BaseModel):
     password: str
 
 
-class AiSnippetTopicsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class AiConfigRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    topics: list[str]
+    enabled: bool
 
 
 def _user_error(exc: Exception) -> HTTPException:
@@ -89,16 +89,15 @@ def set_user_password(
     return {"status": "ok"}
 
 
-@app.get("/admin/ai-snippet-topics")
-def get_ai_snippet_topics(_admin: AdminUser) -> dict[str, Any]:
-    return {"topics": ai_snippets.TOPICS, "enabled": ai_snippets.get_stored_topics()}
+@app.get("/admin/ai-config")
+def get_ai_config(_admin: AdminUser) -> dict[str, bool]:
+    return {"enabled": ai_snippets.get_enabled(), "available": ai_snippets.available()}
 
 
-@app.put("/admin/ai-snippet-topics")
-def set_ai_snippet_topics(
-    body: AiSnippetTopicsRequest, _admin: AdminUser
-) -> dict[str, Any]:
-    return {"enabled": ai_snippets.set_stored_topics(body.topics)}
+@app.put("/admin/ai-config")
+def set_ai_config(body: AiConfigRequest, _admin: AdminUser) -> dict[str, bool]:
+    ai_snippets.set_enabled(body.enabled)
+    return get_ai_config(_admin)
 
 
 @app.post("/admin/logs/summarize")

@@ -54,7 +54,7 @@ def render(status_code: int, detail: str | None = None) -> Response:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{status_code} - {escape(title)}</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-52">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-53">
 <style>
   /* styles.css lays <body> out as the single-page app - this is its own page. */
   body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}

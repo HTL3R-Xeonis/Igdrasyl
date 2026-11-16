@@ -85,32 +85,38 @@ document.getElementById("ap-create-user").addEventListener("submit", async (evt)
   }
 });
 
-async function loadAiTopics() {
-  const { topics, enabled } = await request("/admin/ai-snippet-topics");
-  const form = document.getElementById("ap-topics-form");
-  form.innerHTML = "";
-  for (const [id, label] of Object.entries(topics)) {
-    const wrap = document.createElement("label");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.value = id;
-    checkbox.checked = enabled.includes(id);
-    wrap.append(checkbox, ` ${label}`);
-    form.appendChild(wrap);
+const aiConfigForm = document.getElementById("ap-ai-config-form");
+const aiConfigEnabled = document.getElementById("ap-ai-config-enabled");
+const aiConfigSave = aiConfigForm.querySelector("button");
+
+function showAiConfig({ enabled, available }, saved = false) {
+  aiConfigEnabled.checked = enabled;
+  const status = [saved ? "Saved." : "", available ? "" : "The configuration generator is not configured."];
+  setStatus("ap-ai-config-status", status.filter(Boolean).join(" "));
+}
+
+async function loadAiConfig() {
+  try {
+    showAiConfig(await request("/admin/ai-config"));
+    aiConfigEnabled.disabled = aiConfigSave.disabled = false;
+  } catch (error) {
+    setStatus("ap-ai-config-status", error.message, true);
   }
 }
 
-document.getElementById("ap-topics-save").addEventListener("click", async () => {
-  const topics = [...document.querySelectorAll("#ap-topics-form input:checked")].map((el) => el.value);
+aiConfigForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  aiConfigEnabled.disabled = aiConfigSave.disabled = true;
   try {
-    await request("/admin/ai-snippet-topics", {
+    showAiConfig(await request("/admin/ai-config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topics }),
-    });
-    setStatus("ap-topics-status", "Saved.");
+      body: JSON.stringify({ enabled: aiConfigEnabled.checked }),
+    }), true);
   } catch (error) {
-    setStatus("ap-topics-status", error.message, true);
+    setStatus("ap-ai-config-status", error.message, true);
+  } finally {
+    aiConfigEnabled.disabled = aiConfigSave.disabled = false;
   }
 });
 
@@ -140,7 +146,7 @@ summarizeBtn.addEventListener("click", async () => {
       document.getElementById("ap-denied").style.display = "block";
       return;
     }
-    await Promise.all([loadUsers(), loadAiTopics()]);
+    await Promise.all([loadUsers(), loadAiConfig()]);
   } catch {
     window.location.href = "/login";
   }

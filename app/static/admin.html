@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Admin</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-52">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-53">
 <style>
   /* styles.css lays <body> out for the single-page app (full height, no scrolling) - this page is its own document. */
   body { display: block; height: auto; min-height: 100vh; overflow: auto; }
@@ -17,9 +17,9 @@
   #ap h2 { font-size: 15px; font-weight: 500; margin: 0 0 10px; }
   #ap table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #ap th, #ap td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
-  #ap-create-user, #ap-topics-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  #ap-create-user, #ap-ai-config-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
   #ap-create-user input, #ap-create-user select { min-height: 27px; }
-  #ap-topics-form label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+  #ap-ai-config-form label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
   .ap-status { color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 1em; }
   .ap-status.ap-error { color: var(--bad); }
   #ap-denied { display: none; color: var(--bad); margin-top: 40px; text-align: center; }
@@ -59,11 +59,13 @@
       <p class="ap-status" id="ap-users-status"></p>
     </section>
 
-    <section id="ap-topics-section">
-      <h2>AI snippet exercises enabled for students</h2>
-      <form id="ap-topics-form"></form>
-      <button class="toolbar-btn primary" id="ap-topics-save" type="button">Save</button>
-      <p class="ap-status" id="ap-topics-status"></p>
+    <section id="ap-ai-config-section">
+      <h2>AI configuration</h2>
+      <form id="ap-ai-config-form">
+        <label><input id="ap-ai-config-enabled" type="checkbox" disabled> Allow AI configuration in Config Push</label>
+        <button class="toolbar-btn primary" type="submit" disabled>Save</button>
+      </form>
+      <p class="ap-status" id="ap-ai-config-status" role="status"></p>
     </section>
 
     <section id="ap-logs-section">
@@ -75,6 +77,6 @@
     </section>
   </div>
 </div>
-<script src="/admin.js?v=ginnungagap-52"></script>
+<script src="/admin.js?v=ginnungagap-53"></script>
 </body>
 </html>

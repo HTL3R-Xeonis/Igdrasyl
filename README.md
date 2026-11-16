@@ -450,13 +450,11 @@ Two roles share the same login flow: `admin` and `user`. Regular users keep full
 access to everything they always had, destructive actions included (Find Orphans,
 Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only:
 creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
-user account management, and which AI snippet exercise topics are enabled
-(`app/ai_snippets.py`'s stored override, unioned with the
-`TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS` env var). The upper-right corner of the canvas
+user account management, and enabling AI configuration in Config Push. The upper-right corner of the canvas
 shows the signed-in username (`GET /me`). Hover over it or activate it with the
 keyboard or a tap to open **Log out**. Admins also get an
 **Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
-of the canvas SPA) for user CRUD, the AI-topic checkboxes, and logs (below).
+of the canvas SPA) for user CRUD, the AI configuration switch, and logs (below).
 
 The admin panel's **Logs** section has an **Export logs** link (just the
 existing `GET /logs/download`, open to every signed-in user like the Logs
@@ -548,21 +546,24 @@ For example, PUT `{"label":"Router info","commands":["show version"]}` to `/conf
 The library is shared across projects on this Operator instance. Files are stored in `config_snippets/` by default
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
-**View → Config Push → Generate with AI** creates a draft for one selected device. The button opens the
-availability message when no exercises are enabled. An administrator enables exercises in the
-Operator service environment with `TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS=vlan,interface_description`.
-The exercises currently support VLAN definitions on GNS3 Cisco IOSvL2 and physical port descriptions
-on GNS3 Cisco IOSv and IOSvL2 devices. Both services
-need the same random `XEONIS_AI_SNIPPETS_TOKEN` (at least 32 printable ASCII characters without spaces).
-Set `TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL` in the Operator service environment to pin the
-destination for the token, independent of host profiles. Use an internal network or HTTPS.
-Without a configured topic, service token and generator URL, the feature is disabled. The Operator checks the topic on
-every request and builds the command list from validated fields. **Review and push…** displays the
-target and commands for confirmation, then runs the existing Config Push job and records it in
-History. Each draft can be pushed once and expires after ten minutes or when the project changes.
+**View → Config Push → Generate with AI** takes a device and a prompt. The Operator supplies the
+active device's role, image, interfaces and adjacent links to the model. It supports VLAN creation
+and Access VLAN assignment on GNS3 Cisco IOSvL2, IPv4 addresses on IOSv routed ports, and
+physical port descriptions on both. The Operator renders commands from validated settings.
+**Review and push…** confirms the target and commands before the normal Config Push job runs.
+The push appears in History. A draft belongs to its author and target, can be used once, and
+expires in ten minutes.
+
+An administrator enables the feature in **Admin Panel → AI configuration**. It defaults to off.
+The Operator stores the switch in `ai_config.json` and checks it again before pushing.
+Set `TOPOLOGYOPERATOR_AI_CONFIG_FILE` to an absolute writable path for a service installation.
+Both services need the same random `XEONIS_AI_SNIPPETS_TOKEN` (at least 32 printable ASCII
+characters without spaces). Set `TOPOLOGYOPERATOR_AI_SNIPPET_GENERATOR_URL` in the Operator service
+environment to pin the destination for the token, independent of host profiles. Use an internal
+network or HTTPS. Update the Generator before enabling the switch.
 
 Set `XEONIS_CLASSROOM_MODE=1` in **both services** for a classroom installation to turn off the general
-AI Health Check suggestions while allowing the configured exercises. This release is instance-wide.
+AI Health Check suggestions. The AI configuration switch applies to the whole Operator instance.
 Before offering the shared lab to pupils, protect the Operator behind school authentication and enforce
 role and class permissions for configuration writes, project access and pushes at the API. Give the
 Generator an internal address and keep direct service access restricted to the Operator and administrators.
@@ -746,7 +747,7 @@ same restart flow as host changes. Import and live edits require a selected proj
   session.
 - `GET/POST /admin/users`, `PUT /admin/users/{username}/role`, `DELETE
   /admin/users/{username}` - admin-only user management.
-- `GET/PUT /admin/ai-snippet-topics` - admin-only AI snippet topic allow-list.
+- `GET/PUT /admin/ai-config` - admin-only AI configuration switch.
 - `POST /admin/logs/summarize` - admin-only AI summary of the last 2,000 log
   lines (see Accounts above); `GET /logs/download` remains open to every
   signed-in user, unchanged.

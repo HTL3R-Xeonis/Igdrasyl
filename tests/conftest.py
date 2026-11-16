@@ -85,8 +85,8 @@ def _auth_storage_tmp_file(tmp_path, monkeypatch):
         "TOPOLOGYOPERATOR_SESSION_SECRET_FILE", str(tmp_path / "session_secret.key")
     )
     monkeypatch.setenv(
-        "TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS_FILE",
-        str(tmp_path / "ai_snippet_topics.json"),
+        "TOPOLOGYOPERATOR_AI_CONFIG_FILE",
+        str(tmp_path / "ai_config.json"),
     )
     monkeypatch.setattr(auth, "_cached_secret", None)
 
