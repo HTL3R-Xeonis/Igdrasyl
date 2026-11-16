@@ -396,6 +396,28 @@ def test_admin_can_always_activate_regardless_of_their_own_allowed_hosts(
     assert resp.status_code == 200
 
 
+def test_readonly_can_activate_a_backend_but_not_mutate_anything_else(
+    gateway_client, gateway_readonly_client, monkeypatch
+):
+    _upload(gateway_client, filename="lab-a.yml")
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda port, **kw: True)
+
+    # The one exempted mutation: picking which backend this reader's own view points at.
+    resp = gateway_readonly_client.post("/settings-profiles/lab-a.yml/activate")
+    assert resp.status_code == 200
+
+    # Everything else mutating still 403s with the readonly message, not the
+    # usual admin-only 403 - proving the blanket method check is what fired.
+    resp = gateway_readonly_client.post(
+        "/settings-profiles", files={"file": ("x.yml", b"esxi: {}", "text/yaml")}
+    )
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "Read-only access"}
+
+    assert gateway_readonly_client.get("/settings-profiles").status_code == 200
+
+
 def test_pick_backend_page_only_lists_the_users_allowed_hosts(gateway_client):
     _upload(gateway_client, filename="lab-a.yml", content=b"esxi:\n  ip: 10.0.0.1\n")
     _upload(gateway_client, filename="lab-b.yml", content=b"esxi:\n  ip: 10.0.0.2\n")

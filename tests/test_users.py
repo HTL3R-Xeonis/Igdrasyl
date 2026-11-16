@@ -58,6 +58,12 @@ def test_create_user_rejects_bad_input(username, password, role):
         users.create_user(username, password, role)
 
 
+def test_create_user_accepts_the_readonly_role():
+    created = users.create_user("observer", "correct-horse", "readonly")
+    assert created["role"] == "readonly"
+    assert users.authenticate("observer", "correct-horse") == "readonly"
+
+
 def test_authenticate_returns_role_on_success_and_none_otherwise():
     users.create_user("alice", "correct-horse", "user")
     assert users.authenticate("alice", "correct-horse") == "user"

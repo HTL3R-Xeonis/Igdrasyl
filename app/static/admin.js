@@ -126,7 +126,7 @@ async function loadUsers() {
 
     const roleCell = document.createElement("td");
     const roleSelect = document.createElement("select");
-    for (const role of ["user", "admin"]) {
+    for (const role of ["user", "readonly", "admin"]) {
       const option = new Option(role, role, false, role === user.role);
       roleSelect.add(option);
     }

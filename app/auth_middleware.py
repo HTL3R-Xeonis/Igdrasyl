@@ -12,6 +12,8 @@ this covers once for the whole app).
 
 from __future__ import annotations
 
+import re
+
 from app.auth import SESSION_COOKIE, verify_session_token
 
 _ALLOWED_PATHS = frozenset(
@@ -26,6 +28,18 @@ _ALLOWED_PATHS = frozenset(
         "/login-bg.jpg",
     }
 )
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+# A "readonly" user may mutate exactly this: picking which backend/session
+# their own view points at (app/routes_gateway.py's activate - any logged-in
+# user, not an infrastructure change). /logout needs no exemption here - it's
+# already in _ALLOWED_PATHS above, reachable without even a valid session.
+_READONLY_EXEMPT_PATTERNS = (re.compile(r"^/settings-profiles/[^/]+/activate$"),)
+
+
+def _readonly_exempt(path: str) -> bool:
+    return any(pattern.match(path) for pattern in _READONLY_EXEMPT_PATTERNS)
 
 
 def _header(scope, name: bytes) -> bytes | None:
@@ -92,6 +106,38 @@ class AuthMiddleware:
                     {
                         "type": "http.response.body",
                         "body": b'{"detail":"Not logged in"}',
+                    }
+                )
+            return
+
+        _, role = user
+        if (
+            role == "readonly"
+            and scope["type"] == "http"
+            and scope["method"] not in _SAFE_METHODS
+            and not _readonly_exempt(path)
+        ):
+            if _wants_html(scope):
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 403,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b"Read-only access"})
+            else:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 403,
+                        "headers": [(b"content-type", b"application/json")],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b'{"detail":"Read-only access"}',
                     }
                 )
             return

@@ -33,7 +33,7 @@ from app.settings_profiles import _SAFE_NAME_PATTERN
 _LOCK = Lock()
 _PBKDF2_ITERATIONS = 600_000
 _SALT_BYTES = 16
-VALID_ROLES = ("admin", "user")
+VALID_ROLES = ("admin", "user", "readonly")
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,60}$")
 MIN_PASSWORD_LENGTH = 8
 _MAX_ALLOWED_HOSTS = 200

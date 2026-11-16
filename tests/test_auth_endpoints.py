@@ -94,3 +94,63 @@ def test_logout_clears_the_cookie(tmp_path, monkeypatch):
     resp = session.post("/logout")
     assert resp.status_code == 303
     assert session.get("/me", headers={"accept": "*/*"}).status_code == 401
+
+
+# --- readonly role ----------------------------------------------------
+
+
+def test_readonly_can_make_safe_requests(readonly_client):
+    assert readonly_client.get("/me").status_code == 200
+    assert readonly_client.get("/health").status_code == 200
+
+
+def test_readonly_is_blocked_from_mutating_an_arbitrary_route(readonly_client):
+    resp = readonly_client.post("/nodes", json={"name": "x"})
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "Read-only access"}
+
+
+def test_readonly_is_blocked_from_a_mutation_even_with_an_html_accept_header(
+    readonly_client,
+):
+    resp = readonly_client.post(
+        "/nodes", json={"name": "x"}, headers={"accept": "text/html"}
+    )
+    assert resp.status_code == 403
+    assert "Read-only" in resp.text
+
+
+def test_readonly_can_still_log_out():
+    session = TestClient(main_module.app, follow_redirects=False)
+    session.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-readonly", "readonly")
+    )
+    assert session.post("/logout").status_code == 303
+
+
+def test_user_and_admin_roles_are_unaffected_by_the_readonly_check(client, user_client):
+    # Both still 403 on an admin-only route for the usual (role, not readonly) reason,
+    # proving the readonly method-block isn't what's firing here.
+    assert user_client.post("/admin/users", json={}).status_code == 403
+    assert (
+        client.post("/admin/users", json={}).status_code == 422
+    )  # missing fields, reached the route
+
+
+def test_readonly_websocket_console_access_is_not_blocked_by_the_method_check(
+    readonly_client, app_state, fake_tcp_server
+):
+    from unittest.mock import patch
+
+    port = fake_tcp_server(lambda reader, writer: None)
+    live_node = {
+        "name": "R1",
+        "node_id": "n1",
+        "status": "started",
+        "console": port,
+        "console_type": "telnet",
+    }
+    app_state.project_id = "proj-1"
+    with patch("app.console.list_live_nodes", return_value=[live_node]):
+        with readonly_client.websocket_connect("/ws/console/R1"):
+            pass  # reaching accept() at all proves the readonly check didn't 1008 it

@@ -174,6 +174,16 @@ def user_client(app_state):
 
 
 @pytest.fixture
+def readonly_client(app_state):
+    """Same as `client`, but logged in as the 'readonly' role - every mutating HTTP request should 403."""
+    test_client = TestClient(main_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-readonly", "readonly")
+    )
+    return test_client
+
+
+@pytest.fixture
 def gateway_client():
     """
     Phase 3's gateway (app/gateway_main.py), admin-authenticated - the
@@ -195,6 +205,16 @@ def gateway_user_client():
     test_client = TestClient(gateway_module.app)
     test_client.cookies.set(
         auth.SESSION_COOKIE, auth.create_session_token("test-user", "user")
+    )
+    return test_client
+
+
+@pytest.fixture
+def gateway_readonly_client():
+    """Same as `gateway_client`, but logged in as the 'readonly' role."""
+    test_client = TestClient(gateway_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("test-readonly", "readonly")
     )
     return test_client
 

@@ -449,17 +449,30 @@ default password `admin` - deliberately predictable, not a generated secret, sin
 it's meant to be the very first login on a fresh install and changed right away via
 the admin panel; logged once at `WARNING` level as a reminder.
 
-Two roles share the same login flow: `admin` and `user`. Regular users keep full
-access to everything they always had, destructive actions included (Find Orphans,
-Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only:
-creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
-user account management, and enabling AI configuration in Config Push. The right
-panel's status bar (above the node list, next to the "Connected: N nodes" text)
-shows the signed-in username (`GET /me`). The host overview also has a **Log out** button.
-Hover over the canvas username or activate it with the
-keyboard or a tap to open **Log out**. Admins also get an
-**Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
-of the canvas SPA) for user CRUD, the AI configuration switch, and logs (below).
+Three roles share the same login flow: `admin`, `user` and `readonly`. Regular
+users keep full access to everything they always had, destructive actions
+included (Find Orphans, Deploy Fresh GNS3 VM, etc. are not role-gated). Only
+three things are admin-only: creating/deleting/activating a settings profile
+(`app/routes/host_settings.py`), user account management, and enabling AI
+configuration in Config Push. The right panel's status bar (above the node
+list, next to the "Connected: N nodes" text) shows the signed-in username
+(`GET /me`). The host overview also has a **Log out** button. Hover over the
+canvas username or activate it with the keyboard or a tap to open **Log
+out**. Admins also get an **Admin Panel** link to `/admin.html`, a small
+standalone page (own JS, not part of the canvas SPA) for user CRUD, the AI
+configuration switch, and logs (below).
+
+`readonly` is a blanket, middleware-level block (`app/auth_middleware.py`):
+every request whose method isn't `GET`/`HEAD`/`OPTIONS` gets a 403 before it
+reaches any route, including anything proxied to a Phase 3 backend - a new
+mutating endpoint added later is covered automatically, nothing to remember
+per route. The one exemption is picking which backend a readonly user's own
+session points at (`POST /settings-profiles/{filename}/activate`) - that's
+choosing what to look at, not an infrastructure change. WebSocket console/VM-
+screen connections are deliberately **not** blocked for `readonly` - watching
+a device's console/screen is fine for an observer; a real "watch but don't
+type" split would need new logic in `app/console.py`/`app/serial_console.py`
+and wasn't judged worth the complexity for this project.
 
 Each user also has an `allowed_hosts` field (`app/users.py`), default `"ALL"` -
 every settings-profile filename, same as before this existed. An admin can
