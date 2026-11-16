@@ -1541,6 +1541,30 @@ button.toolbar-btn.primary:hover:not(:disabled) {
 }
 #canvas-toolbar .toolbar-btn:hover { background: #fff; border-color: #838990; }
 #canvas-toolbar .toolbar-btn.active { background: #dfe1e3; border-color: #777e85; }
+#user-menu {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  max-width: calc(100% - 80px);
+}
+#user-menu-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#user-menu-actions {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 130px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  box-shadow: 0 5px 14px #0004;
+}
 #topology-summary { background: #292929; border-bottom-color: #181818; }
 #status-connection {
   padding: 9px 12px;

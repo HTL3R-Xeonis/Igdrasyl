@@ -452,8 +452,9 @@ Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only
 creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
 user account management, and which AI snippet exercise topics are enabled
 (`app/ai_snippets.py`'s stored override, unioned with the
-`TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS` env var). The menu bar shows the signed-in
-username and role (`GET /me`) and a **Log out** button; admins also get an
+`TOPOLOGYOPERATOR_AI_SNIPPET_TOPICS` env var). The upper-right corner of the canvas
+shows the signed-in username (`GET /me`). Hover over it or activate it with the
+keyboard or a tap to open **Log out**. Admins also get an
 **Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
 of the canvas SPA) for user CRUD, the AI-topic checkboxes, and logs (below).
 
