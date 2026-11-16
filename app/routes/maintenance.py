@@ -209,6 +209,10 @@ def deploy_gns3_vm(request: DeployGns3VmRequest | None = None) -> dict[str, str]
         raise HTTPException(400, str(exc)) from exc
     except gns3_vm_deploy_jobs.AlreadyRunning as exc:
         raise HTTPException(409, str(exc)) from exc
+    except (RuntimeError, OSError) as exc:
+        if isinstance(exc, esxi_session.EsxiUnavailable):
+            raise
+        raise HTTPException(502, str(exc)) from exc
     return {"job_id": job.id}
 
 

@@ -30,6 +30,8 @@ from src.settings import Settings
 from app import ova_templates
 from app.gns3_state import resolve_project_id
 
+_JOB_LOCK = threading.Lock()
+
 
 class NotConfigured(Exception):
     """An OVA resource and/or management network has not been selected."""
@@ -48,23 +50,63 @@ class GNS3VMDeployJob:
     error: str | None = None
 
 
-def _require_configured() -> None:
-    if (
-        not ova_templates.selected_template_id()
-        or not Settings.ESXI.GNS3_VM_MGMT_NETWORK
-    ):
-        raise NotConfigured(
-            "Select a GNS3 VM template and management network in host settings"
-        )
+def _find_existing_vm(app: FastAPI):
+    """Prefer the configured name, otherwise adopt a unique inventory match."""
+    esxi = app.state.esxi_connection
+    configured = esxi.get_vm(Settings.ESXI.GNS3_VM_NAME)
+    if configured is not None:
+        return configured
+    vm = esxi.find_gns3_vm()
+    if vm is not None:
+        logger.info(f"Detected existing GNS3 VM '{vm.name}'")
+        Settings.ESXI.GNS3_VM_NAME = vm.name
+    return vm
 
 
-def is_configured() -> bool:
-    """Whether a GNS3 VM template and a management network are selected, i.e. whether a deploy can start."""
-    try:
-        _require_configured()
-    except NotConfigured:
-        return False
-    return True
+def _detect_management_network(app: FastAPI) -> str | None:
+    """Reuse a standard port group on the ESXi management network."""
+    network = app.state.esxi_connection.get_host_system().config.network
+    names = {
+        nic.portgroup
+        for nic in network.vnic
+        if nic.spec.ip.ipAddress == Settings.ESXI.IP
+    }
+    uplink_switches = {switch.name for switch in network.vswitch if switch.pnic}
+    groups = {
+        group.spec.name: (group.spec.vswitchName, group.spec.vlanId)
+        for group in network.portgroup
+        if group.spec.vswitchName in uplink_switches and group.spec.vlanId < 4095
+    }
+    matches = names & groups.keys()
+    if len(matches) != 1:
+        return None
+    management = matches.pop()
+    if groups.get("VM Network") == groups[management]:
+        return "VM Network"
+    return management
+
+
+def _require_configured(
+    app: FastAPI, *, detect_management: bool = True
+) -> tuple[str, str]:
+    template_id = ova_templates.selected_template_id()
+    if not template_id:
+        templates = ova_templates.list_public()
+        if len(templates) == 1:
+            template_id = templates[0]["id"]
+    management = Settings.ESXI.GNS3_VM_MGMT_NETWORK
+    if not management and detect_management:
+        management = _detect_management_network(app)
+
+    missing = []
+    if not template_id:
+        missing.append("GNS3 VM template")
+    if not management:
+        missing.append("management network")
+    if missing:
+        fields = " and ".join(missing)
+        raise NotConfigured(f"Select the {fields} in host settings.")
+    return template_id, management
 
 
 def auto_deploy_if_missing(app: FastAPI) -> None:
@@ -76,20 +118,17 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     matters because deploy_fresh_gns3_vm powers off and renames-as-
     backup any existing same-named VM unconditionally, and this must
     never risk doing that to a VM that's merely slow, only one that
-    isn't there. A no-op (not an error) when a template resource or
-    management network isn't configured - the caller (main.py's own
-    lifespan) falls through to its ordinary "not found" warning either
-    way, this just sometimes fixes that before it happens.
+    isn't there. The startup warning identifies any setting that could
+    not be determined unambiguously.
     :raises RuntimeError/ConnectionError/TimeoutError/ValueError: propagated
         from deploy_fresh_gns3_vm on failure - the caller's own try/except
         (already there for the ordinary "VM not found" case) turns this
         into the same non-fatal startup_warning, not a crash.
     """
-    template_id = ova_templates.selected_template_id()
-    if not template_id or not Settings.ESXI.GNS3_VM_MGMT_NETWORK:
+    if _find_existing_vm(app) is not None:
         return
-    if app.state.esxi_connection.get_vm(Settings.ESXI.GNS3_VM_NAME) is not None:
-        return
+    template_id, management = _require_configured(app)
+    ova_filename = ova_templates.filename_for(template_id)
 
     logger.warning(
         f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}' not found at all - "
@@ -98,27 +137,33 @@ def auto_deploy_if_missing(app: FastAPI) -> None:
     datastore_name = Settings.ESXI.DATASTORE
     if datastore_name is None:
         datastore_name = app.state.esxi_connection.find_biggest_datastore().name
-    # The OVA deploy service imports it straight from the template share.
+    # Discovery and the catalog lookup can take time. Recheck before importing.
+    if _find_existing_vm(app) is not None:
+        return
     deploy_fresh_gns3_vm(
         app.state.esxi_connection,
         Settings.ESXI.GNS3_VM_NAME,
         "",
         datastore_name,
-        Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+        management,
         Settings.ESXI.TRUNK_PORT_GROUP,
         mac_range=Settings.ESXI.GNS3_VM_MAC_RANGE,
-        ova_filename=ova_templates.filename_for(template_id),
+        ova_filename=ova_filename,
     )
     logger.info(f"Auto-deployed GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}'")
 
 
 def run_deploy_job(
-    app: FastAPI, job: GNS3VMDeployJob, delete_old_vm: bool = False
+    app: FastAPI,
+    job: GNS3VMDeployJob,
+    delete_old_vm: bool = False,
+    *,
+    inputs: tuple[str, str] | None = None,
 ) -> None:
     try:
-        template_id = ova_templates.selected_template_id()
-        if not template_id:
-            raise ValueError("No GNS3 VM template is selected")
+        template_id, management = (
+            inputs if inputs is not None else _require_configured(app)
+        )
         datastore_name = Settings.ESXI.DATASTORE
         if datastore_name is None:
             datastore_name = app.state.esxi_connection.find_biggest_datastore().name
@@ -132,7 +177,7 @@ def run_deploy_job(
             Settings.ESXI.GNS3_VM_NAME,
             "",
             datastore_name,
-            Settings.ESXI.GNS3_VM_MGMT_NETWORK,
+            management,
             Settings.ESXI.TRUNK_PORT_GROUP,
             on_stage=lambda stage: setattr(job, "stage", stage),
             delete_old_vm=delete_old_vm,
@@ -179,15 +224,29 @@ def start_job(app: FastAPI, delete_old_vm: bool = False) -> GNS3VMDeployJob:
     :raises NotConfigured: an OVA resource or management network isn't selected
     :raises AlreadyRunning: a job for this app is already in progress
     """
-    _require_configured()
-    existing = getattr(app.state, "gns3_vm_deploy_job", None)
-    if existing is not None and existing.status == "running":
-        raise AlreadyRunning(f"deploy job {existing.id} is already running")
-
-    job = GNS3VMDeployJob(id=str(uuid.uuid4()))
-    app.state.gns3_vm_deploy_job = job
-    thread = threading.Thread(
-        target=run_deploy_job, args=(app, job, delete_old_vm), daemon=True
-    )
-    thread.start()
+    with _JOB_LOCK:
+        existing = getattr(app.state, "gns3_vm_deploy_job", None)
+        if existing is not None and existing.status == "running":
+            raise AlreadyRunning(f"deploy job {existing.id} is already running")
+        esxi = app.state.esxi_connection
+        first_deployment = esxi.get_vm(Settings.ESXI.GNS3_VM_NAME) is None
+        if first_deployment:
+            try:
+                candidate = esxi.find_gns3_vm()
+            except ValueError as exc:
+                raise NotConfigured(
+                    "Select the existing GNS3 VM in host settings."
+                ) from exc
+            if candidate is not None:
+                raise NotConfigured("Select the existing GNS3 VM in host settings.")
+        inputs = _require_configured(app, detect_management=first_deployment)
+        job = GNS3VMDeployJob(id=str(uuid.uuid4()))
+        app.state.gns3_vm_deploy_job = job
+        thread = threading.Thread(
+            target=run_deploy_job,
+            args=(app, job, delete_old_vm),
+            kwargs={"inputs": inputs},
+            daemon=True,
+        )
+        thread.start()
     return job

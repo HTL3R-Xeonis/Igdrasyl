@@ -53,22 +53,17 @@ def test_status_never_connects_to_esxi(app_state):
     esxi.get_vm.assert_not_called()
 
 
-def test_status_offers_deploy_for_a_missing_vm_only_when_a_template_is_selected(
-    app_state,
-):
-    from unittest.mock import patch
+def test_status_offers_deploy_for_a_missing_vm(app_state):
+    app_state.esxi_connection.connected = True
+    app_state.esxi_connection.get_vm.return_value = None
 
-    esxi = _esxi(app_state, "poweredOff")
-    esxi.get_vm.return_value = None
-    with patch("app.gns3_vm_deploy_jobs.is_configured", return_value=True):
-        result = gns3_vm_power.status(_app())
-    assert result == {
+    state = gns3_vm_power.status(_app())
+
+    assert state == {
         "name": Settings.ESXI.GNS3_VM_NAME,
         "power_state": None,
         "action": "deploy",
     }
-    with patch("app.gns3_vm_deploy_jobs.is_configured", return_value=False):
-        assert gns3_vm_power.status(_app())["action"] is None
 
 
 def test_status_is_none_when_the_state_is_unreadable(app_state):

@@ -315,14 +315,17 @@ import, before it is powered on), whatever the OVA declares - the stock OVA's
 - **On demand**, via File menu > "Deploy Fresh GNS3 VM…" - e.g. to
   recover from a corrupted GNS3 VM without restarting this whole
   process.
-- **Automatically at startup**, but only when the configured VM is
-  found *genuinely absent* - never just because it exists but isn't
-  reporting an IP yet (e.g. still booting).
+- **Automatically at startup** on an active host. The Operator looks for
+  the configured VM name first, then checks the ESXi inventory for one
+  identifiable GNS3 VM. It imports an OVA only when no match exists.
 
-Requires an OVA resource selected from the sister template API and
-`esxi.gns3_vm_mgmt_network`. The browser receives only the template ID and safe
-display metadata. The backend streams `/api/download/{id}` into a private
-temporary file for the import and deletes it afterward.
+An explicit OVA template and `esxi.gns3_vm_mgmt_network` take precedence.
+For a first deployment without those settings, the Operator can select the only
+GNS3 OVA from the catalog and reuse a standard port group on the ESXi management
+network. It prefers `VM Network` when it shares the same uplink switch and VLAN
+as the management VMkernel interface. Select the missing settings in host
+settings when discovery is inconclusive. The OVA deploy service imports the
+template from its share and needs valid credentials for the target ESXi host.
 
 An existing same-named VM is always powered off and renamed as a
 timestamped backup first, never touched destructively by default. Two

@@ -61,7 +61,9 @@ async def _linux_console(
                 elif text.startswith("echo "):
                     out, status = text[5:].replace("'", "") + "\r\n", 0
                 elif text.startswith("sleep "):
-                    return  # never answers: a hanging command
+                    # A hung command leaves the connection open until the agent disconnects.
+                    await reader.read()
+                    return
                 else:
                     status = 0
                 writer.write(out.encode())

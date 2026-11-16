@@ -14,8 +14,6 @@ from fastapi import FastAPI
 from loguru import logger
 from src.settings import Settings
 
-from app import gns3_vm_deploy_jobs
-
 _OFF_STATES = ("poweredOff", "suspended")
 
 
@@ -37,7 +35,7 @@ def _action(power_state: str, has_ip: bool) -> str | None:
 def status(app: FastAPI) -> dict[str, Any] | None:
     """
     {"name", "power_state", "action"} for the configured GNS3 VM, where action is "start" (it is off), "restart" (it is on
-    but reports no address), "deploy" (it does not exist on the host and a template for a new one is selected) or None
+    but reports no address), "deploy" (the VM does not exist on the host) or None
     (nothing to offer). None when ESXi is not connected (never waits for a connect: this is read by the polled /health) or
     the state can't be read.
     """
@@ -50,7 +48,7 @@ def status(app: FastAPI) -> dict[str, Any] | None:
             return {
                 "name": Settings.ESXI.GNS3_VM_NAME,
                 "power_state": None,
-                "action": "deploy" if gns3_vm_deploy_jobs.is_configured() else None,
+                "action": "deploy",
             }
         power_state = str(vm.runtime.powerState)
     except Exception as exc:
