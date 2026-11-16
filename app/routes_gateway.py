@@ -145,7 +145,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
             # shared host someone else might be looking at right now.
             who = f": {escape(', '.join(active))}" if role == "admin" else ""
             noun = "user" if len(active) == 1 else "users"
-            presence = f"<br><span>{len(active)} active {noun}{who}</span>"
+            presence = f'<span class="backend-presence">{len(active)} active {noun}{who}</span>'
         deploy = (
             f'<button type="button" data-deploy-profile="{escape(filename)}">Deploy GNS3 VM…</button>'
             '<span data-deploy-status role="status"></span>'
@@ -154,13 +154,13 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
         )
         tiles += (
             '<div class="backend-tile">'
-            f"<div><strong>{escape(filename)}</strong><br><span>{escape(str(detail))}</span>{presence}</div>"
+            f'<div class="backend-tile-info"><strong>{escape(filename)}</strong><span>{escape(str(detail))}</span>{presence}</div>'
             '<div class="backend-tile-actions"><form method="post" action="/settings-profiles/'
             f'{escape(filename)}/activate"><button type="submit">Activate</button></form>'
             f"{deploy}</div></div>"
         )
     if not tiles:
-        tiles = "<p>No host profiles exist yet - an admin creates one under Host Settings.</p>"
+        tiles = '<p class="backend-picker-empty">No host profiles exist yet - an admin creates one under Host Settings.</p>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -170,32 +170,50 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="/styles.css?v=ginnungagap-55">
 <style>
-  body {{ display: block; padding: 48px; }}
-  .backend-picker-header {{ display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
-    justify-content: space-between; max-width: 518px; margin-bottom: 20px; }}
-  .backend-picker-header h1 {{ font-size: 18px; margin: 0; }}
+  body {{ display: block; padding: 0 16px; }}
+  main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}
+  .backend-picker-header {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
+  .backend-picker-header img {{ width: 28px; height: 28px; }}
+  .backend-picker-header h1 {{ font-size: 20px; font-weight: 600; margin: 0; flex: 1; }}
+  .backend-picker-sub {{ color: #aaa; font-size: 13px; margin: 0 0 24px; }}
   .backend-tile {{
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    max-width: 480px; margin-bottom: 10px; padding: 14px 18px; border-radius: 10px;
-    background: #333; border: 1px solid #444;
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    margin-bottom: 12px; padding: 16px 20px; border-radius: 10px;
+    background: #2e2e2e; border: 1px solid #444;
   }}
-  .backend-tile span {{ color: #aaa; font-size: 13px; }}
-  .backend-tile-actions {{ display: grid; gap: 8px; justify-items: end; text-align: right; }}
-  .backend-tile button:disabled {{ cursor: wait; opacity: .6; }}
+  .backend-tile-info {{ min-width: 0; }}
+  .backend-tile-info strong {{ display: block; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }}
+  .backend-tile-info span {{ display: block; color: #aaa; font-size: 13px; margin-top: 3px; }}
+  .backend-tile-info .backend-presence {{ color: #9ccc65; }}
+  .backend-tile-actions {{ display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; flex-shrink: 0; max-width: 60%; }}
+  .backend-tile-actions form {{ margin: 0; }}
   .backend-tile button {{
-    padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer;
-    background: #7cb342; color: #1c1c1c; font-weight: 500;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; white-space: nowrap;
+    background: #7cb342; color: #1c1c1c; border: 1px solid #7cb342;
+  }}
+  .backend-tile button[data-deploy-profile] {{ background: transparent; color: #ddd; border-color: #666; }}
+  .backend-tile button:disabled {{ cursor: wait; opacity: .6; }}
+  .backend-tile-actions [data-deploy-status] {{ flex-basis: 100%; text-align: right; color: #aaa; font-size: 12px; }}
+  .backend-tile-actions [data-deploy-status]:empty {{ display: none; }}
+  .backend-picker-empty {{ color: #aaa; }}
+  @media (max-width: 520px) {{
+    .backend-tile {{ flex-direction: column; align-items: stretch; }}
+    .backend-tile-actions {{ max-width: none; justify-content: flex-start; }}
   }}
 </style>
 </head>
 <body>
+<main class="backend-picker">
 <header class="backend-picker-header">
+  <img src="/ginnungagap-mark.svg" alt="">
   <h1>Choose which server to work on</h1>
   <form action="/logout" method="post">
     <button type="submit" class="toolbar-btn">Log out</button>
   </form>
 </header>
+<p class="backend-picker-sub">Signed in as {escape(username)}. Each server runs its own session.</p>
 {tiles}
+</main>
 <script src="/gateway/host-deploy.js?v=1" defer></script>
 </body>
 </html>"""
