@@ -129,3 +129,119 @@ def test_regular_user_cannot_upload_create_edit_delete_or_activate_a_host_profil
 
 def test_regular_user_can_still_list_host_profiles(user_client):
     assert user_client.get("/settings-profiles").status_code == 200
+
+
+# --- Host restrictions + bulk import ---------------------------------------
+
+
+def _upload_profile(client, filename, content=b"esxi:\n  ip: 10.0.0.1\n"):
+    return client.post(
+        "/settings-profiles", files={"file": (filename, content, "application/x-yaml")}
+    )
+
+
+def test_create_user_with_allowed_hosts_round_trips(client):
+    created = client.post(
+        "/admin/users",
+        json={
+            "username": "alice",
+            "password": "correct-horse",
+            "role": "user",
+            "allowed_hosts": ["lab-a.yml"],
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["allowed_hosts"] == ["lab-a.yml"]
+
+
+def test_set_user_allowed_hosts(client):
+    client.post(
+        "/admin/users",
+        json={"username": "alice", "password": "correct-horse", "role": "user"},
+    )
+    resp = client.put(
+        "/admin/users/alice/allowed-hosts", json={"allowed_hosts": ["lab-a.yml"]}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["allowed_hosts"] == ["lab-a.yml"]
+
+    assert (
+        client.put(
+            "/admin/users/ghost/allowed-hosts", json={"allowed_hosts": "ALL"}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.put(
+            "/admin/users/alice/allowed-hosts", json={"allowed_hosts": "nonsense"}
+        ).status_code
+        == 400
+    )
+
+
+def test_regular_user_cannot_set_allowed_hosts(user_client):
+    resp = user_client.put(
+        "/admin/users/alice/allowed-hosts", json={"allowed_hosts": "ALL"}
+    )
+    assert resp.status_code == 403
+
+
+def test_a_restricted_user_only_sees_their_allowed_host_profiles(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path))
+    _upload_profile(client, "lab-a.yml")
+    _upload_profile(client, "lab-b.yml")
+    client.post(
+        "/admin/users",
+        json={
+            "username": "restricted-user",
+            "password": "correct-horse",
+            "role": "user",
+            "allowed_hosts": ["lab-a.yml"],
+        },
+    )
+
+    from fastapi.testclient import TestClient
+
+    import app.main as main_module
+    from app import auth
+
+    restricted_client = TestClient(main_module.app)
+    restricted_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token("restricted-user", "user")
+    )
+
+    filenames = {
+        p["filename"] for p in restricted_client.get("/settings-profiles").json()
+    }
+    assert filenames == {"lab-a.yml"}
+    # admin always sees every profile regardless of its own allowed_hosts
+    assert {p["filename"] for p in client.get("/settings-profiles").json()} == {
+        "lab-a.yml",
+        "lab-b.yml",
+    }
+
+
+def test_bulk_create_users_mixed_success_and_failure(client):
+    resp = client.post(
+        "/admin/users/bulk",
+        json={
+            "lines": "alice;secret123\nbad-line-no-semicolon\nbob;anotherpass",
+            "role": "user",
+            "allowed_hosts": "ALL",
+        },
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert [r["status"] for r in results] == ["created", "error", "created"]
+
+    listed = {u["username"] for u in client.get("/admin/users").json()}
+    assert {"alice", "bob"}.issubset(listed)
+
+
+def test_bulk_create_users_is_admin_only(user_client):
+    resp = user_client.post(
+        "/admin/users/bulk", json={"lines": "x;secret123", "role": "user"}
+    )
+    assert resp.status_code == 403

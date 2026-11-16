@@ -58,6 +58,8 @@ BACKEND_COOKIE = "xeonis_backend"
 AdminUser = Annotated[tuple[str, str], Depends(require_admin)]
 AnyUser = Annotated[tuple[str, str], Depends(current_user)]
 
+AllowedHosts = str | list[str]
+
 
 def _user_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
@@ -96,10 +98,14 @@ def get_target(scope) -> tuple[str, int] | None:
     return ("127.0.0.1", port) if port is not None else None
 
 
-def _pick_backend_page() -> str:
+def _pick_backend_page(user: tuple[str, str]) -> str:
+    username, role = user
+    record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
     tiles = ""
     for profile in settings_profiles.list_profiles():
         filename = profile["filename"]
+        if not users.can_access_host(record, filename):
+            continue
         if profile.get("error"):
             detail = f"Can't read this profile: {profile['error']}"
         else:
@@ -148,6 +154,7 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     role: str
+    allowed_hosts: AllowedHosts = "ALL"
 
 
 class SetRoleRequest(BaseModel):
@@ -160,6 +167,20 @@ class SetPasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     password: str
+
+
+class SetAllowedHostsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_hosts: AllowedHosts
+
+
+class BulkCreateUsersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lines: str
+    role: str
+    allowed_hosts: AllowedHosts = "ALL"
 
 
 class AiConfigRequest(BaseModel):
@@ -189,8 +210,8 @@ def register(app: FastAPI) -> None:
         return {"status": "ok"}
 
     @app.get("/pick-backend", response_class=HTMLResponse)
-    def pick_backend(_user: AnyUser) -> str:
-        return _pick_backend_page()
+    def pick_backend(user: AnyUser) -> str:
+        return _pick_backend_page(user)
 
     # --- User accounts (app/users.py) -----------------------------------
 
@@ -201,7 +222,18 @@ def register(app: FastAPI) -> None:
     @app.post("/admin/users", status_code=201)
     def create_user(body: CreateUserRequest, _admin: AdminUser) -> dict[str, Any]:
         try:
-            return users.create_user(body.username, body.password, body.role)
+            return users.create_user(
+                body.username, body.password, body.role, body.allowed_hosts
+            )
+        except ValueError as exc:
+            raise _user_error(exc) from exc
+
+    @app.post("/admin/users/bulk")
+    def create_users_bulk(
+        body: BulkCreateUsersRequest, _admin: AdminUser
+    ) -> list[dict[str, Any]]:
+        try:
+            return users.create_users_bulk(body.lines, body.role, body.allowed_hosts)
         except ValueError as exc:
             raise _user_error(exc) from exc
 
@@ -232,6 +264,15 @@ def register(app: FastAPI) -> None:
             raise _user_error(exc) from exc
         return {"status": "ok"}
 
+    @app.put("/admin/users/{username}/allowed-hosts")
+    def set_user_allowed_hosts(
+        username: str, body: SetAllowedHostsRequest, _admin: AdminUser
+    ) -> dict[str, Any]:
+        try:
+            return users.set_allowed_hosts(username, body.allowed_hosts)
+        except (ValueError, FileNotFoundError) as exc:
+            raise _user_error(exc) from exc
+
     # --- AI configuration (app/ai_snippets.py) ---------------------------
     # Mirrors app/routes/admin.py's own /admin/ai-config exactly (same
     # ai_snippets.get_enabled/set_enabled/available functions) - that one
@@ -254,8 +295,14 @@ def register(app: FastAPI) -> None:
     # --- Settings profiles, connections, host-config, OVA templates -----
 
     @app.get("/settings-profiles")
-    def list_settings_profiles() -> list[dict[str, Any]]:
-        return settings_profiles.list_profiles()
+    def list_settings_profiles(user: AnyUser) -> list[dict[str, Any]]:
+        username, role = user
+        record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+        return [
+            profile
+            for profile in settings_profiles.list_profiles()
+            if users.can_access_host(record, profile["filename"])
+        ]
 
     @app.post("/settings-profiles")
     async def upload_settings_profile(
@@ -348,7 +395,7 @@ def register(app: FastAPI) -> None:
     # --- Activate / restart a backend ------------------------------------
 
     @app.post("/settings-profiles/{filename}/activate")
-    def activate_settings_profile(filename: str, _user: AnyUser) -> Response:
+    def activate_settings_profile(filename: str, user: AnyUser) -> Response:
         """
         Makes sure this profile's backend is running (starting it if
         needed, assigning its port the first time), waits for it to
@@ -365,6 +412,10 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
+        username, role = user
+        record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+        if not users.can_access_host(record, filename):
+            raise HTTPException(403, f"Not allowed to use host {filename!r}")
         try:
             port = backend_manager.ensure_running(filename)
         except backend_ports.NoFreePort as exc:

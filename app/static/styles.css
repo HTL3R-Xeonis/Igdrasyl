@@ -805,7 +805,22 @@
     color: var(--dim);
     gap: 16px;
   }
-  #status-connection { padding: 8px 16px 0; font-size: 11px; color: var(--dim); }
+  #status-connection {
+    padding: 8px 16px 0;
+    font-size: 11px;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #status-connection-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   #status-bar .spacer { flex: 1; }
   #status-zoom { display: flex; align-items: center; gap: 6px; }
   #status-zoom button {
@@ -1542,14 +1557,12 @@ button.toolbar-btn.primary:hover:not(:disabled) {
 #canvas-toolbar .toolbar-btn:hover { background: #fff; border-color: #838990; }
 #canvas-toolbar .toolbar-btn.active { background: #dfe1e3; border-color: #777e85; }
 #user-menu {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+  position: relative;
   z-index: 10;
-  max-width: calc(100% - 80px);
+  flex-shrink: 0;
 }
 #user-menu-name {
-  max-width: 100%;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1571,6 +1584,10 @@ button.toolbar-btn.primary:hover:not(:disabled) {
   border-bottom: 1px solid #3a414b;
   color: #c8d0d8;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .summary-row { border-radius: 4px; margin: 2px 5px; }
 .summary-row:hover, .summary-row.selected { background: #3b4046; }

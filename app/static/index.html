@@ -167,13 +167,6 @@
       <button class="toolbar-btn" id="link-mode-btn">Link</button>
       <span id="link-mode-hint" hidden>Click two nodes to connect them (Esc to cancel)</span>
     </div>
-    <div id="user-menu" hidden>
-      <button id="user-menu-name" class="toolbar-btn" type="button" aria-expanded="false" aria-controls="user-menu-actions"></button>
-      <div id="user-menu-actions" hidden>
-        <a id="user-menu-admin-link" href="/admin.html" class="menu-item" hidden>Admin Panel</a>
-        <button id="user-menu-logout-btn" class="menu-item" type="button">Log out</button>
-      </div>
-    </div>
     <div id="node-finder" hidden>
       <input type="search" id="node-finder-input" placeholder="Find node (name, role or image)" autocomplete="off" spellcheck="false">
       <ul id="node-finder-results"></ul>
@@ -196,7 +189,16 @@
   <div id="right-panel-resize-handle" title="Drag to resize"></div>
   <div id="right-panel">
     <div id="topology-summary">
-      <div id="status-connection"><span id="status-connection-text">Connecting…</span></div>
+      <div id="status-connection">
+        <span id="status-connection-text">Connecting…</span>
+        <div id="user-menu" hidden>
+          <button id="user-menu-name" class="toolbar-btn" type="button" aria-expanded="false" aria-controls="user-menu-actions"></button>
+          <div id="user-menu-actions" hidden>
+            <a id="user-menu-admin-link" href="/admin.html" class="menu-item" hidden>Admin Panel</a>
+            <button id="user-menu-logout-btn" class="menu-item" type="button">Log out</button>
+          </div>
+        </div>
+      </div>
       <ul id="topology-summary-list"></ul>
     </div>
     <div id="panel-resize-handle" title="Drag to resize"></div>

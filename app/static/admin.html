@@ -17,12 +17,30 @@
   #ap h2 { font-size: 15px; font-weight: 500; margin: 0 0 10px; }
   #ap table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #ap th, #ap td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
-  #ap-create-user, #ap-ai-config-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
-  #ap-create-user input, #ap-create-user select { min-height: 27px; }
+  #ap-create-user, #ap-ai-config-form, #ap-bulk-create { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  #ap-create-user input, #ap-create-user select, #ap-bulk-create select { min-height: 27px; }
   #ap-ai-config-form label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
   .ap-status { color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 1em; }
   .ap-status.ap-error { color: var(--bad); }
   #ap-denied { display: none; color: var(--bad); margin-top: 40px; text-align: center; }
+  .ap-hosts-cell { position: relative; }
+  .ap-hosts-summary { cursor: pointer; text-decoration: underline dotted; }
+  .ap-hosts-popover {
+    display: none; position: absolute; z-index: 5; top: 100%; left: 0; margin-top: 4px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; min-width: 180px; max-height: 220px; overflow-y: auto; font-size: 12px;
+  }
+  .ap-hosts-popover.ap-open { display: block; }
+  .ap-hosts-popover label { display: flex; align-items: center; gap: 6px; padding: 2px 0; white-space: nowrap; }
+  .ap-hosts-popover hr { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
+  #ap-bulk-create textarea {
+    width: 100%; min-height: 90px; font-family: inherit; font-size: 13px; box-sizing: border-box;
+    background: var(--panel-2); color: inherit; border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px;
+  }
+  #ap-bulk-create-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+  #ap-bulk-results { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
+  #ap-bulk-results li { padding: 2px 0; }
+  #ap-bulk-results li.ap-error { color: var(--bad); }
   #ap-logs-section .toolbar-btn { margin-right: 8px; }
   #ap-logs-summary {
     white-space: pre-wrap; margin-top: 12px; padding: 12px; border-radius: 5px;
@@ -44,7 +62,7 @@
     <section id="ap-users-section">
       <h2>User accounts</h2>
       <table>
-        <thead><tr><th>Username</th><th>Role</th><th></th></tr></thead>
+        <thead><tr><th>Username</th><th>Role</th><th>Allowed hosts</th><th></th></tr></thead>
         <tbody id="ap-users-body"></tbody>
       </table>
       <form id="ap-create-user">
@@ -54,9 +72,27 @@
           <option value="user">user</option>
           <option value="admin">admin</option>
         </select>
+        <span id="ap-new-hosts-control"></span>
         <button class="toolbar-btn primary" type="submit">Add user</button>
       </form>
       <p class="ap-status" id="ap-users-status"></p>
+    </section>
+
+    <section id="ap-bulk-section">
+      <h2>Bulk add users</h2>
+      <form id="ap-bulk-create">
+        <textarea id="ap-bulk-lines" placeholder="One account per line: username;password&#10;alice;secret123&#10;bob;anotherpass" required></textarea>
+        <div id="ap-bulk-create-options">
+          <select id="ap-bulk-role">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+          <span id="ap-bulk-hosts-control"></span>
+          <button class="toolbar-btn primary" type="submit">Import</button>
+        </div>
+      </form>
+      <p class="ap-status" id="ap-bulk-status"></p>
+      <ul id="ap-bulk-results"></ul>
     </section>
 
     <section id="ap-ai-config-section">

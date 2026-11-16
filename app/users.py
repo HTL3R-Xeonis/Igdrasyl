@@ -28,12 +28,15 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from app.settings_profiles import _SAFE_NAME_PATTERN
+
 _LOCK = Lock()
 _PBKDF2_ITERATIONS = 600_000
 _SALT_BYTES = 16
 VALID_ROLES = ("admin", "user")
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,60}$")
 MIN_PASSWORD_LENGTH = 8
+_MAX_ALLOWED_HOSTS = 200
 
 
 def _store() -> Path:
@@ -99,12 +102,41 @@ def _validate_password(password: str) -> str:
     return password
 
 
+def _validate_allowed_hosts(value: Any) -> str | list[str]:
+    """
+    "ALL" (the default - every host, same as today's behavior) or a list of
+    settings-profile filenames. Not checked against the current set of
+    profiles - a restriction may be set before that profile exists, or
+    outlive one that gets deleted and re-created later.
+    """
+    if value == "ALL":
+        return "ALL"
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError('allowed_hosts must be "ALL" or a list of profile filenames')
+    deduplicated = sorted(set(value))
+    if len(deduplicated) > _MAX_ALLOWED_HOSTS:
+        raise ValueError(
+            f"allowed_hosts cannot list more than {_MAX_ALLOWED_HOSTS} hosts"
+        )
+    for filename in deduplicated:
+        if not _SAFE_NAME_PATTERN.match(filename):
+            raise ValueError(f"{filename!r} is not a valid settings-profile filename")
+    return deduplicated
+
+
 def _public(username: str, entry: dict[str, Any]) -> dict[str, Any]:
     return {
         "username": username,
         "role": entry["role"],
         "created_at": entry.get("created_at"),
+        "allowed_hosts": entry.get("allowed_hosts", "ALL"),
     }
+
+
+def get_user(username: str) -> dict[str, Any] | None:
+    """The public record for one user (role, allowed_hosts, ...), or None - no password hash."""
+    entry = _read().get(username)
+    return None if entry is None else _public(username, entry)
 
 
 def list_users() -> list[dict[str, Any]]:
@@ -122,11 +154,14 @@ def _admin_count(users: dict[str, Any], *, excluding: str | None = None) -> int:
     )
 
 
-def create_user(username: str, password: str, role: str) -> dict[str, Any]:
-    """:raises ValueError: a bad username/password/role, or the username is already taken."""
+def create_user(
+    username: str, password: str, role: str, allowed_hosts: str | list[str] = "ALL"
+) -> dict[str, Any]:
+    """:raises ValueError: a bad username/password/role/allowed_hosts, or the username is already taken."""
     _validate_username(username)
     _validate_role(role)
     _validate_password(password)
+    allowed_hosts = _validate_allowed_hosts(allowed_hosts)
     with _LOCK:
         users = _read()
         if username in users:
@@ -135,9 +170,96 @@ def create_user(username: str, password: str, role: str) -> dict[str, Any]:
             "password_hash": hash_password(password),
             "role": role,
             "created_at": time.time(),
+            "allowed_hosts": allowed_hosts,
         }
         _write(users)
         return _public(username, users[username])
+
+
+def set_allowed_hosts(username: str, allowed_hosts: str | list[str]) -> dict[str, Any]:
+    """:raises ValueError: a malformed allowed_hosts value. :raises FileNotFoundError: no such user."""
+    allowed_hosts = _validate_allowed_hosts(allowed_hosts)
+    with _LOCK:
+        users = _read()
+        if username not in users:
+            raise FileNotFoundError(f"No user named {username!r}")
+        users[username]["allowed_hosts"] = allowed_hosts
+        _write(users)
+        return _public(username, users[username])
+
+
+def can_access_host(
+    user: str | dict[str, Any], filename: str, *, role: str | None = None
+) -> bool:
+    """
+    True if this user may activate/see the given settings-profile filename.
+    Admins always can, regardless of their own stored allowed_hosts - "admin"
+    already means install-wide access everywhere else in this project.
+    `user` is either a username (looked up) or an already-fetched public/raw
+    record - whichever the caller already has at hand.
+    """
+    if isinstance(user, dict):
+        if role is None:
+            role = user.get("role")
+        allowed_hosts = user.get("allowed_hosts", "ALL")
+    else:
+        entry = _read().get(user)
+        if entry is None:
+            return False
+        if role is None:
+            role = entry.get("role")
+        allowed_hosts = entry.get("allowed_hosts", "ALL")
+    if role == "admin":
+        return True
+    return allowed_hosts == "ALL" or filename in allowed_hosts
+
+
+def create_users_bulk(
+    text: str, role: str, allowed_hosts: str | list[str] = "ALL"
+) -> list[dict[str, Any]]:
+    """
+    Parses "username;password" lines (one per account, blank lines skipped,
+    split on the first ';' only so a password containing ';' still works)
+    and creates each with the same shared role/allowed_hosts - best-effort,
+    not all-or-nothing: one bad line does not stop the rest of the batch.
+    """
+    allowed_hosts = _validate_allowed_hosts(allowed_hosts)
+    _validate_role(role)
+    results: list[dict[str, Any]] = []
+    seen_in_batch: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if ";" not in line:
+            results.append(
+                {
+                    "username": line,
+                    "status": "error",
+                    "detail": "Missing ';' between username and password",
+                }
+            )
+            continue
+        username, password = line.split(";", 1)
+        username = username.strip()
+        if username in seen_in_batch:
+            results.append(
+                {
+                    "username": username,
+                    "status": "error",
+                    "detail": "Duplicate username within this batch",
+                }
+            )
+            continue
+        seen_in_batch.add(username)
+        try:
+            created = create_user(username, password, role, allowed_hosts)
+            results.append({"username": username, "status": "created", **created})
+        except ValueError as exc:
+            results.append(
+                {"username": username, "status": "error", "detail": str(exc)}
+            )
+    return results
 
 
 def set_role(username: str, role: str) -> dict[str, Any]:

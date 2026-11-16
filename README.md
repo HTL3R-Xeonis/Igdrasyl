@@ -453,12 +453,28 @@ Two roles share the same login flow: `admin` and `user`. Regular users keep full
 access to everything they always had, destructive actions included (Find Orphans,
 Deploy Fresh GNS3 VM, etc. are not role-gated). Only three things are admin-only:
 creating/deleting/activating a settings profile (`app/routes/host_settings.py`),
-user account management, and enabling AI configuration in Config Push. The upper-right corner of the canvas
+user account management, and enabling AI configuration in Config Push. The right
+panel's status bar (above the node list, next to the "Connected: N nodes" text)
 shows the signed-in username (`GET /me`). The host overview also has a **Log out** button.
 Hover over the canvas username or activate it with the
 keyboard or a tap to open **Log out**. Admins also get an
 **Admin Panel** link to `/admin.html`, a small standalone page (own JS, not part
 of the canvas SPA) for user CRUD, the AI configuration switch, and logs (below).
+
+Each user also has an `allowed_hosts` field (`app/users.py`), default `"ALL"` -
+every settings-profile filename, same as before this existed. An admin can
+restrict a regular user to a specific list of filenames from the admin panel's
+per-user "Allowed hosts" control (click the summary to open a checklist of
+every existing profile); `GET /settings-profiles` then only lists the
+filenames that user may see. Admins are never restricted by their own
+`allowed_hosts` value, regardless of what it's set to - "admin" already means
+install-wide access everywhere else in this project. The admin panel also has
+a **Bulk add users** section: paste `username;password` lines (one account per
+line, split on the first `;` only so a password may itself contain `;` or any
+other character), pick a shared role and host restriction for the whole
+batch, and import - one bad line (duplicate username, too-short password, a
+typo with no `;`) reports an error for that line without stopping the rest
+(`POST /admin/users/bulk`).
 
 The admin panel's **Logs** section has an **Export logs** link (just the
 existing `GET /logs/download`, open to every signed-in user like the Logs
@@ -751,8 +767,15 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET/POST /login`, `POST /logout`, `GET /me` - session login/logout and the
   signed-in username/role; see Accounts above. Everything else requires a
   session.
-- `GET/POST /admin/users`, `PUT /admin/users/{username}/role`, `DELETE
-  /admin/users/{username}` - admin-only user management.
+- `GET/POST /admin/users`, `PUT /admin/users/{username}/role`, `PUT
+  /admin/users/{username}/password`, `PUT /admin/users/{username}/allowed-hosts`,
+  `DELETE /admin/users/{username}`, `POST /admin/users/bulk` - admin-only user
+  management. `allowed_hosts` (default `"ALL"`) restricts which
+  settings-profile filenames a non-admin user may see/activate - admins are
+  always unrestricted. Bulk-create takes `{"lines": "user;pass\n...", "role":
+  ..., "allowed_hosts": ...}` (one account per line, split on the first `;`
+  only so a password may itself contain `;` or any other character;
+  best-effort - one bad line doesn't stop the rest).
 - `GET/PUT /admin/ai-config` - admin-only AI configuration switch.
 - `POST /admin/logs/summarize` - admin-only AI summary of the last 2,000 log
   lines (see Accounts above); `GET /logs/download` remains open to every

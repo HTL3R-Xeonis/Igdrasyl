@@ -319,3 +319,89 @@ def test_gateway_health_is_reachable_without_login():
     from app.auth_middleware import _ALLOWED_PATHS
 
     assert "/gateway/health" in _ALLOWED_PATHS
+
+
+# --- Per-user host restrictions ------------------------------------------
+
+
+def _restricted_client(username, role, allowed_hosts):
+    from fastapi.testclient import TestClient
+
+    import app.gateway_main as gateway_module
+    from app import auth, users
+
+    users.create_user(username, "correct-horse", role, allowed_hosts)
+    test_client = TestClient(gateway_module.app)
+    test_client.cookies.set(
+        auth.SESSION_COOKIE, auth.create_session_token(username, role)
+    )
+    return test_client
+
+
+def test_settings_profiles_listing_is_filtered_for_a_restricted_user(gateway_client):
+    _upload(gateway_client, filename="lab-a.yml", content=b"esxi:\n  ip: 10.0.0.1\n")
+    _upload(gateway_client, filename="lab-b.yml", content=b"esxi:\n  ip: 10.0.0.2\n")
+
+    restricted = _restricted_client("restricted-user", "user", ["lab-a.yml"])
+    filenames = {p["filename"] for p in restricted.get("/settings-profiles").json()}
+    assert filenames == {"lab-a.yml"}
+
+    assert {p["filename"] for p in gateway_client.get("/settings-profiles").json()} == {
+        "lab-a.yml",
+        "lab-b.yml",
+    }
+
+
+def test_activate_403s_for_a_host_outside_the_users_allowed_list(
+    gateway_client, monkeypatch
+):
+    _upload(gateway_client, filename="lab-a.yml")
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda port, **kw: True)
+
+    restricted = _restricted_client("restricted-user", "user", ["lab-b.yml"])
+    resp = restricted.post("/settings-profiles/lab-a.yml/activate")
+    assert resp.status_code == 403
+
+
+def test_activate_still_404s_for_an_unknown_profile_before_the_host_check(
+    gateway_client,
+):
+    restricted = _restricted_client("restricted-user", "user", ["lab-a.yml"])
+    resp = restricted.post("/settings-profiles/nope.yml/activate")
+    assert resp.status_code == 404
+
+
+def test_activate_allowed_for_a_host_the_user_is_restricted_to(
+    gateway_client, monkeypatch
+):
+    _upload(gateway_client, filename="lab-a.yml")
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda port, **kw: True)
+
+    restricted = _restricted_client("restricted-user", "user", ["lab-a.yml"])
+    resp = restricted.post("/settings-profiles/lab-a.yml/activate")
+    assert resp.status_code == 200
+
+
+def test_admin_can_always_activate_regardless_of_their_own_allowed_hosts(
+    gateway_client, monkeypatch
+):
+    _upload(gateway_client, filename="lab-a.yml")
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda port, **kw: True)
+
+    restricted_admin = _restricted_client("restricted-admin", "admin", ["lab-b.yml"])
+    resp = restricted_admin.post("/settings-profiles/lab-a.yml/activate")
+    assert resp.status_code == 200
+
+
+def test_pick_backend_page_only_lists_the_users_allowed_hosts(gateway_client):
+    _upload(gateway_client, filename="lab-a.yml", content=b"esxi:\n  ip: 10.0.0.1\n")
+    _upload(gateway_client, filename="lab-b.yml", content=b"esxi:\n  ip: 10.0.0.2\n")
+
+    restricted = _restricted_client("restricted-user", "user", ["lab-a.yml"])
+    resp = restricted.get("/pick-backend", headers={"Accept": "text/html"})
+    assert resp.status_code == 200
+    assert "lab-a.yml" in resp.text
+    assert "lab-b.yml" not in resp.text

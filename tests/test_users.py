@@ -104,3 +104,135 @@ def test_ensure_bootstrap_admin_only_creates_once():
     assert users.authenticate("admin", password) == "admin"
 
     assert users.ensure_bootstrap_admin() is None  # already has accounts
+
+
+# --- allowed_hosts -------------------------------------------------------
+
+
+def test_create_user_defaults_to_all_hosts_and_round_trips_a_list():
+    default = users.create_user("alice", "correct-horse", "user")
+    assert default["allowed_hosts"] == "ALL"
+
+    restricted = users.create_user(
+        "bob", "correct-horse", "user", allowed_hosts=["lab-a.yml", "lab-b.yml"]
+    )
+    assert restricted["allowed_hosts"] == ["lab-a.yml", "lab-b.yml"]
+    assert users.get_user("bob")["allowed_hosts"] == ["lab-a.yml", "lab-b.yml"]
+
+
+def test_an_existing_user_json_without_the_field_reads_back_as_all(tmp_path):
+    store = tmp_path / "users.json"
+    store.write_text(
+        '{"alice": {"password_hash": "x", "role": "user", "created_at": 1.0}}'
+    )
+    assert users.list_users()[0]["allowed_hosts"] == "ALL"
+    assert users.get_user("alice")["allowed_hosts"] == "ALL"
+
+
+def test_set_allowed_hosts_round_trips_and_validates():
+    users.create_user("alice", "correct-horse", "user")
+
+    updated = users.set_allowed_hosts("alice", ["lab-a.yml"])
+    assert updated["allowed_hosts"] == ["lab-a.yml"]
+    assert users.set_allowed_hosts("alice", "ALL")["allowed_hosts"] == "ALL"
+
+    with pytest.raises(ValueError):
+        users.set_allowed_hosts("alice", "not-all-and-not-a-list")
+    with pytest.raises(ValueError):
+        users.set_allowed_hosts("alice", ["../escape.yml"])
+    with pytest.raises(ValueError):
+        users.set_allowed_hosts("alice", [123])
+    with pytest.raises(FileNotFoundError):
+        users.set_allowed_hosts("ghost", "ALL")
+
+
+def test_set_allowed_hosts_deduplicates_and_caps_the_count():
+    users.create_user("alice", "correct-horse", "user")
+    updated = users.set_allowed_hosts("alice", ["a.yml", "a.yml", "b.yml"])
+    assert updated["allowed_hosts"] == ["a.yml", "b.yml"]
+
+    too_many = [f"host{i}.yml" for i in range(201)]
+    with pytest.raises(ValueError, match="200"):
+        users.set_allowed_hosts("alice", too_many)
+
+
+def test_can_access_host_admin_always_true_regardless_of_their_own_list():
+    users.create_user(
+        "admin1", "correct-horse", "admin", allowed_hosts=["only-this.yml"]
+    )
+    assert users.can_access_host("admin1", "literally-anything.yml") is True
+
+
+def test_can_access_host_all_vs_explicit_list():
+    users.create_user("alice", "correct-horse", "user")  # default ALL
+    users.create_user("bob", "correct-horse", "user", allowed_hosts=["lab-a.yml"])
+
+    assert users.can_access_host("alice", "lab-a.yml") is True
+    assert users.can_access_host("alice", "anything-else.yml") is True
+
+    assert users.can_access_host("bob", "lab-a.yml") is True
+    assert users.can_access_host("bob", "lab-b.yml") is False
+
+
+def test_can_access_host_accepts_a_record_dict_too():
+    record = {"role": "user", "allowed_hosts": ["lab-a.yml"]}
+    assert users.can_access_host(record, "lab-a.yml") is True
+    assert users.can_access_host(record, "lab-b.yml") is False
+    assert (
+        users.can_access_host({"role": "admin", "allowed_hosts": []}, "x.yml") is True
+    )
+
+
+# --- bulk import -----------------------------------------------------------
+
+
+def test_create_users_bulk_happy_path():
+    results = users.create_users_bulk(
+        "alice;secret123\nbob;anotherpass\n", "user", "ALL"
+    )
+    assert [r["status"] for r in results] == ["created", "created"]
+    assert {u["username"] for u in users.list_users()} == {"alice", "bob"}
+
+
+def test_create_users_bulk_skips_blank_lines():
+    results = users.create_users_bulk("\nalice;secret123\n\n  \n", "user", "ALL")
+    assert len(results) == 1
+    assert results[0]["status"] == "created"
+
+
+def test_create_users_bulk_reports_a_missing_semicolon_without_stopping_the_batch():
+    results = users.create_users_bulk(
+        "alice;secret123\nthis-line-has-no-separator\nbob;anotherpass", "user", "ALL"
+    )
+    assert [r["status"] for r in results] == ["created", "error", "created"]
+    assert "';'" in results[1]["detail"]
+    assert {u["username"] for u in users.list_users()} == {"alice", "bob"}
+
+
+def test_create_users_bulk_rejects_a_duplicate_within_the_batch():
+    results = users.create_users_bulk("alice;one12345\nalice;two12345", "user", "ALL")
+    assert results[0]["status"] == "created"
+    assert results[1]["status"] == "error"
+    assert "Duplicate" in results[1]["detail"]
+
+
+def test_create_users_bulk_reports_but_does_not_stop_on_an_existing_username():
+    users.create_user("alice", "correct-horse", "user")
+    results = users.create_users_bulk("alice;one12345\nbob;two12345", "user", "ALL")
+    assert results[0]["status"] == "error"
+    assert "already exists" in results[0]["detail"]
+    assert results[1]["status"] == "created"
+
+
+def test_create_users_bulk_password_may_contain_a_semicolon_or_any_character():
+    results = users.create_users_bulk("alice;pa;ss;word!äÖü😀", "user", "ALL")
+    assert results[0]["status"] == "created"
+    assert users.authenticate("alice", "pa;ss;word!äÖü😀") == "user"
+
+
+def test_create_users_bulk_applies_the_shared_role_and_allowed_hosts():
+    results = users.create_users_bulk(
+        "alice;secret123\nbob;anotherpass", "admin", ["lab-a.yml"]
+    )
+    assert all(r["allowed_hosts"] == ["lab-a.yml"] for r in results)
+    assert all(r["role"] == "admin" for r in results)

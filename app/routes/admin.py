@@ -13,6 +13,8 @@ from app.auth import require_admin
 
 AdminUser = Annotated[tuple[str, str], Depends(require_admin)]
 
+AllowedHosts = str | list[str]
+
 
 class CreateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -20,6 +22,7 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     role: str
+    allowed_hosts: AllowedHosts = "ALL"
 
 
 class SetRoleRequest(BaseModel):
@@ -32,6 +35,20 @@ class SetPasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     password: str
+
+
+class SetAllowedHostsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_hosts: AllowedHosts
+
+
+class BulkCreateUsersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lines: str
+    role: str
+    allowed_hosts: AllowedHosts = "ALL"
 
 
 class AiConfigRequest(BaseModel):
@@ -54,7 +71,19 @@ def list_users(_admin: AdminUser) -> list[dict[str, Any]]:
 @app.post("/admin/users", status_code=201)
 def create_user(body: CreateUserRequest, _admin: AdminUser) -> dict[str, Any]:
     try:
-        return users.create_user(body.username, body.password, body.role)
+        return users.create_user(
+            body.username, body.password, body.role, body.allowed_hosts
+        )
+    except ValueError as exc:
+        raise _user_error(exc) from exc
+
+
+@app.post("/admin/users/bulk")
+def create_users_bulk(
+    body: BulkCreateUsersRequest, _admin: AdminUser
+) -> list[dict[str, Any]]:
+    try:
+        return users.create_users_bulk(body.lines, body.role, body.allowed_hosts)
     except ValueError as exc:
         raise _user_error(exc) from exc
 
@@ -87,6 +116,16 @@ def set_user_password(
     except (ValueError, FileNotFoundError) as exc:
         raise _user_error(exc) from exc
     return {"status": "ok"}
+
+
+@app.put("/admin/users/{username}/allowed-hosts")
+def set_user_allowed_hosts(
+    username: str, body: SetAllowedHostsRequest, _admin: AdminUser
+) -> dict[str, Any]:
+    try:
+        return users.set_allowed_hosts(username, body.allowed_hosts)
+    except (ValueError, FileNotFoundError) as exc:
+        raise _user_error(exc) from exc
 
 
 @app.get("/admin/ai-config")

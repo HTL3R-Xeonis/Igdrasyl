@@ -13,26 +13,35 @@ from app import (
     profile_secrets,
     project_selection,
     settings_profiles,
+    users,
 )
 from app.application import app
-from app.auth import require_admin
+from app.auth import current_user, require_admin
 from app.routes.common import (
     settings_call,
 )
 
 AdminUser = Annotated[tuple[str, str], Depends(require_admin)]
+AnyUser = Annotated[tuple[str, str], Depends(current_user)]
 from app.routes.models import (
     ConnectionSettingsUpdate,
 )
 
 
 @app.get("/settings-profiles")
-def list_settings_profiles() -> list[dict[str, Any]]:
+def list_settings_profiles(user: AnyUser) -> list[dict[str, Any]]:
     """
-    Every uploaded settings.yml profile (see app/settings_profiles.py),
-    each with a path-free preview and whether it is active.
+    Every uploaded settings.yml profile (see app/settings_profiles.py) this
+    caller is allowed to use, each with a path-free preview and whether it
+    is active - admins always see every profile.
     """
-    return settings_profiles.list_profiles()
+    username, role = user
+    record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+    return [
+        profile
+        for profile in settings_profiles.list_profiles()
+        if users.can_access_host(record, profile["filename"])
+    ]
 
 
 @app.post("/settings-profiles")
