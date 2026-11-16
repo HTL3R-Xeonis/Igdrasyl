@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 
@@ -202,32 +203,69 @@ def test_remove_link_runtime_error_maps_to_502(client, app_state, temp_topology_
     assert resp.status_code == 502
 
 
-def test_templates_returns_gns3_and_esxi_names(client, app_state):
+@pytest.mark.parametrize("path", ["/templates", "/design/templates"])
+def test_palettes_hide_infrastructure_templates_and_their_metadata(
+    client, monkeypatch, path
+):
+    monkeypatch.delenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", raising=False)
     with (
         patch(
             "app.topology_write.APIHandler.get_gns3_template_names",
-            return_value={"VPCS", "Cisco IOSv 15.6(1)T"},
+            return_value={"VPCS", "Cisco IOSv 15.6(1)T", "GNS3-VM"},
         ),
         patch(
             "app.topology_write.APIHandler.get_esxi_template_names",
-            return_value={"debian", "pfSense"},
+            return_value={
+                "debian",
+                "pfSense",
+                "gns3-vm",
+                "Ginnungagap-Appliance",
+                "gns3-vm-v2",
+            },
         ),
-        patch("app.topology_write._fetch_gns3_templates", return_value=[]),
         patch(
-            "app.topology_write._gns3_template_categories",
-            return_value={"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
+            "app.topology_write._fetch_gns3_templates",
+            return_value=[
+                {"name": "Cisco IOSv 15.6(1)T", "category": "router"},
+                {"name": "VPCS", "category": "guest"},
+                {
+                    "name": "GNS3-VM",
+                    "category": "guest",
+                    "adapters": 2,
+                    "port_name_format": "eth{0}",
+                },
+            ],
         ),
-        patch("app.topology_write._gns3_template_port_specs", return_value={}),
     ):
-        resp = client.get("/templates")
+        resp = client.get(path)
 
     assert resp.status_code == 200
     assert resp.json() == {
         "gns3": ["Cisco IOSv 15.6(1)T", "VPCS"],
-        "esxi": ["debian", "pfSense"],
+        "esxi": ["debian", "gns3-vm-v2", "pfSense"],
         "gns3_categories": {"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
         "gns3_port_specs": {},
     }
+
+
+def test_template_palette_filter_can_be_configured(client, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", " VpCs , DEBIAN, ")
+    with (
+        patch(
+            "app.topology_write.APIHandler.get_gns3_template_names",
+            return_value={"VPCS", "Ethernet switch"},
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_esxi_template_names",
+            return_value={"debian", "gns3-vm"},
+        ),
+        patch("app.topology_write._fetch_gns3_templates", return_value=[]),
+    ):
+        resp = client.get("/templates")
+
+    assert resp.status_code == 200
+    assert resp.json()["gns3"] == ["Ethernet switch"]
+    assert resp.json()["esxi"] == ["gns3-vm"]
 
 
 def test_templates_timeout_maps_to_503(client, app_state):

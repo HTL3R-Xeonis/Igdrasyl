@@ -15,6 +15,7 @@ fail to start.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -137,22 +138,41 @@ def _gns3_template_port_specs(templates: list[dict]) -> dict[str, dict[str, Any]
     return specs
 
 
+_HIDDEN_TEMPLATE_NAMES = frozenset({"gns3-vm", "ginnungagap-appliance"})
+
+
+def _hidden_template_names() -> frozenset[str]:
+    configured = os.getenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", "")
+    names = frozenset(
+        name.strip().casefold() for name in configured.split(",") if name.strip()
+    )
+    return names or _HIDDEN_TEMPLATE_NAMES
+
+
 def list_templates() -> dict[str, Any]:
-    """
-    Every image name valid for add_node - the practical contract behind
-    TopologyBackend.add_node's `image` argument is "matches a name from
-    one of these two sets" (see Environment.get_environment, which is
-    what actually decides ON_GNS3 vs ON_ESXI - not this project's role
-    field). `gns3_categories` is purely an informational hint for the
-    frontend's own Role filter/guess, and `gns3_port_specs` for its
-    Add Link interface picker (see _gns3_template_port_specs) - neither
-    is ever used for validation here or on the TopologyBuilder side.
+    """List placeable images for the live and design palettes.
+
+    Category and port metadata describe visible GNS3 entries. The underlying
+    template catalog still provides all images for deployment and validation.
     :raises TimeoutError: propagated from either Template-API server.
     """
-    gns3_templates = _fetch_gns3_templates()
+    hidden = _hidden_template_names()
+    gns3_templates = [
+        template
+        for template in _fetch_gns3_templates()
+        if str(template.get("name", "")).casefold() not in hidden
+    ]
     return {
-        "gns3": sorted(APIHandler.get_gns3_template_names()),
-        "esxi": sorted(APIHandler.get_esxi_template_names()),
+        "gns3": sorted(
+            name
+            for name in APIHandler.get_gns3_template_names()
+            if name.casefold() not in hidden
+        ),
+        "esxi": sorted(
+            name
+            for name in APIHandler.get_esxi_template_names()
+            if name.casefold() not in hidden
+        ),
         "gns3_categories": _gns3_template_categories(gns3_templates),
         "gns3_port_specs": _gns3_template_port_specs(gns3_templates),
     }

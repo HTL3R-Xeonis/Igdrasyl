@@ -534,6 +534,12 @@ using it.
 
 ## Working on the canvas
 
+The live and design device palettes hide the infrastructure templates
+`gns3-vm` and `ginnungagap-appliance`. To replace that list, set
+`TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES` to comma-separated complete template
+names. Matching is case-insensitive. The OVA catalog for host setup still
+includes the GNS3 VM image.
+
 Modelled on GNS3's own GUI. Everything below works in the offline design canvas;
 the live canvas gets the same except where a change would touch real VMs.
 
