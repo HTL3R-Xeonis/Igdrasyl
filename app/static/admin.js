@@ -296,6 +296,27 @@ summarizeBtn.addEventListener("click", async () => {
   }
 });
 
+async function loadAuditLog() {
+  try {
+    const events = await request("/admin/audit-log");
+    const body = document.getElementById("ap-audit-body");
+    body.innerHTML = "";
+    for (const event of events) {
+      const row = document.createElement("tr");
+      const time = new Date(event.ts * 1000).toLocaleString();
+      for (const value of [time, event.event, event.username, event.detail || ""]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      body.appendChild(row);
+    }
+    setStatus("ap-audit-status", events.length ? "" : "No audit events yet.");
+  } catch (error) {
+    setStatus("ap-audit-status", error.message, true);
+  }
+}
+
 (async () => {
   try {
     const me = await request("/me");
@@ -306,7 +327,7 @@ summarizeBtn.addEventListener("click", async () => {
     }
     await loadProfiles();
     refreshCreationHostsControls();
-    await Promise.all([loadUsers(), loadAiConfig()]);
+    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog()]);
   } catch {
     window.location.href = "/login";
   }

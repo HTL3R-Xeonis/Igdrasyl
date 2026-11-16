@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from app import log_summary
+from app import audit_log, log_summary
 
 
 def test_regular_user_cannot_summarize_logs(user_client):
@@ -245,3 +245,59 @@ def test_bulk_create_users_is_admin_only(user_client):
         "/admin/users/bulk", json={"lines": "x;secret123", "role": "user"}
     )
     assert resp.status_code == 403
+
+
+# --- Audit log --------------------------------------------------------
+
+
+def test_user_management_actions_are_audited(client):
+    client.post(
+        "/admin/users",
+        json={"username": "other-admin", "password": "correct-horse", "role": "admin"},
+    )
+    client.post(
+        "/admin/users",
+        json={"username": "alice", "password": "correct-horse", "role": "user"},
+    )
+    client.put("/admin/users/alice/role", json={"role": "admin"})
+    client.put("/admin/users/alice/password", json={"password": "new-password-1"})
+    client.put(
+        "/admin/users/alice/allowed-hosts", json={"allowed_hosts": ["lab-a.yml"]}
+    )
+    client.delete("/admin/users/alice")
+
+    events = audit_log.recent()
+    assert [e["event"] for e in events] == [
+        "user_deleted",
+        "user_allowed_hosts_changed",
+        "user_password_changed",
+        "user_role_changed",
+        "user_created",
+        "user_created",
+    ]
+    assert all(e["username"] == "test-admin" for e in events)
+    assert events[3]["detail"] == "alice -> admin"
+
+
+def test_bulk_create_only_audits_the_successfully_created_lines(client):
+    client.post(
+        "/admin/users/bulk",
+        json={"lines": "alice;secret123\nbad-line\nbob;anotherpass", "role": "user"},
+    )
+    events = audit_log.recent()
+    created = [e for e in events if e["event"] == "user_created"]
+    assert {e["detail"] for e in created} == {"alice", "bob"}
+
+
+def test_ai_config_change_is_audited(client):
+    client.put("/admin/ai-config", json={"enabled": True})
+    events = audit_log.recent()
+    assert events[0]["event"] == "ai_snippet_topics_changed"
+    assert events[0]["detail"] == "enabled=True"
+
+
+def test_audit_log_endpoint_is_admin_only(client, user_client):
+    assert user_client.get("/admin/audit-log").status_code == 403
+    client.put("/admin/ai-config", json={"enabled": True})
+    events = client.get("/admin/audit-log").json()
+    assert events[0]["event"] == "ai_snippet_topics_changed"

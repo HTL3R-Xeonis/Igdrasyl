@@ -60,6 +60,12 @@ def _node_notes_tmp_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _audit_log_tmp_file(tmp_path, monkeypatch):
+    """The admin-events audit log (app/audit_log.py) writes a file; never into the repo root during a test."""
+    monkeypatch.setenv("TOPOLOGYOPERATOR_AUDIT_LOG_FILE", str(tmp_path / "audit.log"))
+
+
+@pytest.fixture(autouse=True)
 def _push_storage(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR", str(tmp_path / "snippets")

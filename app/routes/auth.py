@@ -20,11 +20,16 @@ import threading
 import time
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Form, Query
+from fastapi import Depends, FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from app import users
-from app.auth import SESSION_COOKIE, create_session_token, current_user
+from app import audit_log, users
+from app.auth import (
+    SESSION_COOKIE,
+    create_session_token,
+    current_user,
+    verify_session_token,
+)
 
 _failed_attempts: dict[str, tuple[int, float]] = {}
 _attempts_lock = threading.Lock()
@@ -177,8 +182,10 @@ def register(app: FastAPI) -> None:
         role = users.authenticate(username, password)
         if role is None:
             _record_failure(username)
+            audit_log.record("login_failure", username)
             return RedirectResponse("/login?error=1", status_code=303)
         _record_success(username)
+        audit_log.record("login_success", username)
         token = create_session_token(username, role, remember=bool(remember))
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
@@ -191,7 +198,11 @@ def register(app: FastAPI) -> None:
         return response
 
     @app.post("/logout")
-    def logout() -> Response:
+    def logout(request: Request) -> Response:
+        token = request.cookies.get(SESSION_COOKIE)
+        user = verify_session_token(token) if token else None
+        if user:
+            audit_log.record("logout", user[0])
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(SESSION_COOKIE)
         return response

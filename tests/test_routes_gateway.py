@@ -11,7 +11,13 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 
-from app import backend_manager, backend_ports, routes_gateway
+from app import (
+    audit_log,
+    backend_manager,
+    backend_ports,
+    backend_presence,
+    routes_gateway,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +30,13 @@ def _isolated_stores(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("TOPOLOGYOPERATOR_SETTINGS", raising=False)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_presence():
+    backend_presence._presence.clear()
+    yield
+    backend_presence._presence.clear()
 
 
 def _upload(gateway_client, filename="host-a.yml", content=b"esxi:\n  ip: 10.0.0.1\n"):
@@ -240,6 +253,28 @@ def test_restart_404s_for_an_unknown_profile(gateway_client):
     assert gateway_client.post("/settings-profiles/nope.yml/restart").status_code == 404
 
 
+def test_activate_and_restart_are_audited(gateway_client, monkeypatch):
+    _upload(gateway_client)
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    monkeypatch.setattr(backend_manager, "wait_healthy", lambda port, **kw: True)
+    monkeypatch.setattr(backend_manager, "restart", lambda filename, **kw: None)
+
+    gateway_client.post("/settings-profiles/host-a.yml/activate")
+    gateway_client.post("/settings-profiles/host-a.yml/restart")
+
+    events = audit_log.recent()
+    assert [e["event"] for e in events] == ["host_restart", "host_activate"]
+    assert all(e["detail"] == "host-a.yml" for e in events)
+    assert all(e["username"] == "test-admin" for e in events)
+
+
+def test_gateway_audit_log_endpoint_is_admin_only(gateway_client, gateway_user_client):
+    assert gateway_user_client.get("/admin/audit-log").status_code == 403
+    gateway_client.put("/admin/ai-config", json={"enabled": True})
+    events = gateway_client.get("/admin/audit-log").json()
+    assert events[0]["event"] == "ai_snippet_topics_changed"
+
+
 # --- get_target (app/proxy.py's own GetTarget callback) -----------------
 
 
@@ -266,6 +301,27 @@ def test_get_target_resolves_to_127_0_0_1_and_the_assigned_port(monkeypatch):
     backend_ports.assign_port("host-a.yml")
     target = routes_gateway.get_target(_scope_with_cookie("host-a.yml"))
     assert target == ("127.0.0.1", backend_ports.get_port("host-a.yml"))
+
+
+def _scope_with_both_cookies(backend: str, username: str, role: str = "user") -> dict:
+    from app.auth import SESSION_COOKIE, create_session_token
+
+    token = create_session_token(username, role)
+    cookie = f"{routes_gateway.BACKEND_COOKIE}={backend}; {SESSION_COOKIE}={token}"
+    return {"type": "http", "headers": [(b"cookie", cookie.encode())]}
+
+
+def test_get_target_records_presence_on_a_successful_resolve(monkeypatch):
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: True)
+    backend_ports.assign_port("host-a.yml")
+    routes_gateway.get_target(_scope_with_both_cookies("host-a.yml", "alice"))
+    assert backend_presence.active_users("host-a.yml") == ["alice"]
+
+
+def test_get_target_records_nothing_when_it_returns_none(monkeypatch):
+    monkeypatch.setattr(backend_manager, "is_active", lambda filename, **kw: False)
+    routes_gateway.get_target(_scope_with_both_cookies("host-a.yml", "alice"))
+    assert backend_presence.active_users("host-a.yml") == []
 
 
 # --- The "pick a backend" page -------------------------------------------
@@ -427,3 +483,26 @@ def test_pick_backend_page_only_lists_the_users_allowed_hosts(gateway_client):
     assert resp.status_code == 200
     assert "lab-a.yml" in resp.text
     assert "lab-b.yml" not in resp.text
+
+
+def test_pick_backend_page_shows_presence_only_for_a_host_that_has_it(gateway_client):
+    _upload(gateway_client, filename="lab-a.yml", content=b"esxi:\n  ip: 10.0.0.1\n")
+    _upload(gateway_client, filename="lab-b.yml", content=b"esxi:\n  ip: 10.0.0.2\n")
+    backend_presence.record("lab-a.yml", "alice")
+    backend_presence.record("lab-a.yml", "bob")
+
+    non_admin_page = (
+        _restricted_client("regular-user", "user", "ALL")
+        .get("/pick-backend", headers={"Accept": "text/html"})
+        .text
+    )
+    assert "2 active users" in non_admin_page
+    assert "alice" not in non_admin_page  # only a count for a non-admin
+
+    admin_page = gateway_client.get(
+        "/pick-backend", headers={"Accept": "text/html"}
+    ).text
+    assert "2 active users: alice, bob" in admin_page
+    assert "lab-b.yml" in admin_page
+    lab_b_tile = admin_page.split("lab-b.yml", 1)[1].split("</form>", 1)[0]
+    assert "active" not in lab_b_tile

@@ -505,6 +505,25 @@ command-format notes, the host-config dialog's per-field captions) now collapses
 behind a small "?" button instead - `app/static/info-popover.js`, one
 document-level delegated click listener shared by every such button.
 
+The admin panel's **Audit log** section (`GET /admin/audit-log`, admin-only)
+is a second, much smaller log than the main verbose one: named
+security/admin events only (`login_success`/`login_failure`, `logout`,
+`user_created`/`user_deleted`/`user_role_changed`/`user_password_changed`/
+`user_allowed_hosts_changed`, `ai_snippet_topics_changed`, and, on the Phase 3
+gateway, `host_activate`/`host_restart`) - who did what, without scrolling
+through every request. `app/audit_log.py`, same bounded-line-count file
+rotation as the main log (`app/log_store.py`'s `LineLimitedFile`), its own
+file (`TOPOLOGYOPERATOR_AUDIT_LOG_FILE`, default `audit.log`). A write
+failure never breaks the action it's recording - it's logged to the regular
+log instead. Backend-side actions (config push, node/link add/remove,
+project deploy) are out of scope for this first pass.
+
+On the Phase 3 gateway's "choose a server" page, each tile also shows who's
+currently routed to that backend (`app/backend_presence.py`, in-memory only,
+a 5-minute window) - a plain count for everyone, and for an admin the actual
+usernames too, so restarting a shared host doesn't surprise someone else
+using it.
+
 ## Working on the canvas
 
 Modelled on GNS3's own GUI. Everything below works in the offline design canvas;
@@ -790,6 +809,7 @@ same restart flow as host changes. Import and live edits require a selected proj
   only so a password may itself contain `;` or any other character;
   best-effort - one bad line doesn't stop the rest).
 - `GET/PUT /admin/ai-config` - admin-only AI configuration switch.
+- `GET /admin/audit-log` - admin-only named security/admin events (see Accounts above).
 - `POST /admin/logs/summarize` - admin-only AI summary of the last 2,000 log
   lines (see Accounts above); `GET /logs/download` remains open to every
   signed-in user, unchanged.

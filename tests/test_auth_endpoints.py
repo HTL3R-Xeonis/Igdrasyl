@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app import auth, users
+from app import audit_log, auth, users
 
 
 def test_login_page_is_reachable_without_a_session():
@@ -78,6 +78,19 @@ def test_login_with_the_wrong_password_redirects_back_with_an_error(
     assert auth.SESSION_COOKIE not in resp.cookies
 
 
+def test_login_success_and_failure_are_audited(tmp_path, monkeypatch):
+    monkeypatch.setenv("TOPOLOGYOPERATOR_USERS_FILE", str(tmp_path / "users.json"))
+    users.create_user("alice", "correct-horse", "user")
+    anon = TestClient(main_module.app, follow_redirects=False)
+
+    anon.post("/login", data={"username": "alice", "password": "wrong"})
+    anon.post("/login", data={"username": "alice", "password": "correct-horse"})
+
+    events = audit_log.recent()
+    assert [e["event"] for e in events] == ["login_success", "login_failure"]
+    assert all(e["username"] == "alice" for e in events)
+
+
 def test_me_reports_the_logged_in_user(client):
     resp = client.get("/me")
     assert resp.status_code == 200
@@ -94,6 +107,16 @@ def test_logout_clears_the_cookie(tmp_path, monkeypatch):
     resp = session.post("/logout")
     assert resp.status_code == 303
     assert session.get("/me", headers={"accept": "*/*"}).status_code == 401
+
+    events = audit_log.recent()
+    assert events[0]["event"] == "logout"
+    assert events[0]["username"] == "alice"
+
+
+def test_logout_without_a_valid_session_is_not_audited():
+    anon = TestClient(main_module.app, follow_redirects=False)
+    assert anon.post("/logout").status_code == 303
+    assert audit_log.recent() == []
 
 
 # --- readonly role ----------------------------------------------------

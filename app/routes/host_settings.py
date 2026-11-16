@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
 from app import (
+    audit_log,
     connection_settings,
     ova_templates,
     profile_secrets,
@@ -181,4 +182,7 @@ def activate_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+    # restart_into_profile only *schedules* the re-exec (a short delay so this
+    # response has time to reach the client first) - this still runs normally.
+    audit_log.record("host_activate", _admin[0], filename)
     return {"status": "restarting"}
