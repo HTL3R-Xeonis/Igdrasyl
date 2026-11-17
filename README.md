@@ -425,8 +425,10 @@ its log.
 does not accept passwords in YAML, so they are stored apart from it, per host, in
 `<profiles dir>/.secrets/<profile>.json` (mode 0600) and applied at startup
 (the Operator does not read `ESXI_PASSWORD`/`GNS3_PASSWORD` from the environment any
-more - a host without a stored password logs a clear error at startup and its
-connections fail until one is set). The ESXi password of the active host also travels
+more). The Operator refuses to open an ESXi session if its password is missing.
+Creating the live topology backend requires both passwords. The error names
+the missing service and points to Host settings > Credentials.
+The ESXi password of the active host also travels
 with every OVA deploy request to the deploy service, which has no password list of its
 own. They are write-only: the server only reports
 *whether* one is stored, an empty field keeps it, and they never appear in the

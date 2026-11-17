@@ -89,15 +89,15 @@ class LazyESXiConnection:
 
     def connection(self) -> Any:
         """The real connection, opened now if it is not yet. :raises EsxiUnavailable: it can't be."""
-        if not self._has_password:
-            message = password_missing_message("ESXi", self._host)
-            if not self._missing_password_logged:
-                self._missing_password_logged = True
-                logger.error(message)
-            raise EsxiUnavailable(message)
         with self._lock:
             if self._connection is not None:
                 return self._connection
+            if not self._has_password:
+                message = password_missing_message("ESXi", self._host)
+                if not self._missing_password_logged:
+                    self._missing_password_logged = True
+                    logger.error(message)
+                raise EsxiUnavailable(message)
             attempt = self._attempt
             if attempt is None:
                 now = self._clock()

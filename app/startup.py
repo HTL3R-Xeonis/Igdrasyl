@@ -205,16 +205,17 @@ async def lifespan(app: FastAPI):
     # A real, persistent pyvmomi session, reused for the app's lifetime rather than opened per request (same reasoning
     # as TopologyBuilder's own CLI commands) - but opened on first use, so a host that is down or not set up yet does
     # not keep the app (landing page, design mode) from starting. See app/esxi_session.py.
+    esxi_password = Settings.ESXI.PASSWORD
     esxi_args = (
         Settings.ESXI.IP,
         Settings.ESXI.PORT,
         Settings.ESXI.USERNAME,
-        Settings.ESXI.PASSWORD,
+        esxi_password,
     )
     app.state.esxi_connection = esxi_session.LazyESXiConnection(
         lambda: ESXiConnection(*esxi_args),
         host=Settings.ESXI.IP,
-        has_password=bool(Settings.ESXI.PASSWORD),
+        has_password=bool(esxi_password),
     )
 
     # Most recent /config-push request body - project_bundle.py's own

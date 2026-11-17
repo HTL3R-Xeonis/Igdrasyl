@@ -16,6 +16,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from src.settings import Settings
+
+from app import topology_write
 
 
 class _FakeBackend:
@@ -65,6 +68,67 @@ class _FakeBackend:
 
         data["edges"] = [e for e in data["edges"] if not matches(e)]
         self._write(topology_file, data)
+
+
+@pytest.mark.parametrize(
+    ("missing", "esxi_password", "gns3_password"),
+    [
+        ("ESXi", None, "fixture-gns3-password"),
+        ("GNS3", "fixture-esxi-password", ""),
+    ],
+)
+def test_live_changes_report_the_missing_password_before_building_the_backend(
+    client,
+    app_state,
+    temp_topology_file,
+    monkeypatch,
+    missing,
+    esxi_password,
+    gns3_password,
+):
+    monkeypatch.setattr(app_state, "topology_backend", None, raising=False)
+    monkeypatch.setattr(Settings.ESXI, "IP", "192.0.2.20")
+    monkeypatch.setattr(Settings.ESXI, "PASSWORD", esxi_password)
+    monkeypatch.setattr(Settings.GNS3, "PASSWORD", gns3_password)
+
+    with (
+        patch("app.topology_write.TopologyBackend") as backend,
+        patch("app.topology_write.logger.error") as error,
+    ):
+        response = client.post(
+            "/nodes", json={"name": "PC1", "role": "PC", "image": "VPCS"}
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        f"{missing} password for host 192.0.2.20 is not set - enter it in the host "
+        "profile (Host settings > Credentials). No connection attempted."
+    )
+    error.assert_called_once_with(response.json()["detail"])
+    backend.assert_not_called()
+
+
+def test_live_backend_passes_both_configured_passwords_and_reuses_the_client(
+    client, app_state, monkeypatch
+):
+    monkeypatch.setattr(app_state, "topology_backend", None, raising=False)
+    monkeypatch.setattr(Settings.ESXI, "PASSWORD", "fixture-esxi-password")
+    monkeypatch.setattr(Settings.GNS3, "PASSWORD", "fixture-gns3-password")
+
+    with patch("app.topology_write.TopologyBackend") as backend:
+        assert topology_write.get_or_create_backend(client.app) is backend.return_value
+        assert topology_write.get_or_create_backend(client.app) is backend.return_value
+
+    backend.assert_called_once_with(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        "fixture-esxi-password",
+        Settings.ESXI.GNS3_VM_NAME,
+        Settings.GNS3.USERNAME,
+        "fixture-gns3-password",
+        Settings.GNS3.PORT,
+    )
 
 
 def test_add_node_calls_backend_and_reloads_graph(

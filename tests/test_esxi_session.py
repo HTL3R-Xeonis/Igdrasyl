@@ -138,7 +138,10 @@ def test_the_handler_answers_503_with_the_message_for_api_clients_and_browsers(
     assert page.status_code == 503 and page.media_type == "text/html"
 
 
-def test_the_app_starts_although_the_esxi_host_is_down():
+@pytest.mark.parametrize("password", [None, "fixture-password"])
+def test_the_app_starts_when_esxi_is_unavailable(monkeypatch, password):
+    monkeypatch.delenv(startup_module.SETTINGS_ENV_VAR, raising=False)
+    monkeypatch.setattr(startup_module.Settings.ESXI, "PASSWORD", password)
     app = main_module.app
     saved = dict(app.state._state)
     esxi = MagicMock(side_effect=OSError("host down"))
@@ -157,8 +160,13 @@ def test_the_app_starts_although_the_esxi_host_is_down():
             assert isinstance(
                 app.state.esxi_connection, esxi_session.LazyESXiConnection
             )
-            with pytest.raises(EsxiUnavailable):
+            with pytest.raises(EsxiUnavailable) as exc_info:
                 app.state.esxi_connection.get_vm("VM1")
+            if password is None:
+                assert "Host settings > Credentials" in str(exc_info.value)
+                esxi.assert_not_called()
+            else:
+                esxi.assert_called_once()
     finally:
         app.state._state.clear()
         app.state._state.update(saved)

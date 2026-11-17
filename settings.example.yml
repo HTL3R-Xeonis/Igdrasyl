@@ -4,12 +4,9 @@
 #
 # This reuses TopologyBuilder's own Settings class/YAML schema wholesale -
 # Select the topology separately using Project on the host tile.
-# Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
-# GNS3_PASSWORD environment variables instead (a .env file works too, see
-# .env.example). GNS3_PASSWORD specifically is only needed for Phase B's
-# write endpoints (add/remove node/link) - they SSH into the GNS3 VM to
-# rebuild its VLAN trunk subinterfaces on every call. Read-only endpoints
-# work fine without it.
+# Set both passwords in the host profile under Host settings > Credentials.
+# ESXi operations need the ESXi password. The live topology backend also
+# needs the GNS3 VM password for VLAN configuration.
 
 # A host can be configured before any topology exists. Project selection
 # is stored separately by TopologyOperator, outside this host profile.
