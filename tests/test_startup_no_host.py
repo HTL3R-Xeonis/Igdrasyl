@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from src.settings import Settings
 
 import app.main as main_module
 from app import gateway_main, startup
@@ -62,6 +63,17 @@ def test_with_an_active_host_the_gns3_vm_is_looked_for_as_before(
     app_state.esxi_connection.get_vm_ip_address.assert_called_once()
     auto_deploy.assert_called_once()
     assert "not found or has no IP" in app_state.startup_warning
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected_ip"), [(None, None), ("lab.yml", "192.0.2.10")]
+)
+def test_health_reports_the_esxi_ip_only_for_an_active_profile(
+    client, app_state, monkeypatch, profile, expected_ip
+):
+    _refresh(app_state, profile, monkeypatch)
+    monkeypatch.setattr(Settings.ESXI, "IP", "192.0.2.10")
+    assert client.get("/health").json()["esxi_ip"] == expected_ip
 
 
 @pytest.mark.parametrize("behind_gateway", [False, True])

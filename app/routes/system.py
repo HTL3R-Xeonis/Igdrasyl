@@ -18,6 +18,7 @@ from app import (
 from app.application import app
 from app.live_lock import exclusive
 from app.startup import (
+    active_host_filename,
     deployable_project,
     gns3_vm_power_state,
     held_project,
@@ -32,7 +33,7 @@ def health() -> dict[str, Any]:
         "version": __version__,
         "deployable_project": deployable_project(),
         "held_project": held_project(),
-        "esxi_ip": Settings.ESXI.IP,
+        "esxi_ip": Settings.ESXI.IP if active_host_filename() else None,
         "gns3_vm_ip": app.state.gns3_vm_ip,
         "gns3_vm": gns3_vm_power_state(),
         "gns3_port": Settings.GNS3.PORT,

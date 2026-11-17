@@ -884,8 +884,8 @@ same restart flow as host changes. Import and live edits require a selected proj
 - `GET /ova-templates`: safe OVA resource metadata proxied from the sister API;
   filenames, source directories, credentials, and server paths are omitted.
 
-- `GET /health` (includes `warning` - see the graceful-degrade point
-  above), `POST /reload` (manual retry once a down dependency recovers),
+- `GET /health` (includes `warning` and returns `esxi_ip: null` until a host
+  profile is active), `POST /reload` (same response shape, after retrying startup),
   `GET /topology` (static graph, 503 while `app.state.graph` is down),
   `GET /nodes` (graph merged with live GNS3/ESXi state), `GET/POST
   /layout`.

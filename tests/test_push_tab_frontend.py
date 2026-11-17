@@ -55,7 +55,7 @@ def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_versi
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/consoles-and-push.js?v=ginnungagap-56" in html
+    assert "/consoles-and-push.js?v=ginnungagap-57" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):

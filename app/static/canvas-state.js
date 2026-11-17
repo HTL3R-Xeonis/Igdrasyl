@@ -352,7 +352,9 @@ async function loadCanvas() {
     document.getElementById("project-meta").textContent = designMode
       ? (typeof currentDesignProject !== "undefined" && currentDesignProject
         ? currentDesignProject.name : "Unsaved design")
-      : `${health.gns3_project_name} @ ${health.esxi_ip}`;
+      : health.esxi_ip
+        ? `${health.gns3_project_name} @ ${health.esxi_ip}`
+        : health.gns3_project_name;
     setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project, gns3Vm: designMode ? null : health.gns3_vm });
     incrementalDeploy = health.incremental_deploy !== false;
     if (!designMode) {
