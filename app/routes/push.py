@@ -11,6 +11,7 @@ from app import ai_snippets, config_snippets, push_audit, push_jobs
 from app.application import app
 from app.auth import current_user
 from app.config_push import DeviceResult, DeviceSpec, push_all
+from app.routes.common import require_active_host
 
 
 class PushRequest(BaseModel):
@@ -68,6 +69,7 @@ def generate_ai_snippet(request: ai_snippets.GenerateRequest, user: AiUser) -> d
 
 @app.post("/config-snippets/ai/push", status_code=202)
 def push_ai_snippet(request: PushAiSnippet, user: AiUser) -> dict[str, str]:
+    require_active_host("AI configuration push")
     try:
         job = ai_snippets.push_draft(app, request.draft_id, user[0])
     except ai_snippets.GenerationDisabled as exc:
@@ -130,6 +132,7 @@ def start_config_push_job(request: PushRequest) -> dict[str, Any]:
     (up to 10 000 commands per device; see app/push_jobs.py). Poll
     GET /config-push/jobs/{job_id}.
     """
+    require_active_host("configuration push job")
     try:
         job = push_jobs.start_job(
             app, request.devices, wait_seconds=request.wait_seconds
@@ -164,6 +167,7 @@ def config_push(request: PushRequest) -> list[DeviceResult]:
     threadpool, so this doesn't block the event loop the console
     WebSocket proxy also needs.
     """
+    require_active_host("configuration push")
     app.state.last_config_push = request.devices
     with push_audit.track("Direct push") as audit:
         results = push_all(request.devices, app)

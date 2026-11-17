@@ -105,7 +105,8 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   (a plain zip) carries the topology YAML, a sanitized settings
   snapshot (used only as an ESXi/GNS3-target safety check on import,
   never auto-applied), the last-pushed device configs, canvas drawings,
-  and node canvas positions. Import runs as a background job
+  and node canvas positions. Live import and export require an active host
+  profile. Import runs as a background job
   (`app/import_jobs.py`) with an approximate live-polled progress
   percentage, since a deploy can take minutes and TopologyBuilder's own
   deploy has no progress-callback hook. The status also carries
@@ -612,7 +613,8 @@ Docker-Server-Files), is simply left to its own timer - the answer says which on
 ## Device configs saved with the project
 
 The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim; **up to 10 000
-commands per device**). With **Save to project** the lists are stored with the library project (`configs.json` next to its
+commands per device**). Select a host before pushing commands or opening its ESXi serial console.
+With **Save to project** the lists are stored with the library project (`configs.json` next to its
 topology; **Load from project** brings them back, and they are loaded when the tab opens). The switch **Push automatically
 after deploy and resume** makes the app push them by itself - right after the deploy of that project (they travel in the
 deployment bundle) and after a **Resume** from hold. Endpoints: `GET/PUT /project/configs` (the active host's project) and

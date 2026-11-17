@@ -25,6 +25,7 @@ from src.settings import Settings
 import app.gateway_main as gateway_module
 import app.main as main_module
 from app import auth, design
+from app.routes import common
 from app.topology import load_graph, resolve_project_name
 
 _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
@@ -143,7 +144,7 @@ def graph():
 
 
 @pytest.fixture
-def app_state(graph):
+def app_state(graph, monkeypatch):
     """
     A real FastAPI app with app.state populated by hand, deliberately
     bypassing the real `lifespan` (which would open a real pyvmomi
@@ -153,6 +154,9 @@ def app_state(graph):
     manager (`with client:`), which is what would trigger the real
     lifespan.
     """
+    # These live route fixtures represent an already selected host. Avoid setting the
+    # profile path itself, since routes also use it to locate settings on disk.
+    monkeypatch.setattr(common, "has_active_host", lambda: True)
     app = main_module.app
     app.state.graph = graph
     app.state.project_name = resolve_project_name()

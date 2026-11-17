@@ -32,6 +32,7 @@ from app.layout import load_layout, save_position, save_positions
 from app.routes.common import (
     LIVE_READ_ERRORS,
     LIVE_WRITE_ERRORS,
+    require_active_host,
 )
 from app.routes.models import (
     AddLinkRequest,
@@ -400,6 +401,7 @@ def stream_link_capture(
 @app.get("/nodes/{name}/serial")
 def serial_console_status(name: str) -> dict[str, Any]:
     """Whether an ESXi VM has a network serial port (and which), for the config push via serial."""
+    require_active_host("serial console status")
     try:
         return esxi_serial.status(app, name)
     except esxi_serial.SerialSetupError as exc:
@@ -412,6 +414,7 @@ def enable_serial_console(name: str) -> dict[str, Any]:
     Adds a network serial port to an ESXi VM - powering it off and on again if it runs -
     and, for a Linux guest with VMware Tools, a login prompt on it. See app/esxi_serial.py.
     """
+    require_active_host("enabling the serial console")
     try:
         return esxi_serial.enable(app, name)
     except esxi_serial.SerialSetupError as exc:

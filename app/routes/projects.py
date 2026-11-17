@@ -31,6 +31,7 @@ from app.gns3_state import (
 )
 from app.routes.common import (
     LIVE_WRITE_ERRORS,
+    require_active_host,
     settings_call,
 )
 from app.startup import (
@@ -94,6 +95,7 @@ def export_project() -> Response:
     the last config-push, drawings.json, layout.json (node canvas
     positions), labels.json (moved port/name labels), and a manifest) - see app/project_bundle.py.
     """
+    require_active_host("live project export")
     if app.state.graph is None:
         raise HTTPException(503, app.state.startup_warning or "topology unavailable")
     data = project_bundle.build_export(app)
@@ -141,6 +143,7 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
     reported progress is an approximation, not a real callback from the
     deploy itself.
     """
+    require_active_host("live project import")
     if not Settings.TOPOLOGY_FILE:
         raise HTTPException(
             409, "Select a project for this host before importing a deployment"

@@ -1,9 +1,12 @@
-"""Pieces every route module needs: the live-call error tuples, the settings env var, two guards."""
+"""Shared route guards, live-call errors and settings helpers."""
 
 from __future__ import annotations
 
+import os
+
 import requests
 from fastapi import HTTPException
+from loguru import logger
 
 from app import (
     settings_profiles,
@@ -24,6 +27,18 @@ LIVE_WRITE_ERRORS = (
 )
 
 SETTINGS_ENV_VAR = "TOPOLOGYOPERATOR_SETTINGS"
+
+
+def has_active_host() -> bool:
+    return bool(os.getenv(SETTINGS_ENV_VAR))
+
+
+def require_active_host(operation: str) -> None:
+    if not has_active_host():
+        logger.warning(f"Refusing {operation}: no host profile is active.")
+        raise HTTPException(
+            409, "No host is active - choose one on the landing page first."
+        )
 
 
 def require_live_topology() -> None:
