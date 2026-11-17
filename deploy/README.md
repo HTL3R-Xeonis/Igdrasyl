@@ -1,11 +1,10 @@
 # Phase 3 deployment: gateway + per-profile backends
 
-**This describes the cutover from today's single-process app to Phase 3's
-gateway/backend split. That cutover has not happened yet** - see
-`app/main.py`'s own docstring and `TopologyBuilder/handoff/plans/
-PLAN_login_multiserver.md`. Everything here is ready to use once the
-decision is made to actually do it; it does not change how the app runs
-today.
+**Cut over on the lab testbox on 2026-11-16** (user units of the existing
+`junioradmin` account, state in `~/xeonis-state`, gateway on :8123, backends on
+9200+). Installs that still run `uvicorn app.main:app` directly keep working
+unchanged. Without `loginctl enable-linger <account>` (it needs root, and fails on
+Debian 13 - see below) the units only live as long as that account has a login session.
 
 ## The one thing to get exactly right
 
@@ -140,5 +139,4 @@ was corrected after a failed startup, restart that backend to retry startup.
   accounts/sessions aren't silently abandoned.
 - TLS - put a real reverse proxy in front of the gateway for that; it
   isn't this project's job to terminate TLS itself.
-- The actual decision to cut over a live, currently-single-process
-  install - see `app/main.py`'s own docstring and the Phase 3 plan.
+- Per-install decisions: whether to cut over further installs - see `app/main.py`'s docstring and the Phase 3 plan.

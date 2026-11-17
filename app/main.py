@@ -8,15 +8,15 @@ Everything else (GNS3 console proxy, config push, embedded VM screens)
 plugs into the connections/graph this module resolves once at startup.
 
 Phase 3 (app/gateway_main.py, see TopologyBuilder/handoff/plans/
-PLAN_login_multiserver.md): the plan is for this module to eventually
-become a *backend* reachable only through the gateway's proxy, with no
-login of its own. **That cutover has NOT happened and must not happen
-silently** - this is still the one process real installs run directly
-(login included), exactly as before Phase 3's own code was written. The
-new gateway/proxy/routes_gateway modules exist alongside this file,
-ready for the deliberate migration step described in the plan, but this
-module keeps registering "auth" and AuthMiddleware itself until that
-migration actually happens.
+PLAN_login_multiserver.md): the lab testbox runs it as gateway + one backend per
+settings profile (cut over on 2026-11-16), where this module is a *backend*
+reachable only through the gateway's proxy. deploy/xeonis-backend-launch.py sets
+TOPOLOGYOPERATOR_GATEWAY_BACKEND=1, which only stops the backend from bootstrapping
+the first admin - the gateway owns the shared user store. It still verifies the
+forwarded session cookie itself (AuthMiddleware), which costs nothing and keeps a
+backend safe if it is ever reached directly. Started directly (uvicorn app.main:app,
+no gateway) it stays a complete single-process app, login and first-boot admin
+included.
 
 Run with: uvicorn app.main:app --reload
 Point TOPOLOGYOPERATOR_SETTINGS at a settings.yml first (see
