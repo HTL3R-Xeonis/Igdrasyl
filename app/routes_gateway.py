@@ -164,6 +164,11 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
         )
     if not tiles:
         tiles = '<p class="backend-picker-empty">No host profiles exist yet - an admin creates one under Host Settings.</p>'
+    admin_link = (
+        '<a class="toolbar-btn" href="/admin.html">Admin Panel</a>'
+        if role == "admin"
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -171,7 +176,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Choose a server</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-57">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
 <style>
   body {{ display: block; padding: 0 16px; }}
   main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}
@@ -210,6 +215,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <header class="backend-picker-header">
   <img src="/ginnungagap-mark.svg" alt="">
   <h1>Choose which server to work on</h1>
+  {admin_link}
   <form action="/logout" method="post">
     <button type="submit" class="toolbar-btn">Log out</button>
   </form>

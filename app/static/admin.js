@@ -327,7 +327,7 @@ async function loadAuditLog() {
     }
     await loadProfiles();
     refreshCreationHostsControls();
-    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog()]);
+    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog(), loadTemplateShare()]);
   } catch {
     window.location.href = "/login";
   }

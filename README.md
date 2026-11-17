@@ -613,6 +613,18 @@ minute for them to list templates again. `/templates/health` reports `refreshabl
 a service without that endpoint, or not set up for it (the host needs the request folder and the `.path` unit from
 Docker-Server-Files), is simply left to its own timer - the answer says which one took the request.
 
+## Template Share
+
+The Admin Panel lists the ESXi templates and the status of their OVA files. Use **Import template…** to upload an OVA and
+enter its catalog information. The Operator writes the file with its SHA-256 in the name and generates the YAML. Use
+**Edit…** to update metadata. The catalog reflects changes on the next collector run.
+An upload can contain one OVA up to 32 GiB.
+
+Enable **Allow admins to manage ESXi templates in the Admin Panel** in the Appliance setup under **Template store**.
+On a standalone or gateway installation, set `TOPOLOGYOPERATOR_TEMPLATE_SHARE_DIR` on the process serving the Admin Panel
+to the absolute path of its already mounted writable share. An optional `TOPOLOGYOPERATOR_TEMPLATE_REFRESH_MINUTES`
+sets the refresh interval shown in the panel. GNS3 templates are collected from GNS3.
+
 ## Device configs saved with the project
 
 The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim; **up to 10 000

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Admin</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-57">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
 <style>
   /* styles.css lays <body> out for the single-page app (full height, no scrolling) - this page is its own document. */
   body { display: block; height: auto; min-height: 100vh; overflow: auto; }
@@ -41,6 +41,22 @@
   #ap-bulk-results { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
   #ap-bulk-results li { padding: 2px 0; }
   #ap-bulk-results li.ap-error { color: var(--bad); }
+  #ap-share-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #ap-share-actions[hidden] { display: none; }
+  #ap-share-table { margin-top: 12px; }
+  #ap-share-table td { overflow-wrap: anywhere; }
+  #ap-share-dialog { width: min(560px, calc(100% - 32px)); max-height: 85vh; overflow: auto;
+    box-sizing: border-box; color: inherit; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 20px; }
+  #ap-share-dialog::backdrop { background: #0009; }
+  #ap-share-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 14px; }
+  #ap-share-form label { display: grid; gap: 4px; font-size: 13px; }
+  #ap-share-form input, #ap-share-form textarea { width: 100%; box-sizing: border-box; }
+  #ap-share-form label[hidden] { display: none; }
+  #ap-share-form textarea { min-height: 62px; }
+  .ap-share-wide { grid-column: 1 / -1; }
+  #ap-share-progress { width: 100%; }
+  .ap-share-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   #ap-logs-section .toolbar-btn { margin-right: 8px; }
   #ap-logs-summary {
     white-space: pre-wrap; margin-top: 12px; padding: 12px; border-radius: 5px;
@@ -114,6 +130,47 @@
       <pre id="ap-logs-summary" hidden></pre>
     </section>
 
+    <section id="ap-share-section">
+      <h2>Template Share</h2>
+      <div id="ap-share-actions" hidden>
+        <button type="button" class="toolbar-btn primary" id="ap-share-import">Import template…</button>
+        <button type="button" class="toolbar-btn" id="ap-share-refresh">Refresh list</button>
+      </div>
+      <p id="ap-share-status" class="ap-status" role="status"></p>
+      <table id="ap-share-table" hidden>
+        <thead><tr><th>Template</th><th>Category</th><th>OVA</th><th></th></tr></thead>
+        <tbody id="ap-share-body"></tbody>
+      </table>
+      <dialog id="ap-share-dialog" aria-labelledby="ap-share-title">
+        <form id="ap-share-form">
+          <h2 id="ap-share-title">Import ESXi template</h2>
+          <div id="ap-share-fields">
+            <label class="ap-share-wide" id="ap-share-file-label">OVA file
+              <input type="file" name="ova" accept=".ova" required>
+            </label>
+            <label>Template name <input name="name" required maxlength="120"></label>
+            <label>Category <input name="category" required maxlength="120"></label>
+            <label>OS family <input name="os_family" required maxlength="120"></label>
+            <label>OS version <input name="os_version" required maxlength="120"></label>
+            <label>vCPUs <input type="number" name="cpu" min="1" step="1" required></label>
+            <label>RAM (GB or MB) <input name="memory" required maxlength="20"></label>
+            <label>Disk (TB, GB or MB) <input name="disk" required maxlength="20"></label>
+            <label>Hostname <input name="hostname" required maxlength="253"></label>
+            <label>Domain <input name="domain" maxlength="253"></label>
+            <label>Tags (comma separated) <input name="tags"></label>
+            <label id="ap-share-users-label">Guest usernames (comma separated) <input name="users"></label>
+            <label class="ap-share-wide">Notes <textarea name="note" maxlength="1200"></textarea></label>
+          </div>
+          <p id="ap-share-form-status" class="ap-status" role="status"></p>
+          <progress id="ap-share-progress" max="100" aria-label="OVA upload progress" hidden></progress>
+          <div class="ap-share-footer">
+            <button type="button" class="toolbar-btn" id="ap-share-cancel">Cancel</button>
+            <button type="submit" class="toolbar-btn primary" id="ap-share-save">Import</button>
+          </div>
+        </form>
+      </dialog>
+    </section>
+
     <section id="ap-audit-section">
       <h2>Audit log</h2>
       <table>
@@ -124,6 +181,7 @@
     </section>
   </div>
 </div>
-<script src="/admin.js?v=ginnungagap-57"></script>
+<script src="/admin-template-share.js?v=ginnungagap-58"></script>
+<script src="/admin.js?v=ginnungagap-58"></script>
 </body>
 </html>

@@ -43,6 +43,7 @@ from app import (
 from app.auth_middleware import AuthMiddleware
 from app.proxy import make_proxy_app
 from app.request_logging import RequestLoggingMiddleware
+from app.routes.template_share import router as template_share_router
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 # Exactly the static paths app/auth_middleware.py's _ALLOWED_PATHS lets through without a
@@ -82,6 +83,7 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="Ginnungagap Gateway", lifespan=_lifespan)
 routes_gateway.register(app)
+app.include_router(template_share_router)
 
 
 def _serve_static(filename: str):
@@ -94,6 +96,11 @@ for _path, _filename in _PRE_LOGIN_ASSETS.items():
 
 app.get("/gateway/host-deploy.js", include_in_schema=False)(
     _serve_static("gateway-host-deploy.js")
+)
+app.get("/admin.html", include_in_schema=False)(_serve_static("admin.html"))
+app.get("/admin.js", include_in_schema=False)(_serve_static("admin.js"))
+app.get("/admin-template-share.js", include_in_schema=False)(
+    _serve_static("admin-template-share.js")
 )
 
 app.add_middleware(AuthMiddleware)
