@@ -219,6 +219,19 @@ function showLandingView() {
   document.getElementById("app-view").hidden = true;
   document.getElementById("landing-view").hidden = false;
   loadLandingHostGrid();
+  showAppVersion();
+}
+
+// Plain text next to the footer links, from the backend's own /health
+// (app/version.py) - stays empty (and hidden by CSS) if /health fails.
+async function showAppVersion() {
+  const label = document.getElementById("landing-version");
+  try {
+    const { version } = await fetch("/health", { cache: "no-store" }).then(r => r.json());
+    label.textContent = version ? `v${version}` : "";
+  } catch (error) {
+    label.textContent = "";
+  }
 }
 
 // Toggles the handful of menu items that only make sense against a
@@ -331,7 +344,7 @@ async function promptAndGenerateTopology() {
 
   const input = await showTextareaPrompt("", {
     title: "Generate via LLM",
-    placeholder: "Describe the topology you want (e.g. \"a small office network with 2 routers, 3 switches, and 5 PCs\")…",
+    placeholder: "Describe the topology you want",
     confirmLabel: "Generate",
     attachments: {
       accept: ".pdf,.png,.jpg,.jpeg,.docx,.txt,.md,.csv",

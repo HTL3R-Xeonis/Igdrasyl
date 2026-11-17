@@ -1,5 +1,5 @@
 
-# Phase 3: the one gateway process - owns login and the shared user/AI-config
+# The one gateway process - owns login and the shared user/AI-config
 # stores exclusively, proxies everything else to whichever backend a session has
 # picked (see app/gateway_main.py's own docstring). Copy to
 # ~/.config/systemd/user/xeonis-gateway.service for the SAME dedicated,
@@ -9,7 +9,7 @@
 # absolute path on this unit and on every xeonis-backend@.service instance.
 
 [Unit]
-Description=Ginnungagap gateway (Phase 3)
+Description=Ginnungagap gateway
 After=network-online.target
 
 [Service]

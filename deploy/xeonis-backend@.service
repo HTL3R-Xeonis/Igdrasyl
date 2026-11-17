@@ -1,5 +1,5 @@
 
-# Phase 3: one instance of this unit per settings profile - app/backend_manager.py
+# One instance of this unit per settings profile - app/backend_manager.py
 # starts/stops/restarts "xeonis-backend@<profile-stem>.service" (the part before
 # ".yml"/".yaml" in the profile's filename). Copy this file (unchanged) to
 # ~/.config/systemd/user/xeonis-backend@.service for the dedicated, unprivileged

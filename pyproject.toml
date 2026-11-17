@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "topologyoperator"
-version = "0.1.0"
+dynamic = ["version"]
 description = "GUI tool for operating topologies already deployed by TopologyBuilder."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,9 @@ test = ["pytest==9.1.1", "httpx==0.28.1"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "app.version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

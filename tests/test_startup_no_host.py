@@ -70,6 +70,10 @@ def test_initial_admin_belongs_to_whichever_app_handles_first_boot(
 ):
     user_store = tmp_path / "users.json"
     monkeypatch.setenv("TOPOLOGYOPERATOR_USERS_FILE", str(user_store))
+    # a managed backend and the gateway refuse to start without all four shared paths (app/shared_state.py)
+    monkeypatch.setenv(
+        "TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR", str(tmp_path / "profiles")
+    )
     monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
     monkeypatch.delenv("TOPOLOGYOPERATOR_GATEWAY_BACKEND", raising=False)
     if behind_gateway:

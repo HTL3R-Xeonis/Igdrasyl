@@ -31,6 +31,21 @@ _FIXTURE_TOPOLOGY = str(Path(__file__).parent / "fixtures" / "topology.yaml")
 
 
 @pytest.fixture(autouse=True)
+def _service_urls_in_the_environment(monkeypatch):
+    """
+    A host profile must name its service addresses itself or the environment must (app/required_settings.py); the
+    test profiles are bare `esxi: ip` files, so the environment provides them. Tests of the missing case delete these.
+    """
+    for name in (
+        "ESXI_TEMPLATE_SERVER_URL",
+        "GNS3_TEMPLATE_SERVER_URL",
+        "TOPOLOGY_GENERATOR_URL",
+        "OVA_DEPLOY_URL",
+    ):
+        monkeypatch.setenv(name, "http://services.test:8000")
+
+
+@pytest.fixture(autouse=True)
 def _design_store_tmp_file(tmp_path, monkeypatch):
     """
     Every /design/* mutation now autosaves (see app/design_store.py) -

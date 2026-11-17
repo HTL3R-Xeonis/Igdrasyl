@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from src.settings import Settings
 
-from app import logging_setup, routes_gateway, users
+from app import logging_setup, routes_gateway, shared_state, users
 from app.auth_middleware import AuthMiddleware
 from app.proxy import make_proxy_app
 from app.request_logging import RequestLoggingMiddleware
@@ -53,6 +53,8 @@ _PRE_LOGIN_ASSETS = {
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # The gateway only exists in the gateway/backend deployment, so it always needs the shared files (no flag needed).
+    shared_state.require_shared_state_paths()
     # The gateway never calls Settings.initialise_settings for any one profile - it isn't any
     # backend's process. Only its own log file path is worth overriding, so backend and gateway
     # logs never collide when both default to a relative "./logs/..." path in the same directory.

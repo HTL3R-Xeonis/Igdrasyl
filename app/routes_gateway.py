@@ -59,6 +59,7 @@ from app import (
     error_pages,
     ova_templates,
     profile_secrets,
+    required_settings,
     settings_profiles,
     users,
 )
@@ -66,6 +67,7 @@ from app.auth import SESSION_COOKIE, current_user, require_admin, verify_session
 from app.routes import auth as auth_routes
 from app.routes.common import settings_call
 from app.routes.models import ConnectionSettingsUpdate
+from app.version import __version__
 
 BACKEND_COOKIE = "xeonis_backend"
 
@@ -168,7 +170,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Choose a server</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-55">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-56">
 <style>
   body {{ display: block; padding: 0 16px; }}
   main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}
@@ -213,6 +215,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 </header>
 <p class="backend-picker-sub">Signed in as {escape(username)}. Each server runs its own session.</p>
 {tiles}
+<p class="backend-picker-version">v{__version__}</p>
 </main>
 <script src="/gateway/host-deploy.js?v=1" defer></script>
 </body>
@@ -280,7 +283,7 @@ def register(app: FastAPI) -> None:
         all - found by actually running both processes together, not by
         a unit test (see deploy/README.md's own verification section).
         """
-        return {"status": "ok"}
+        return {"status": "ok", "version": __version__}
 
     @app.get("/pick-backend", response_class=HTMLResponse)
     def pick_backend(user: AnyUser) -> str:
@@ -572,6 +575,13 @@ def register(app: FastAPI) -> None:
         record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
         if not users.can_access_host(record, filename):
             raise HTTPException(403, f"Not allowed to use host {filename!r}")
+        missing = required_settings.missing_api_settings(
+            settings_profiles.profile_path(filename)
+        )
+        if missing:
+            message = required_settings.explain(filename, missing)
+            logger.error(message)
+            raise HTTPException(400, message)
         try:
             port = backend_manager.ensure_running(filename)
         except backend_ports.NoFreePort as exc:

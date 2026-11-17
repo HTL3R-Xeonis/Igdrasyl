@@ -1,10 +1,12 @@
-# Phase 3 deployment: gateway + per-profile backends
+# Deployment: gateway + per-profile backends
 
-**Cut over on the lab testbox on 2026-11-16** (user units of the existing
-`junioradmin` account, state in `~/xeonis-state`, gateway on :8123, backends on
-9200+). Installs that still run `uvicorn app.main:app` directly keep working
-unchanged. Without `loginctl enable-linger <account>` (it needs root, and fails on
-Debian 13 - see below) the units only live as long as that account has a login session.
+One gateway process owns login and the shared user store and proxies every request to the backend of the host the
+caller picked; every host profile has its own backend process (`xeonis-backend@<profile>`). The units here run as
+systemd *user* units of one unprivileged account. A single process started directly (`uvicorn app.main:app`) is still a
+complete app without any of this.
+
+Without `loginctl enable-linger <account>` the units only live as long as that account has a login session (see the
+Debian 13 note below).
 
 ## The one thing to get exactly right
 
@@ -22,6 +24,13 @@ Today's bare relative-path defaults (`users.json`, `session_secret.key`, ...)
 resolve against whatever `WorkingDirectory=` happens to be. The gateway
 creates the initial account in the shared store. Each managed backend needs
 that same store to authenticate gateway sessions.
+
+This is enforced: the gateway, and every backend started by `deploy/xeonis-backend-launch.py`
+(`TOPOLOGYOPERATOR_GATEWAY_BACKEND=1`), refuse to start unless `TOPOLOGYOPERATOR_USERS_FILE`,
+`TOPOLOGYOPERATOR_SESSION_SECRET_FILE`, `TOPOLOGYOPERATOR_AI_CONFIG_FILE` and
+`TOPOLOGYOPERATOR_SETTINGS_PROFILES_DIR` are all set to absolute paths. The log and the error name the offender:
+`<VAR> is not set to an absolute path - every gateway and backend unit must share the same file (see deploy/README.md).`
+A standalone `uvicorn app.main:app` is not checked and keeps its relative defaults (see `app/shared_state.py`).
 
 The two `.service` files here already set all of these identically - if
 you copy them as-is and just change the `/opt/ginnungagap/...` prefix
@@ -139,4 +148,3 @@ was corrected after a failed startup, restart that backend to retry startup.
   accounts/sessions aren't silently abandoned.
 - TLS - put a real reverse proxy in front of the gateway for that; it
   isn't this project's job to terminate TLS itself.
-- Per-install decisions: whether to cut over further installs - see `app/main.py`'s docstring and the Phase 3 plan.

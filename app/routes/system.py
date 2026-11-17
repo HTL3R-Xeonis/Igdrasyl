@@ -23,11 +23,13 @@ from app.startup import (
     held_project,
     refresh_startup_state,
 )
+from app.version import __version__
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
+        "version": __version__,
         "deployable_project": deployable_project(),
         "held_project": held_project(),
         "esxi_ip": Settings.ESXI.IP,

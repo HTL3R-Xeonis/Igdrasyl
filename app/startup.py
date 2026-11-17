@@ -24,7 +24,9 @@ from app import (
     ova_templates,
     profile_secrets,
     project_selection,
+    required_settings,
     settings_profiles,
+    shared_state,
     startup_retry,
     template_health,
     users,
@@ -138,12 +140,42 @@ def retry_startup_state(app: FastAPI) -> bool:
         return True
 
 
+BACKEND_ENV_VAR = "TOPOLOGYOPERATOR_GATEWAY_BACKEND"
+
+
+def check_shared_state_if_managed() -> None:
+    """A backend behind the gateway must share the gateway's files (see app/shared_state.py); a standalone one need not."""
+    if os.getenv(BACKEND_ENV_VAR) == "1":
+        shared_state.require_shared_state_paths()
+
+
+def warn_if_literal_api_values() -> None:
+    """A test switch of TopologyBuilder that hides the template services completely - nothing in production sets it."""
+    if Settings.API.LITERAL_API_VALUES:
+        logger.warning(
+            "LITERAL_API_VALUES is set: the template lists are hardcoded, "
+            "the template services are NOT asked."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_shared_state_if_managed()
     settings_path = os.getenv(SETTINGS_ENV_VAR)
+    secret_problems: list[str] = []
     if settings_path:
+        if not Settings.API.LITERAL_API_VALUES:
+            try:
+                required_settings.check(settings_path)
+            except required_settings.MissingProfileSettings as exc:
+                configure_logging()
+                logger.error(str(exc))
+                raise
         Settings.initialise_settings(settings_path)
         stored_secrets = profile_secrets.apply(Path(settings_path).name)
+        secret_problems = profile_secrets.drop_environment_passwords(
+            Path(settings_path).name, stored_secrets
+        )
     else:
         stored_secrets = []
     ova_templates.initialise(settings_path)
@@ -152,13 +184,16 @@ async def lifespan(app: FastAPI):
     # After initialise_settings, so a settings.yml's own log_file_path
     # override (if any) is already in effect - see app/logging_setup.py.
     configure_logging()
+    warn_if_literal_api_values()
+    for problem in secret_problems:
+        logger.error(problem)
     if stored_secrets:
         # Names only - never the values.
         logger.info(f"Using stored credentials for: {', '.join(stored_secrets)}")
 
     # The gateway owns initial accounts for units started by its launcher.
     # Standalone installs need their own admin on first boot.
-    if os.getenv("TOPOLOGYOPERATOR_GATEWAY_BACKEND") != "1":
+    if os.getenv(BACKEND_ENV_VAR) != "1":
         bootstrap_password = users.ensure_bootstrap_admin()
         if bootstrap_password:
             logger.warning(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Phase 3: resolves one profile's own port and settings file, then execs
+Resolves one profile's own port and settings file, then execs
 uvicorn for it - the systemd unit template (xeonis-backend@.service)
 calls this with the profile stem (systemd's `%i`) as its one argument,
 since a plain unit file can't read JSON itself to pick a --port.

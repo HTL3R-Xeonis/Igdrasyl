@@ -106,3 +106,26 @@ def apply(filename: str) -> list[str]:
     if "gns3_password" in stored:
         Settings.GNS3.PASSWORD = stored["gns3_password"]
     return sorted(stored)
+
+
+def drop_environment_passwords(filename: str, stored: list[str]) -> list[str]:
+    """
+    A host's passwords come from its stored secrets only. TopologyBuilder's Settings also reads ESXI_PASSWORD/
+    GNS3_PASSWORD from the environment, which would silently hand one host's password to another profile - so whatever
+    the environment put there is cleared when this host has no stored one.
+    :return: the human-readable problems to log (never containing a value)
+    """
+    problems = []
+    if "esxi_password" not in stored:
+        Settings.ESXI.PASSWORD = None
+        problems.append(
+            f"Host profile {filename!r} has no stored ESXi password - set one in the host settings; the ESXI_PASSWORD "
+            f"environment variable is no longer used, so connections to this host will fail until then."
+        )
+    if "gns3_password" not in stored:
+        Settings.GNS3.PASSWORD = None
+        problems.append(
+            f"Host profile {filename!r} has no stored GNS3 password - set one in the host settings; the GNS3_PASSWORD "
+            f"environment variable is no longer used."
+        )
+    return problems

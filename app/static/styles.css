@@ -1349,6 +1349,8 @@ header#menubar { height: 30px; padding: 0 6px; background: #353535; }
 #landing-actions-grid .landing-host-icon { width: 26px; height: 26px; font-size: 23px; }
 #landing-footer-links { display: flex; align-self: flex-start; gap: 18px; margin-top: 24px; }
 #landing-footer-links a { margin-top: 0; }
+#landing-version { font-size: 11px; color: var(--dim); }
+#landing-version:empty { display: none; }
 #template-banner {
   padding: 8px 20px;
   background: #3a2c14;

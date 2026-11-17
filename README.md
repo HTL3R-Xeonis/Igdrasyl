@@ -364,7 +364,7 @@ settings for, so it still fails loudly.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 cp settings.example.yml settings.yml   # configure the ESXi/GNS3 host
-cp .env.example .env                    # fill in ESXI_PASSWORD/GNS3_PASSWORD
+cp .env.example .env                    # machine-wide settings only; host passwords are entered in the host settings
 export TOPOLOGYOPERATOR_SETTINGS=settings.yml
 uvicorn app.main:app --reload
 ```
@@ -413,11 +413,21 @@ Each host tile's **Settings** button opens the same page for an existing
 profile. Optional values, booleans, ports, protected port-group lists, and MAC
 ranges have dedicated inputs and validation.
 
+**Service addresses**: a host profile must name the four services it uses (`api.esxi_template_server_url`,
+`api.gns3_template_server_url`, `api.topology_generator_url`, `api.ova_deploy_url`) - or the matching environment
+variable must (`ESXI_TEMPLATE_SERVER_URL`, ..., which is how the appliance points everything somewhere else). The built-in
+lab addresses of TopologyBuilder are not used as a fallback: activating a profile without them is refused with a message
+naming the missing keys (HTTP 400 on the gateway), and a backend started with such a profile stops with the same text in
+its log.
+
 **Passwords** can be pasted into the Credentials section. The settings loader
 does not accept passwords in YAML, so they are stored apart from it, per host, in
 `<profiles dir>/.secrets/<profile>.json` (mode 0600) and applied at startup
-(they win over `ESXI_PASSWORD`/`GNS3_PASSWORD` for that host; those variables
-still work when nothing is stored). They are write-only: the server only reports
+(the Operator does not read `ESXI_PASSWORD`/`GNS3_PASSWORD` from the environment any
+more - a host without a stored password logs a clear error at startup and its
+connections fail until one is set). The ESXi password of the active host also travels
+with every OVA deploy request to the deploy service, which has no password list of its
+own. They are write-only: the server only reports
 *whether* one is stored, an empty field keeps it, and they never appear in the
 YAML, the preview, the Test connections request or the log. Deleting a host
 deletes its stored passwords; a changed password takes effect after
@@ -449,6 +459,9 @@ the rest of the app's theme. Passwords are hashed with salted PBKDF2-HMAC-SHA256
 library - no new dependency. Accounts live in `users.json` (gitignored, path
 overridable via `TOPOLOGYOPERATOR_USERS_FILE`); the session-signing secret is
 generated once into `session_secret.key` next to it and persists across restarts.
+(Behind the gateway these files must be absolute shared paths - see `deploy/README.md`; a gateway or managed backend
+without them refuses to start.) If TopologyBuilder's test switch `LITERAL_API_VALUES` is set, startup logs a warning
+that the template lists are hardcoded and the template services are not asked.
 If `users.json` doesn't exist at startup, one `admin` account is created with the
 default password `admin` - deliberately predictable, not a generated secret, since
 it's meant to be the very first login on a fresh install and changed right away via
@@ -939,6 +952,17 @@ same restart flow as host changes. Import and live edits require a selected proj
   own "View License" link.
 
 The frontend at `/` covers all of these.
+
+## Application version
+
+The version (`MAJOR.MINOR.PATCH`, currently `1.0.0`) lives in exactly one place: the single line `__version__ = "1.0.0"` in
+`app/version.py`. It is a plain file under `app/` on purpose: a deploy by raw file copy (as on the lab testbox) carries it along,
+whereas git and the installed package metadata can be missing or stale there. `pyproject.toml` reads the same value
+(`dynamic = ["version"]`), so a built package cannot disagree; a test fails if the two ever drift. To bump it, edit that one line.
+
+It is reported as `version` by `GET /health` (backend) and `GET /gateway/health` (gateway), shown as `v1.0.0` in the
+landing page footer next to "View License" / "View Logs", and in the footer of the gateway's choose-a-server page. It is
+plain text - no hover effect or tooltip.
 
 ## Testing
 
