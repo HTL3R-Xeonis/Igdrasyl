@@ -504,3 +504,24 @@ def test_remove_link_with_ambiguous_interfaces_maps_to_404(
 
     assert resp.status_code == 404
     assert "cannot tell which one" in resp.json()["detail"]
+
+
+def test_versioned_appliance_images_are_hidden_with_the_default_list(monkeypatch):
+    from app import topology_write
+
+    monkeypatch.delenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", raising=False)
+    hidden = topology_write._hidden_template_names()
+    assert topology_write._is_hidden("ginnungagap-appliance-v1.0.0", hidden)
+    assert topology_write._is_hidden("Ginnungagap-Appliance-V2", hidden)
+    assert topology_write._is_hidden("gns3-vm", hidden)
+    assert not topology_write._is_hidden("ginnungagap", hidden)
+    assert not topology_write._is_hidden("debian", hidden)
+
+
+def test_a_list_from_the_environment_is_matched_exactly(monkeypatch):
+    from app import topology_write
+
+    monkeypatch.setenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", "debian")
+    hidden = topology_write._hidden_template_names()
+    assert topology_write._is_hidden("debian", hidden)
+    assert not topology_write._is_hidden("ginnungagap-appliance-v1.0.0", hidden)

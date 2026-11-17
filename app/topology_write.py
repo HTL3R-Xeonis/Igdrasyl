@@ -150,6 +150,20 @@ def _gns3_template_port_specs(templates: list[dict]) -> dict[str, dict[str, Any]
 _HIDDEN_TEMPLATE_NAMES = frozenset({"gns3-vm", "ginnungagap-appliance"})
 
 
+# Appliance images carry their version in the template name (ginnungagap-appliance-v1.0.0); with the built-in list every
+# such name is hidden too. A list set through the environment is matched exactly, as before.
+_APPLIANCE_IMAGE_PREFIX = "ginnungagap-appliance-"
+
+
+def _is_hidden(name: object, hidden: frozenset[str]) -> bool:
+    folded = str(name).casefold()
+    if folded in hidden:
+        return True
+    return hidden is _HIDDEN_TEMPLATE_NAMES and folded.startswith(
+        _APPLIANCE_IMAGE_PREFIX
+    )
+
+
 def _hidden_template_names() -> frozenset[str]:
     configured = os.getenv("TOPOLOGYOPERATOR_HIDDEN_TEMPLATE_NAMES", "")
     names = frozenset(
@@ -169,18 +183,18 @@ def list_templates() -> dict[str, Any]:
     gns3_templates = [
         template
         for template in _fetch_gns3_templates()
-        if str(template.get("name", "")).casefold() not in hidden
+        if not _is_hidden(template.get("name", ""), hidden)
     ]
     return {
         "gns3": sorted(
             name
             for name in APIHandler.get_gns3_template_names()
-            if name.casefold() not in hidden
+            if not _is_hidden(name, hidden)
         ),
         "esxi": sorted(
             name
             for name in APIHandler.get_esxi_template_names()
-            if name.casefold() not in hidden
+            if not _is_hidden(name, hidden)
         ),
         "gns3_categories": _gns3_template_categories(gns3_templates),
         "gns3_port_specs": _gns3_template_port_specs(gns3_templates),
