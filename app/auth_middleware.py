@@ -29,6 +29,10 @@ _ALLOWED_PATHS = frozenset(
     }
 )
 
+# Service-to-service GETs that skip the session check because the route itself requires a bearer token
+# (app/internal_credentials.py). Any other method on these paths is treated like every protected path.
+_BEARER_PATHS = frozenset({"/internal/host-credentials"})
+
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # A "readonly" user may mutate exactly this: picking which backend/session
@@ -75,7 +79,11 @@ class AuthMiddleware:
             return
 
         path = scope["path"]
-        if path in _ALLOWED_PATHS:
+        if path in _ALLOWED_PATHS or (
+            path in _BEARER_PATHS
+            and scope["type"] == "http"
+            and scope["method"] == "GET"
+        ):
             await self.app(scope, receive, send)
             return
 

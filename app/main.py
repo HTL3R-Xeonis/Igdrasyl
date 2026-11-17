@@ -7,16 +7,14 @@ routes, every route module and the frontend, and nothing else.
 Everything else (GNS3 console proxy, config push, embedded VM screens)
 plugs into the connections/graph this module resolves once at startup.
 
-Phase 3 (app/gateway_main.py, see TopologyBuilder/handoff/plans/
-PLAN_login_multiserver.md): the lab testbox runs it as gateway + one backend per
-settings profile (cut over on 2026-11-16), where this module is a *backend*
-reachable only through the gateway's proxy. deploy/xeonis-backend-launch.py sets
-TOPOLOGYOPERATOR_GATEWAY_BACKEND=1, which only stops the backend from bootstrapping
-the first admin - the gateway owns the shared user store. It still verifies the
-forwarded session cookie itself (AuthMiddleware), which costs nothing and keeps a
-backend safe if it is ever reached directly. Started directly (uvicorn app.main:app,
-no gateway) it stays a complete single-process app, login and first-boot admin
-included.
+Two deployment shapes (design: TopologyBuilder/handoff/plans/PLAN_login_multiserver.md,
+setup: deploy/README.md). Started directly (uvicorn app.main:app) this module is a
+complete single-process app, login and first-boot admin included. Behind the gateway
+(app/gateway_main.py) it is one *backend* per host profile, reachable only through the
+gateway's proxy: deploy/xeonis-backend-launch.py sets TOPOLOGYOPERATOR_GATEWAY_BACKEND=1,
+which only stops the backend from bootstrapping the first admin - the gateway owns the
+shared user store. A backend still verifies the forwarded session cookie itself
+(AuthMiddleware), which costs nothing and keeps it safe if it is ever reached directly.
 
 Run with: uvicorn app.main:app --reload
 Point TOPOLOGYOPERATOR_SETTINGS at a settings.yml first (see
@@ -52,7 +50,7 @@ from app.routes import auth as _auth_routes
 # Importing a route module registers its routes. Starlette tries routes in registration order, so this
 # order is the matching order; the frontend mount below must stay last. "auth" registers itself via
 # register() (see its own docstring - this lets the same code also mount onto app/gateway_main.py's
-# app once Phase 3's migration actually happens), everything else still registers on import.
+# app), everything else registers on import.
 _auth_routes.register(app)
 for _module in (
     "system",

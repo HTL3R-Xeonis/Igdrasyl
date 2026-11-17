@@ -1,5 +1,5 @@
 """
-Phase 3 (gateway + per-profile backend): which TCP port each settings
+Gateway + per-profile backend: which TCP port each settings
 profile's backend process listens on. A separate sidecar JSON file,
 not a key inside the profile's own YAML - app/settings_profiles.py's
 save_profile() does a verbatim raw-bytes overwrite with no merge, so a

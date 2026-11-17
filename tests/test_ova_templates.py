@@ -62,7 +62,7 @@ def test_download_uses_resource_id_and_removes_temporary_file():
 
 
 def test_ova_template_endpoint_returns_only_sanitized_metadata(gateway_client):
-    # /ova-templates moved to the gateway in Phase 3 - see app/routes_gateway.py.
+    # /ova-templates moved to the gateway - see app/routes_gateway.py.
     with patch(
         "app.ova_templates.list_public",
         return_value=[{"id": "template-1", "name": "GNS3 VM"}],

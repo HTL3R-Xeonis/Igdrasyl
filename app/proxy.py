@@ -1,5 +1,5 @@
 """
-Phase 3 (gateway + per-profile backend): the raw ASGI app that forwards
+Gateway + per-profile backend: the raw ASGI app that forwards
 everything the gateway doesn't handle itself to whichever backend the
 caller is pointed at - HTTP and WebSocket alike, in one callable, the
 same way app/main.py's own static-file mount is a plain ASGI app

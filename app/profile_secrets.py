@@ -47,6 +47,11 @@ def _read(filename: str) -> dict[str, str]:
     return {k: v for k, v in data.items() if k in SECRET_KEYS and isinstance(v, str)}
 
 
+def stored_value(filename: str, key: str) -> str | None:
+    """One stored secret of this host, for the few server-side callers that must hand it on (never for a browser)."""
+    return _read(filename).get(key) or None
+
+
 def validate(secrets: dict[str, str]) -> dict[str, str]:
     """
     Drops blank entries (blank means "keep what is stored").

@@ -28,7 +28,7 @@ def test_wrong_method_is_a_405_page_in_a_browser(client):
 
 def test_reason_is_escaped_and_paths_redacted(client):
     # Any dynamic path segment reflected into a 404's detail text exercises the same
-    # escaping/redaction - /connections moved to the gateway in Phase 3 (app/routes_gateway.py),
+    # escaping/redaction - /connections moved to the gateway (app/routes_gateway.py),
     # but /project (still backend-side, see app/routes/host_settings.py) 404s the same way.
     response = client.get("/settings-profiles/<b>x</b>.yml/project", headers=HTML)
     assert "<b>x</b>" not in response.text

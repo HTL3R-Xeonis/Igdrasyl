@@ -4,7 +4,7 @@ The login page is a plain HTML form, rendered server-side (no JS, no
 fetch()) - "no browser popups" is trivially true, and it works even if the
 main app's own JS has a problem.
 
-Phase 3 (app/gateway_main.py): these routes are registered on whichever
+Gateway (app/gateway_main.py): these routes are registered on whichever
 FastAPI app calls `register()` below, rather than decorating a fixed
 `app` at import time like every other route module - they live on the
 gateway exclusively there (see app/main.py's own comment on why it no

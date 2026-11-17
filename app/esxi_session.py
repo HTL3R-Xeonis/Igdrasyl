@@ -27,6 +27,14 @@ class EsxiUnavailable(RuntimeError):
     """The ESXi host can't be reached (or refused the login); the message is for the operator."""
 
 
+def password_missing_message(service: str, host: str) -> str:
+    """The one wording for "this host has no password stored" - the login is not even tried (never contains a password)."""
+    return (
+        f"{service} password for host {host} is not set - enter it in the host profile "
+        f"(Host settings > Credentials). No connection attempted."
+    )
+
+
 class _Attempt:
     """One connect attempt, running in its own thread."""
 
@@ -58,9 +66,12 @@ class LazyESXiConnection:
         host: str,
         clock: Callable[[], float] = time.monotonic,
         connect_wait_seconds: float | None = None,
+        has_password: bool = True,
     ) -> None:
         self._connect = connect
         self._host = host
+        self._has_password = has_password
+        self._missing_password_logged = False
         self._clock = clock
         self._wait = (
             self.CONNECT_WAIT_SECONDS
@@ -78,6 +89,12 @@ class LazyESXiConnection:
 
     def connection(self) -> Any:
         """The real connection, opened now if it is not yet. :raises EsxiUnavailable: it can't be."""
+        if not self._has_password:
+            message = password_missing_message("ESXi", self._host)
+            if not self._missing_password_logged:
+                self._missing_password_logged = True
+                logger.error(message)
+            raise EsxiUnavailable(message)
         with self._lock:
             if self._connection is not None:
                 return self._connection

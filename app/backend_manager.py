@@ -1,5 +1,5 @@
 """
-Phase 3 (gateway + per-profile backend): starting, checking and
+Gateway + per-profile backend: starting, checking and
 restarting a settings profile's own backend process, as a systemd
 `--user` unit (`xeonis-backend@<profile-stem>.service`, see
 deploy/xeonis-backend@.service) under one dedicated, unprivileged

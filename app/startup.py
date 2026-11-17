@@ -212,7 +212,9 @@ async def lifespan(app: FastAPI):
         Settings.ESXI.PASSWORD,
     )
     app.state.esxi_connection = esxi_session.LazyESXiConnection(
-        lambda: ESXiConnection(*esxi_args), host=Settings.ESXI.IP
+        lambda: ESXiConnection(*esxi_args),
+        host=Settings.ESXI.IP,
+        has_password=bool(Settings.ESXI.PASSWORD),
     )
 
     # Most recent /config-push request body - project_bundle.py's own

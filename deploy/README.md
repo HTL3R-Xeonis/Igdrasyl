@@ -112,6 +112,16 @@ dropped into `settings_profiles/` needs that key set to its own path
 otherwise every backend defaults to the same relative `./logs/app.log`
 under the shared `WorkingDirectory=` and they overwrite each other's log.
 
+## Letting the template collector ask for a host's login
+
+The template collector (on its own machine) has no copy of any ESXi password. It asks the gateway:
+`GET /internal/host-credentials?ip=<esxi ip>` with `Authorization: Bearer <token>`. Put a random token of at least 32
+characters into the shared `xeonis.env` as `XEONIS_COLLECTOR_TOKEN` (mode 0600) and into the collector's own `.env` as
+`OPERATOR_TOKEN`, next to `OPERATOR_URL=http://<gateway>:<port>`. Without the token the endpoint answers 503 and says so in
+the gateway log at start. It serves only the ESXi user name and password of the host profile with that address, and every
+lookup is an audit event (`credentials_served`, never the secret). Over plain HTTP the token and the answer travel
+unencrypted - put TLS in front of the gateway outside a closed lab network.
+
 ## Verifying it
 
 ```bash

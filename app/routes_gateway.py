@@ -1,5 +1,5 @@
 """
-Phase 3 (app/gateway_main.py): every route that is install-wide rather
+Gateway (app/gateway_main.py): every route that is install-wide rather
 than specific to one backend - moved here from app/routes/admin.py and
 app/routes/host_settings.py, registered on the gateway's own FastAPI
 app instead of the per-profile backend's. Nothing here is new business
@@ -9,7 +9,7 @@ code those two modules already called, just reached through the
 gateway now.
 
 What moved and why, one line each (the full reasoning for each is in
-the Phase 3 section of TopologyBuilder/handoff/plans/PLAN_login_multiserver.md):
+the gateway design in TopologyBuilder/handoff/plans/PLAN_login_multiserver.md):
 - user accounts and AI configuration: shared across every
   backend, so there is exactly one place to manage them - here.
 - settings-profile CRUD, connection settings, host-config create/preview/
@@ -24,7 +24,7 @@ the Phase 3 section of TopologyBuilder/handoff/plans/PLAN_login_multiserver.md):
   the users currently on that profile, not everyone.
 
 What did NOT move, on purpose: GET/PUT /settings-profiles/{filename}/project
-(app/routes/host_settings.py) - never admin-gated before Phase 3, stays
+(app/routes/host_settings.py) - never admin-gated, stays
 exactly that way and backend-side, reached through the proxy like any other
 backend route. Logs (/admin/logs/summarize, /logs*) stay backend-side too -
 a backend's own log file genuinely is its own, not install-wide.
@@ -57,6 +57,7 @@ from app import (
     backend_presence,
     connection_settings,
     error_pages,
+    internal_credentials,
     ova_templates,
     profile_secrets,
     required_settings,
@@ -272,6 +273,43 @@ def register(app: FastAPI) -> None:
     deploy_jobs: dict[str, dict[str, Any]] = {}
     deploy_lock = Lock()
 
+    @app.get("/internal/host-credentials", include_in_schema=False)
+    def host_credentials(request: Request) -> JSONResponse:
+        """
+        The template collector's login lookup: reachable without a session but only with the service token
+        (app/internal_credentials.py). The token check comes before anything else, so an unauthenticated caller learns
+        nothing about which hosts exist.
+        """
+        headers = {"Cache-Control": "no-store"}
+        token = internal_credentials.configured_token()
+        if token is None:
+            logger.warning(internal_credentials.DISABLED_TEXT)
+            return JSONResponse(
+                {"detail": internal_credentials.DISABLED_TEXT}, 503, headers
+            )
+        caller = request.client.host if request.client else "-"
+        if not internal_credentials.token_matches(
+            request.headers.get("authorization"), token
+        ):
+            logger.warning(
+                f"Credentials request from {caller} refused: {internal_credentials.BAD_TOKEN_TEXT}"
+            )
+            return JSONResponse(
+                {"detail": internal_credentials.BAD_TOKEN_TEXT}, 401, headers
+            )
+        ip = (request.query_params.get("ip") or "").strip()
+        if not ip or len(ip) > 253:
+            return JSONResponse(
+                {"detail": internal_credentials.MISSING_IP_TEXT}, 400, headers
+            )
+        login = internal_credentials.lookup(ip)
+        if login is None:
+            return JSONResponse(
+                {"detail": internal_credentials.not_found_text(ip)}, 404, headers
+            )
+        audit_log.record("credentials_served", "collector", f"{ip} to {caller}")
+        return JSONResponse({"username": login[0], "password": login[1]}, 200, headers)
+
     @app.get("/gateway/health")
     def gateway_health() -> dict[str, str]:
         """
@@ -364,9 +402,8 @@ def register(app: FastAPI) -> None:
     # --- AI configuration (app/ai_snippets.py) ---------------------------
     # Mirrors app/routes/admin.py's own /admin/ai-config exactly (same
     # ai_snippets.get_enabled/set_enabled/available functions) - that one
-    # stays the live route until Phase 3's migration actually happens (see
-    # app/main.py's own docstring); this copy exists so the gateway isn't
-    # stale once it does.
+    # is the live route when the app runs without the gateway (see
+    # app/main.py's own docstring); this copy serves the gateway.
 
     @app.get("/admin/ai-config")
     def get_ai_config(_admin: AdminUser) -> dict[str, bool]:

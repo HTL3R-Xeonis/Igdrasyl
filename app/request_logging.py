@@ -60,7 +60,7 @@ def _header(scope, name: bytes) -> str | None:
 
 
 def _client(scope) -> str:
-    # Phase 3 (app/gateway_main.py's proxy): every request a backend sees otherwise comes from the
+    # Behind the gateway (app/gateway_main.py's proxy): every request a backend sees otherwise comes from the
     # gateway's own loopback address, which would lose per-user audit fidelity in exactly the logs
     # the admin panel summarizes - the gateway sets this header, trusted since a backend is only
     # ever reachable through it. app/proxy.py sets the same header when forwarding.
@@ -72,7 +72,7 @@ def _client(scope) -> str:
 
 
 def _trusted_user(scope) -> str | None:
-    # Phase 3 (app/gateway_main.py's proxy): a backend is only ever reachable through the gateway,
+    # Behind the gateway (app/gateway_main.py's proxy): a backend is only ever reachable through the gateway,
     # and the gateway forwards the original session cookie unchanged (it isn't hop-by-hop), so the
     # same cookie this process would otherwise use for its own login check also tells it who's
     # asking - cheaper and simpler than a separate trust header, and it works unchanged in Phase

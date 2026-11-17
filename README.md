@@ -474,7 +474,7 @@ included (Find Orphans, Deploy Fresh GNS3 VM, etc. are not role-gated).
 Admin-only: creating/deleting/activating a settings profile and editing its
 connection settings (`app/routes/host_settings.py`), user account
 management, and enabling AI configuration in Config Push - plus, on the
-Phase 3 gateway only, explicitly restarting a backend (`POST
+gateway only, explicitly restarting a backend (`POST
 /settings-profiles/{filename}/restart`, separate from activate, which any
 logged-in user may do there). The right panel's status bar (above the node
 list, next to the "Connected: N nodes" text) shows the signed-in username
@@ -486,7 +486,7 @@ configuration switch, and logs (below).
 
 `readonly` is a blanket, middleware-level block (`app/auth_middleware.py`):
 every request whose method isn't `GET`/`HEAD`/`OPTIONS` gets a 403 before it
-reaches any route, including anything proxied to a Phase 3 backend - a new
+reaches any route, including anything proxied to a backend behind the gateway - a new
 mutating endpoint added later is covered automatically, nothing to remember
 per route. The one exemption is picking which backend a readonly user's own
 session points at (`POST /settings-profiles/{filename}/activate`) - that's
@@ -531,7 +531,7 @@ The admin panel's **Audit log** section (`GET /admin/audit-log`, admin-only)
 is a second, much smaller log than the main verbose one: named
 security/admin events only (`login_success`/`login_failure`, `logout`,
 `user_created`/`user_deleted`/`user_role_changed`/`user_password_changed`/
-`user_allowed_hosts_changed`, `ai_snippet_topics_changed`, and, on the Phase 3
+`user_allowed_hosts_changed`, `ai_snippet_topics_changed`, and, on the
 gateway, `host_activate`/`host_restart`) - who did what, without scrolling
 through every request. `app/audit_log.py`, same bounded-line-count file
 rotation as the main log (`app/log_store.py`'s `LineLimitedFile`), its own
@@ -540,7 +540,7 @@ failure never breaks the action it's recording - it's logged to the regular
 log instead. Backend-side actions (config push, node/link add/remove,
 project deploy) are out of scope for this first pass.
 
-On the Phase 3 gateway's "choose a server" page, each tile also shows who's
+On the gateway's "choose a server" page, each tile also shows who's
 currently routed to that backend (`app/backend_presence.py`, in-memory only,
 a 5-minute window) - a plain count for everyone, and for an admin the actual
 usernames too, so restarting a shared host doesn't surprise someone else

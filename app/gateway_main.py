@@ -1,5 +1,5 @@
 """
-Ginnungagap (TopologyOperator) - Phase 3's gateway process.
+Ginnungagap (TopologyOperator) - the gateway process.
 
 Owns login and the one shared user store exclusively (see
 app/routes_gateway.py's own docstring for the full list of what moved
@@ -33,7 +33,13 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from src.settings import Settings
 
-from app import logging_setup, routes_gateway, shared_state, users
+from app import (
+    internal_credentials,
+    logging_setup,
+    routes_gateway,
+    shared_state,
+    users,
+)
 from app.auth_middleware import AuthMiddleware
 from app.proxy import make_proxy_app
 from app.request_logging import RequestLoggingMiddleware
@@ -42,7 +48,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 # Exactly the static paths app/auth_middleware.py's _ALLOWED_PATHS lets through without a
 # session - the login page needs to render before anyone has picked a backend to proxy to, and
 # there is no backend to serve them from yet at that point; everything else (the real app's own
-# .js/.css/images) is served by whichever backend the proxy forwards to, same as before Phase 3.
+# .js/.css/images) is served by whichever backend the proxy forwards to, same as in a single-process install.
 _PRE_LOGIN_ASSETS = {
     "/styles.css": "styles.css",
     "/ginnungagap-mark.svg": "ginnungagap-mark.svg",
@@ -62,6 +68,7 @@ async def _lifespan(app: FastAPI):
         "TOPOLOGYOPERATOR_GATEWAY_LOG_FILE", "./logs/gateway.log"
     )
     logging_setup.configure_logging()
+    internal_credentials.log_status()
 
     bootstrap_password = users.ensure_bootstrap_admin()
     if bootstrap_password:

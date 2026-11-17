@@ -145,7 +145,7 @@ def test_a_websocket_session_is_logged_on_accept_and_end(client, records):
 def test_x_forwarded_for_replaces_the_loopback_address_a_proxy_would_otherwise_show(
     client, records
 ):
-    # Phase 3: a backend behind app/gateway_main.py's proxy would otherwise only ever see the
+    # A backend behind app/gateway_main.py's proxy would otherwise only ever see the
     # gateway's own loopback address as scope["client"] - this header is how it learns the real one.
     client.get("/nodes", headers={"X-Forwarded-For": "203.0.113.7"})
 

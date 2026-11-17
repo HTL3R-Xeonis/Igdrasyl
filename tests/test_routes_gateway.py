@@ -1,5 +1,5 @@
 """
-Phase 3: everything app/routes_gateway.py moved onto the gateway from
+Everything app/routes_gateway.py moved onto the gateway from
 app/routes/admin.py and app/routes/host_settings.py (user accounts, AI
 snippet topics, settings-profile CRUD, host-config, OVA templates), plus
 what's genuinely new there - activate's changed meaning, the explicit

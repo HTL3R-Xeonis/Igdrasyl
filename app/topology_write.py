@@ -29,7 +29,7 @@ from src.backend import TopologyBackend
 from src.connections.api_handler import APIHandler
 from src.settings import Settings
 
-from app import node_names
+from app import esxi_session, node_names
 from app.live_lock import exclusive
 from app.topology import load_graph
 
@@ -37,6 +37,16 @@ from app.topology import load_graph
 def get_or_create_backend(app: FastAPI) -> TopologyBackend:
     backend = getattr(app.state, "topology_backend", None)
     if backend is None:
+        for service, password in (
+            ("ESXi", Settings.ESXI.PASSWORD),
+            ("GNS3", Settings.GNS3.PASSWORD),
+        ):
+            if not password:
+                message = esxi_session.password_missing_message(
+                    service, Settings.ESXI.IP
+                )
+                logger.error(message)
+                raise esxi_session.EsxiUnavailable(message)
         backend = TopologyBackend(
             Settings.ESXI.IP,
             Settings.ESXI.PORT,
