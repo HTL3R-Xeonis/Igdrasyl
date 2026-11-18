@@ -62,6 +62,16 @@ def is_active(filename: str, *, inspect: Inspect = default_inspect) -> bool:
     return output == "active"
 
 
+def state(filename: str, *, inspect: Inspect = default_inspect) -> str:
+    """ "running", "starting" (systemd is bringing the unit up or restarting it) or "stopped" - what a person is told when it is not reachable."""
+    output = inspect(["systemctl", "--user", "is-active", unit_name(filename)])
+    if output == "active":
+        return "running"
+    if output in ("activating", "reloading"):
+        return "starting"
+    return "stopped"
+
+
 def start(filename: str, *, runner: Runner = default_runner) -> None:
     runner(["systemctl", "--user", "start", unit_name(filename)])
 

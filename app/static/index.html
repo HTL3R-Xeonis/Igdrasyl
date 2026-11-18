@@ -6,13 +6,15 @@
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/6.0.0/xterm.js"></script>
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
+<script>if (/[?&]enter(=|&|$)/.test(location.search)) document.documentElement.classList.add("enter-pending");</script>
 </head>
 <body>
 <div id="template-banner" role="status" hidden><span id="template-banner-text"></span><button id="template-gns3vm-btn" hidden>Start GNS3 VM</button><button id="template-refresh-btn" hidden>Check again</button></div>
 <div id="app-view" hidden>
 <header id="menubar">
   <button class="menu-btn" id="home-btn" title="Back to host picker">Main Menu</button>
+  <button class="menu-btn" id="switch-server-btn" hidden>Switch server</button>
   <nav id="menubar-menus">
     <div class="menu">
       <button class="menu-btn" data-menu="file">File</button>
@@ -136,6 +138,8 @@
   <input type="file" id="import-project-input" accept=".topoproj" hidden>
   <input type="file" id="draw-image-input" accept="image/*" hidden>
   <span id="menubar-mode-badge" hidden>Design mode</span>
+  <button id="design-deploy-btn" class="menu-btn" hidden>Deploy</button>
+  <span id="design-deploy-reason" hidden></span>
   <button id="stage-changes-btn" class="menu-btn" hidden title="Edit several live nodes/links at once without deploying each one separately - review a diff, then apply them all together">Stage Changes</button>
   <span id="staging-indicator" hidden>
     <span id="staging-count-text"></span>
@@ -144,7 +148,7 @@
   </span>
   <div id="menubar-status"></div>
 </header>
-<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-deploy-btn" hidden>Deploy project…</button><button id="warning-resume-btn" hidden>Resume project</button><button id="warning-gns3vm-btn" hidden>Start GNS3 VM</button></div>
+<div id="warning-banner" hidden><span id="warning-banner-text"></span><button id="warning-retry-btn" hidden>Retry</button><button id="warning-choose-project-btn" hidden>Choose project…</button><button id="warning-deploy-btn" hidden>Deploy project…</button><button id="warning-resume-btn" hidden>Resume project</button><button id="warning-gns3vm-btn" hidden>Start GNS3 VM</button></div>
 <main>
   <div id="device-palette">
     <div id="palette-header"><span>Template List</span><button id="palette-close-btn" title="Hide device palette">✕</button></div>
@@ -253,7 +257,7 @@
         <div id="session-tabbar" hidden></div>
         <button id="popout-btn" title="Pop this panel out into its own window (Shift-click: a new browser tab)">⧉ Pop out</button>
       </div>
-      <div id="console-placeholder">Click a node on the canvas, or in the Topology Summary above, then open its Console or Screen to see it here.</div>
+      <div id="console-placeholder">Select a node, then open its Console or Screen.</div>
       <div id="session-panels"></div>
     </div>
   </div>
@@ -265,7 +269,7 @@
     <div id="push-editor">
       <p class="info-row" style="color: var(--dim); font-size: 13px; margin-top: 0;">
         Device name → list of raw commands, sent verbatim.
-        <button class="info-btn" type="button" aria-label="More information" title="Device name → list of raw commands, sent verbatim (JSON; up to 10 000 per device). To choose how a VM is reached, use an object instead of the list, with a via field.">?</button>
+        <button class="info-btn" type="button" aria-label="More information">i</button>
         <span class="info-popover" hidden>
           JSON; up to 10 000 per device.
           To choose how a VM is reached, use an object instead of the list:
@@ -348,6 +352,7 @@
     <div class="landing-brand-text">
       <h1>Ginnungagap</h1>
     </div>
+    <button class="toolbar-btn" id="landing-switch-server" type="button" hidden>Switch server</button>
     <form id="landing-logout" action="/logout" method="post">
       <button class="toolbar-btn" type="submit">Log out</button>
     </form>
@@ -389,8 +394,7 @@
   </div>
 </dialog>
 <dialog id="project-selection-dialog" aria-labelledby="project-selection-title">
-  <h3 id="project-selection-title">Project library</h3>
-  <p>Create or upload a topology, then select it for a host. Files are managed by Ginnungagap.</p>
+  <div class="dialog-title-row"><h3 id="project-selection-title">Project library</h3><span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Create or upload a topology, then select it for a host. Files are managed by Ginnungagap.</span></span></div>
   <p id="project-selection-status" role="status"></p>
   <form id="project-selection-form">
     <label>Project<select id="project-library-picker"></select></label>
@@ -398,16 +402,15 @@
     <button class="toolbar-btn" id="project-library-delete" type="button" hidden>Delete project…</button>
     <button class="toolbar-btn primary" id="project-library-open" type="button" hidden>Open in designer</button>
     <label id="project-name-label">GNS3 project name (optional)<input id="project-selection-name" placeholder="Defaults to the library project name"></label>
-    <p id="project-selection-help">Selection changes take effect when the host is activated or restarted.</p>
+    <span class="info-row inline" id="project-selection-help"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Selection changes take effect when the host is activated or restarted.</span></span>
     <button class="toolbar-btn primary" id="project-selection-save" type="submit">Save selection</button>
     <button class="toolbar-btn" id="project-selection-apply" type="button" hidden>Apply / restart…</button>
   </form>
   <hr>
   <form id="project-library-create">
-    <h4>Create or upload a project</h4>
+    <div class="dialog-title-row"><h4>Create or upload a project</h4><span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Leave the file empty to create an empty topology. Uploads are checked for structure; host templates are checked at activation.</span></span></div>
     <label>Project name<input id="project-library-name" required maxlength="120"></label>
     <label>Topology YAML (optional)<input id="project-library-file" type="file" accept=".yaml,.yml"></label>
-    <p>Leave the file empty to create an empty topology. Uploads are checked for structure; host templates are checked at activation.</p>
     <button class="toolbar-btn" type="submit">Add to library</button>
   </form>
   <button class="toolbar-btn" id="project-selection-close" type="button">Close</button>
@@ -425,8 +428,7 @@
 </dialog>
 
 <dialog id="staging-dialog" aria-labelledby="staging-title">
-  <h3 id="staging-title">Stage Live Edits</h3>
-  <p>Add or remove nodes/links here first - nothing is deployed until you review and apply the diff below.</p>
+  <div class="dialog-title-row"><h3 id="staging-title">Stage Live Edits</h3><span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Add or remove nodes/links here first - nothing is deployed until you review and apply the diff below.</span></span></div>
   <h4>Nodes</h4>
   <ul id="staging-nodes-list"></ul>
   <form id="staging-add-node-form">
@@ -451,8 +453,7 @@
 </dialog>
 
 <dialog id="snapshots-dialog" aria-labelledby="snapshots-title">
-  <h3 id="snapshots-title">Snapshots</h3>
-  <p>Checkpoint the current sketch under this project without replacing it - come back to any earlier point later.</p>
+  <div class="dialog-title-row"><h3 id="snapshots-title">Snapshots</h3><span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Checkpoint the current sketch under this project without replacing it - come back to any earlier point later.</span></span></div>
   <ul id="snapshots-list"></ul>
   <form id="snapshot-create-form">
     <input id="snapshot-name" placeholder="Snapshot name" autocomplete="off" required maxlength="120">
@@ -536,21 +537,40 @@
   </div>
 </div>
 
-<script src="/core.js?v=ginnungagap-58"></script>
-<script src="/canvas-state.js?v=ginnungagap-58"></script>
-<script src="/label-placement.js?v=ginnungagap-58"></script>
-<script src="/drawings.js?v=ginnungagap-58"></script>
-<script src="/canvas-render.js?v=ginnungagap-58"></script>
-<script src="/edit-actions.js?v=ginnungagap-58"></script>
-<script src="/link-actions-and-capture.js?v=ginnungagap-58"></script>
-<script src="/palette-and-screenshot.js?v=ginnungagap-58"></script>
-<script src="/import-and-generate.js?v=ginnungagap-58"></script>
-<script src="/connection-settings-and-maintenance.js?v=ginnungagap-58"></script>
-<script src="/consoles-and-push.js?v=ginnungagap-58"></script>
-<script src="/projects.js?v=ginnungagap-58"></script>
-<script src="/staging.js?v=ginnungagap-58"></script>
-<script src="/snapshots.js?v=ginnungagap-58"></script>
-<script src="/info-popover.js?v=ginnungagap-58"></script>
-<script src="/user-menu.js?v=ginnungagap-58"></script>
+<div id="connection-lost" role="alert" aria-live="assertive" hidden>
+  <div class="cl-card">
+    <img class="cl-mark" src="/ginnungagap-mark.svg" alt="">
+    <h1 class="cl-title" id="cl-title">Connection lost</h1>
+    <p class="cl-message" id="cl-message"></p>
+    <ul class="cl-layers" id="cl-layers"></ul>
+    <p class="cl-since" id="cl-since"></p>
+    <p class="cl-countdown" id="cl-countdown"></p>
+    <div class="cl-actions">
+      <button class="toolbar-btn" id="cl-retry" type="button">Retry now</button>
+      <a class="toolbar-btn" id="cl-picker" href="/pick-backend">Choose another server</a>
+      <form id="cl-signout" action="/logout" method="post"><button class="toolbar-btn" type="submit">Sign out</button></form>
+    </div>
+  </div>
+</div>
+<p id="cl-restored" role="status" hidden>Connected again</p>
+
+<script src="/connection-monitor.js?v=ginnungagap-60"></script>
+<script src="/core.js?v=ginnungagap-60"></script>
+<script src="/canvas-state.js?v=ginnungagap-60"></script>
+<script src="/label-placement.js?v=ginnungagap-60"></script>
+<script src="/drawings.js?v=ginnungagap-60"></script>
+<script src="/canvas-render.js?v=ginnungagap-60"></script>
+<script src="/edit-actions.js?v=ginnungagap-60"></script>
+<script src="/link-actions-and-capture.js?v=ginnungagap-60"></script>
+<script src="/palette-and-screenshot.js?v=ginnungagap-60"></script>
+<script src="/import-and-generate.js?v=ginnungagap-60"></script>
+<script src="/connection-settings-and-maintenance.js?v=ginnungagap-60"></script>
+<script src="/consoles-and-push.js?v=ginnungagap-60"></script>
+<script src="/projects.js?v=ginnungagap-60"></script>
+<script src="/staging.js?v=ginnungagap-60"></script>
+<script src="/snapshots.js?v=ginnungagap-60"></script>
+<script src="/info-popover.js?v=ginnungagap-60"></script>
+<script src="/user-menu.js?v=ginnungagap-60"></script>
+<script src="/design-deploy-button.js?v=ginnungagap-60"></script>
 </body>
 </html>

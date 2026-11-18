@@ -140,7 +140,18 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   process restart doesn't lose an in-progress sketch - and restoring
   never touches the template service (see the graceful-degrade point
   below), since the sketch's already-resolved node environments are
-  saved alongside it rather than re-derived.
+  saved alongside it rather than re-derived. While design mode is on, a yellow
+  frame surrounds the canvas, the "Design mode" badge is yellow and a
+  **Deploy** button next to it deploys the design's saved project to the
+  host the user works on in one click - no preview dialog and no
+  confirmation (`app/static/design-deploy-button.js`; it uses the same
+  calls as "Deploy to Host…", so a project on hold is resumed and the
+  host's own incremental/full setting decides what is rebuilt, which for a
+  full deployment can remove managed devices that are not in the project).
+  The button is disabled with a short reason while the sketch is empty or a
+  deployment runs, hidden for the readonly role, and opens the dialog
+  instead only when a value cannot be guessed (a design that was never
+  saved needs a name; several hosts with none selected need a choice).
 - **Generate via LLM** (`app/generate_jobs.py`): a landing-page action
   that turns a natural-language prompt into a topology via the Topology
   Generator API (`src.connections.topology_generator_client`), mirroring
@@ -470,6 +481,15 @@ default password `admin` - deliberately predictable, not a generated secret, sin
 it's meant to be the very first login on a fresh install and changed right away via
 the admin panel; logged once at `WARNING` level as a reminder.
 
+**After login the chosen server's canvas opens directly** (not the main menu). The login and the gateway's **Activate** both
+redirect to `/?enter=1`; the page (`startView()` in `app/static/import-and-generate.js`) removes the flag at once, checks `/health`
+and opens the live canvas of the active host. Without a chosen server the gateway first shows its picker (`/pick-backend`), and a
+failed activation (not allowed, unknown, service addresses missing, backend not healthy) stays on the picker with a one-line
+message. Everything else still lands on the main menu: reload, Back, a bookmark, the **Main Menu** button, a host that is down, a
+single-process install with more than one usable host. A host without a project opens its canvas with the banner and a
+**Choose project...** button. In the gateway deployment a **Switch server** entry (menubar and main menu) returns to the picker, and
+a tile of another host switches this browser's session to it without any restart.
+
 Three roles share the same login flow: `admin`, `user` and `readonly`. Regular
 users keep full access to everything they always had, destructive actions
 included (Find Orphans, Deploy Fresh GNS3 VM, etc. are not role-gated).
@@ -547,6 +567,19 @@ currently routed to that backend (`app/backend_presence.py`, in-memory only,
 a 5-minute window) - a plain count for everyone, and for an admin the actual
 usernames too, so restarting a shared host doesn't surprise someone else
 using it.
+
+**Connection lost.** When the server stops answering, the canvas shows a full-screen "Connection lost" card instead of
+failing quietly (`app/static/connection-monitor.js`, client-side so it keeps working while the server is away). It wraps
+`fetch` once: a network error or a gateway 502/503/504 that is not the app's own JSON body, two checks 3 seconds apart,
+and a heartbeat every 20 seconds while the tab is visible. The card names the layer that is down - Browser, Gateway,
+Server (the selected host's backend, as systemd sees it through `GET /gateway/status`, which needs a session and is
+answered by the gateway itself) and Host - shows since when, retries after 2, 4, 8 and then every 15 seconds with a
+countdown, offers "Retry now", "Choose another server" and "Sign out", and disappears by itself (a green "Connected again"
+for 3 seconds, the canvas is reloaded in place, or the page reloads once if the server version changed). Problems of a
+reachable server (a host or template service that is down) stay in their own banners. A session that ended goes to
+`/login?next=...`, and the sign-in page returns to that same-origin path. A browser navigation or reload during an outage
+gets the same card from the gateway (`error_pages.unavailable_html`) instead of the raw proxy error. A single-process
+install without a gateway has no `/gateway/health` and shows three layers.
 
 ## Working on the canvas
 
@@ -643,9 +676,22 @@ The library is shared across projects on this Operator instance. Files are store
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
 **View → Config Push → Generate with AI** takes a device and a prompt. The Operator supplies the
-active device's role, image, interfaces and adjacent links to the model. It supports VLAN creation
-and Access VLAN assignment on GNS3 Cisco IOSvL2, IPv4 addresses on IOSv routed ports, and
-physical port descriptions on both. The Operator renders commands from validated settings.
+active device's role, image, platform, interfaces and adjacent links to the model. Every device of the
+active project is listed, with the platform it is written for; the Operator renders commands from
+validated settings only (the model never writes commands):
+
+| Platform | Which devices | Settings | Pushed through |
+|---|---|---|---|
+| Cisco IOSvL2 | GNS3 `Cisco IOSvL2` | VLAN creation, Access VLAN, port descriptions | console (Netmiko) |
+| Cisco IOSv | GNS3 `Cisco IOSv` | IPv4 on routed ports, port descriptions | console (Netmiko) |
+| Linux | any ESXi VM that is not Windows, MikroTik or pfSense/OPNsense (ubuntu, debian, mint, rocky ...) | IPv4 on an interface (`ip address replace`, runtime only, lost on reboot), hostname (`hostnamectl`) | guest operations (VMware Tools) |
+| Windows | ESXi Windows VMs | IPv4 on an interface (`netsh`) | guest operations |
+| RouterOS | ESXi MikroTik VMs | IPv4 on an interface, identity (hostname) | serial console |
+| VPCS | GNS3 `VPCS` | IPv4 address, PC name (followed by `save`) | console (Netmiko) |
+
+Devices without a renderer (pfSense/OPNsense, other GNS3 templates) stay in the list, greyed out,
+with a one-line reason. The list follows the canvas: a node added while the panel is open appears
+without closing it. `GET /config-snippets/ai/devices` carries the same list with the reasons.
 **Review and push…** confirms the target and commands before the normal Config Push job runs.
 The push appears in History. A draft belongs to its author and target, can be used once, and
 expires in ten minutes.
@@ -972,12 +1018,12 @@ The frontend at `/` covers all of these.
 
 ## Application version
 
-The version (`MAJOR.MINOR.PATCH`, currently `1.0.0`) lives in exactly one place: the single line `__version__ = "1.0.0"` in
+The version (`MAJOR.MINOR.PATCH`, currently `1.1.0`) lives in exactly one place: the single line `__version__ = "1.1.0"` in
 `app/version.py`. It is a plain file under `app/` on purpose: a deploy by raw file copy (as on the lab testbox) carries it along,
 whereas git and the installed package metadata can be missing or stale there. `pyproject.toml` reads the same value
 (`dynamic = ["version"]`), so a built package cannot disagree; a test fails if the two ever drift. To bump it, edit that one line.
 
-It is reported as `version` by `GET /health` (backend) and `GET /gateway/health` (gateway), shown as `v1.0.0` in the
+It is reported as `version` by `GET /health` (backend) and `GET /gateway/health` (gateway), shown as `v1.1.0` in the
 landing page footer next to "View License" / "View Logs", and in the footer of the gateway's choose-a-server page. It is
 plain text - no hover effect or tooltip.
 

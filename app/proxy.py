@@ -33,6 +33,7 @@ from loguru import logger
 from starlette.concurrency import run_in_threadpool
 from starlette.websockets import WebSocket
 
+from app import error_pages
 from app.ws_bridge import bridge_ws
 
 Target = tuple[str, int]
@@ -108,6 +109,7 @@ def _do_http_proxy(
     receive: Callable,
     send: Callable,
     loop: asyncio.AbstractEventLoop,
+    unreachable_html: bytes | None = None,
 ) -> None:
     """
     The entire HTTP leg, run in a worker thread by run_in_threadpool - a
@@ -156,6 +158,26 @@ def _do_http_proxy(
             send_async({"type": "http.response.body", "body": b"", "more_body": False})
     except requests.RequestException as exc:
         logger.warning(f"proxy: {method} {url} failed: {exc}")
+        if unreachable_html is not None:
+            # A browser navigation: the readable card, never the raw exception text.
+            send_async(
+                {
+                    "type": "http.response.start",
+                    "status": 502,
+                    "headers": [
+                        (b"content-type", b"text/html; charset=utf-8"),
+                        (b"cache-control", b"no-store"),
+                    ],
+                }
+            )
+            send_async(
+                {
+                    "type": "http.response.body",
+                    "body": unreachable_html,
+                    "more_body": False,
+                }
+            )
+            return
         send_async(
             {
                 "type": "http.response.start",
@@ -172,8 +194,22 @@ def _do_http_proxy(
         )
 
 
-async def _proxy_http(scope, receive, send, target: Target) -> None:
+async def _proxy_http(
+    scope,
+    receive,
+    send,
+    target: Target,
+    describe_unavailable: Callable | None = None,
+) -> None:
     host, port = target
+    unreachable_html = None
+    if (
+        describe_unavailable is not None
+        and scope["method"] == "GET"
+        and _wants_html(scope)
+    ):
+        label, backend_state = describe_unavailable(scope)
+        unreachable_html = error_pages.unavailable_html(label, backend_state).encode()
     query_string = scope.get("query_string", b"")
     path = scope["path"] + (
         "?" + query_string.decode("latin-1") if query_string else ""
@@ -187,6 +223,7 @@ async def _proxy_http(scope, receive, send, target: Target) -> None:
         receive=receive,
         send=send,
         loop=asyncio.get_running_loop(),
+        unreachable_html=unreachable_html,
     )
 
 
@@ -253,7 +290,12 @@ async def _unavailable(scope, send, *, redirect_html_to: str | None) -> None:
     )
 
 
-def make_proxy_app(get_target: GetTarget, *, redirect_html_to: str | None = None):
+def make_proxy_app(
+    get_target: GetTarget,
+    *,
+    redirect_html_to: str | None = None,
+    describe_unavailable: Callable | None = None,
+):
     """
     `get_target(scope)` decides, per request, which `(host, port)` to
     forward to - typically derived from the caller's `xeonis_backend`
@@ -263,6 +305,9 @@ def make_proxy_app(get_target: GetTarget, *, redirect_html_to: str | None = None
     gateway's own "pick a backend" page; a non-GET or non-HTML caller
     (fetch/API) always gets the 409, since redirecting those would just
     break whatever called them.
+    `describe_unavailable(scope)`, if given, returns `(host label or None, "starting" | "stopped" | "unreachable")`: a
+    browser navigation that cannot reach the backend then gets the readable "not reachable" page (error_pages) instead
+    of the raw exception text; fetch/API callers keep the plain 502.
     """
 
     async def proxy_app(scope, receive, send) -> None:
@@ -275,6 +320,6 @@ def make_proxy_app(get_target: GetTarget, *, redirect_html_to: str | None = None
         if scope["type"] == "websocket":
             await _proxy_websocket(scope, receive, send, target)
         else:
-            await _proxy_http(scope, receive, send, target)
+            await _proxy_http(scope, receive, send, target, describe_unavailable)
 
     return proxy_app

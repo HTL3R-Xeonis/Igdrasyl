@@ -321,7 +321,7 @@ def test_picker_form_redirects_to_backend_and_logout_clears_selection(
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"] == "/"
+    assert response.headers["location"] == "/?enter=1"
     assert session.cookies.get(routes_gateway.BACKEND_COOKIE) == "host-a.yml"
     assert session.get("/settings-profiles").json()[0]["active"] is True
     assert gateway_client.get("/settings-profiles").json()[0]["active"] is False

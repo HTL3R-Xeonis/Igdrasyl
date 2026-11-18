@@ -36,6 +36,80 @@ def wants_html(request: Request) -> bool:
     return "text/html" in request.headers.get("accept", "")
 
 
+# Layer states shown on the "not reachable" card: "ok" (reached), "fail" (the layer that is down), "unknown" (not
+# checked because a lower layer failed). Same four layers the in-page overlay (connection-monitor.js) shows.
+LAYER_STATES = ("ok", "fail", "unknown")
+
+
+def unavailable_html(host: str | None, backend_state: str) -> str:
+    """
+    The page a browser gets when the gateway cannot reach the selected host's server (a navigation or a reload during an
+    outage): same look as the in-page "Connection lost" overlay, no exception text, refreshes itself every 10 seconds.
+    `backend_state` is "starting", "stopped" or "unreachable".
+    """
+    name = escape(host) if host else "the selected host"
+    title = (
+        f"The server for {name} is starting"
+        if backend_state == "starting"
+        else f"The server for {name} is not reachable"
+    )
+    message = (
+        "It was started a moment ago and is not answering yet. This page tries again by itself."
+        if backend_state == "starting"
+        else "The gateway is running, but the server of this host does not answer. This page tries again by itself."
+    )
+    layers = (
+        ("Browser", "ok"),
+        ("Gateway", "ok"),
+        ("Server", "fail"),
+        ("Host", "unknown"),
+    )
+    words = {"ok": "reached", "fail": "not reachable", "unknown": "not checked"}
+    items = "".join(
+        f'<li class="cl-layer cl-{state}"><span class="cl-dot"></span>{escape(label)}'
+        f'<span class="cl-state">{words[state]}</span></li>'
+        for label, state in layers
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Connection lost - Ginnungagap</title>
+<link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
+<style>
+  body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}
+  .cl-page {{ min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }}
+</style>
+</head>
+<body>
+<div class="cl-page">
+  <main class="cl-card" role="alert">
+    <img class="cl-mark" src="/ginnungagap-mark.svg" alt="">
+    <h1 class="cl-title">{title}</h1>
+    <p class="cl-message">{escape(message)}</p>
+    <ul class="cl-layers">{items}</ul>
+    <nav class="cl-actions">
+      <a class="toolbar-btn" href="">Retry now</a>
+      <a class="toolbar-btn" href="/pick-backend">Choose another server</a>
+    </nav>
+  </main>
+</div>
+</body>
+</html>"""
+
+
+def render_unavailable(host: str | None, backend_state: str) -> Response:
+    return Response(
+        unavailable_html(host, backend_state),
+        status_code=502,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 def render(status_code: int, detail: str | None = None) -> Response:
     title, message = _TITLES.get(status_code) or (
         _SERVER_ERROR
@@ -54,7 +128,7 @@ def render(status_code: int, detail: str | None = None) -> Response:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{status_code} - {escape(title)}</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
 <style>
   /* styles.css lays <body> out as the single-page app - this is its own page. */
   body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}

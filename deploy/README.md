@@ -129,7 +129,7 @@ sudo -u xeonis XDG_RUNTIME_DIR=/run/user/$(id -u xeonis) systemctl --user status
 curl http://127.0.0.1/gateway/health   # the gateway process's own liveness, not any backend's
 ```
 Then open the gateway in a browser, log in, pick a profile on
-`/pick-backend`, confirm its backend unit actually started:
+`/pick-backend` (Activate opens that server's canvas directly), confirm its backend unit actually started:
 ```bash
 sudo -u xeonis XDG_RUNTIME_DIR=/run/user/$(id -u xeonis) systemctl --user status xeonis-backend@<profile-stem>.service
 ```

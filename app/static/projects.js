@@ -79,6 +79,12 @@ async function openProjectSelection(filename = null) {
   finally { projectBusy(false); }
 }
 document.getElementById("open-project-library").addEventListener("click", () => openProjectSelection());
+// Banner button for a host without a project: the selection dialog of the active host's profile.
+document.getElementById("warning-choose-project-btn").addEventListener("click", async () => {
+  const profiles = await fetch("/settings-profiles", { cache: "no-store" }).then(r => (r.ok ? r.json() : [])).catch(() => []);
+  const active = profiles.find(profile => profile.active);
+  await openProjectSelection(active ? active.filename : null);
+});
 document.getElementById("open-library-project-btn").addEventListener("click", () => openProjectSelection());
 projectPicker.addEventListener("change", () => {
   updateProjectDownload();
@@ -288,6 +294,23 @@ async function startLibraryDeployment(project, filename) {
   await monitorLibraryDeployment(project, body.job_id);
 }
 
+// Selects the project for the host, lets the host come back and reloads the page; the saved
+// "pendingLibraryDeployment" then continues the deployment (resumePendingLibraryDeployment).
+// Used by the deployment dialog and by the one-click Deploy button of the design mode.
+async function restartIntoProject(preview) {
+  await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/project`, {
+    method:"PUT", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({project_id: currentDesignProject.id})
+  });
+  sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:preview.host.filename, resume: !!preview.held}));
+  const restarting = "Restarting with the selected host and project…";
+  if (deploymentDialog.open) deploymentStatus.textContent = restarting;
+  else setMenubarBusy(restarting);
+  try { await fetch(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
+  if (await connectionMonitor.waitUntilBack(30000)) { window.location.reload(); return; }
+  throw new Error("Server did not return after restart");
+}
+
 document.getElementById("deploy-library-project-btn").addEventListener("click", openDeploymentPreview);
 deploymentHostPicker.addEventListener("change", loadDeploymentPreview);
 deploymentName.addEventListener("input", loadDeploymentPreview);
@@ -331,21 +354,8 @@ deploymentConfirm.addEventListener("click", async () => {
       }
     }
     if (preview.requires_restart) {
-      await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/project`, {
-        method:"PUT", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({project_id: currentDesignProject.id})
-      });
-      sessionStorage.setItem("pendingLibraryDeployment", JSON.stringify({project:currentDesignProject, filename:preview.host.filename, resume: !!preview.held}));
-      const restarting = "Restarting with the selected host and project…";
-      if (deploymentDialog.open) deploymentStatus.textContent = restarting;
-      else setMenubarBusy(restarting);
-      try { await fetch(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
-      const deadline = Date.now() + 30000;
-      while (Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        try { if ((await fetch("/health")).ok) { window.location.reload(); return; } } catch (error) {}
-      }
-      throw new Error("Server did not return after restart");
+      await restartIntoProject(preview);
+      return;
     }
     if (preview.held) {
       deploymentDialog.close();

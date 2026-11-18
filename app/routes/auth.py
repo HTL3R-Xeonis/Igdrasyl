@@ -18,7 +18,9 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from html import escape
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -63,9 +65,42 @@ def _pending_delay(username: str) -> float:
     return _backoff_seconds(count)
 
 
-def _login_page(error: bool) -> str:
+_NEXT_MAX_LENGTH = 512
+
+
+def safe_next(value: str | None) -> str | None:
+    """
+    Where to go after signing in: only a same-origin absolute path. Anything that could leave this site (a scheme, a
+    protocol-relative `//host`, a backslash that browsers read as a slash, control characters) or loop back to the
+    login page itself gives None, which means the normal landing page.
+    """
+    if not value or len(value) > _NEXT_MAX_LENGTH:
+        return None
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return None
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return None
+    if value == "/login" or value.startswith(("/login?", "/login/", "/logout")):
+        return None
+    return value
+
+
+def _login_page(
+    error: bool, next_path: str | None = None, expired: bool = False
+) -> str:
     message = (
-        '<p class="login-error">Invalid username or password.</p>' if error else ""
+        '<p class="login-error">Invalid username or password.</p>'
+        if error
+        else (
+            '<p class="login-note">Your session ended - please sign in again.</p>'
+            if expired
+            else ""
+        )
+    )
+    next_field = (
+        f'<input type="hidden" name="next" value="{escape(next_path, quote=True)}">'
+        if next_path
+        else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -74,7 +109,7 @@ def _login_page(error: bool) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Sign in</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
 <style>
   html, body {{ height: 100%; }}
   body {{
@@ -83,7 +118,7 @@ def _login_page(error: bool) -> str:
   }}
   body::before {{
     content: ""; position: fixed; inset: -20px;
-    background: url("/login-bg.jpg?v=ginnungagap-58") center center / cover no-repeat;
+    background: url("/login-bg.jpg?v=ginnungagap-60") center center / cover no-repeat;
     filter: blur(3px) brightness(0.62) saturate(1.1);
     transform: scale(1.05);
     z-index: -2;
@@ -137,6 +172,11 @@ def _login_page(error: bool) -> str:
   }}
   .login-box button:hover {{ background: #8fc954; }}
   .login-box button:active {{ transform: scale(0.98); }}
+  .login-note {{
+    color: #d8e6c4; font-size: 13px; margin: 0 0 16px; text-align: center;
+    background: rgba(124,179,66,0.15); border: 1px solid rgba(124,179,66,0.35);
+    border-radius: 6px; padding: 8px 10px;
+  }}
   .login-error {{
     color: #ffb4b4; font-size: 13px; margin: 0 0 16px; text-align: center;
     background: rgba(224,90,90,0.15); border: 1px solid rgba(224,90,90,0.35);
@@ -153,6 +193,7 @@ def _login_page(error: bool) -> str:
   <h1>Sign in to Ginnungagap</h1>
   {message}
   <form method="post" action="/login">
+    {next_field}
     <label>Username<input type="text" name="username" autocomplete="username" required autofocus></label>
     <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
     <label class="remember"><input type="checkbox" name="remember" value="1"> Stay logged in</label>
@@ -167,14 +208,19 @@ def register(app: FastAPI, *, logout_cookies: tuple[str, ...] = ()) -> None:
     """Registers /login (GET+POST), /logout and /me onto the given app."""
 
     @app.get("/login", response_class=HTMLResponse)
-    def login_page(error: Annotated[bool, Query()] = False) -> str:
-        return _login_page(error)
+    def login_page(
+        error: Annotated[bool, Query()] = False,
+        next: Annotated[str | None, Query()] = None,
+        expired: Annotated[bool, Query()] = False,
+    ) -> str:
+        return _login_page(error, safe_next(next), expired)
 
     @app.post("/login")
     async def login_submit(
         username: Annotated[str, Form()],
         password: Annotated[str, Form()],
         remember: Annotated[str, Form()] = "",
+        next: Annotated[str, Form()] = "",
     ) -> Response:
         delay = _pending_delay(username)
         if delay:
@@ -183,11 +229,15 @@ def register(app: FastAPI, *, logout_cookies: tuple[str, ...] = ()) -> None:
         if role is None:
             _record_failure(username)
             audit_log.record("login_failure", username)
-            return RedirectResponse("/login?error=1", status_code=303)
+            target = safe_next(next)
+            suffix = f"&next={quote(target, safe='')}" if target else ""
+            return RedirectResponse(f"/login?error=1{suffix}", status_code=303)
         _record_success(username)
         audit_log.record("login_success", username)
         token = create_session_token(username, role, remember=bool(remember))
-        response = RedirectResponse("/", status_code=303)
+        # a deep link (?next=) wins; otherwise ?enter=1: a browser that still has a chosen server (gateway) or has exactly one
+        # host (single process) opens its canvas straight away, without a chosen server the gateway sends it to the picker first.
+        response = RedirectResponse(safe_next(next) or "/?enter=1", status_code=303)
         response.set_cookie(
             SESSION_COOKIE,
             token,

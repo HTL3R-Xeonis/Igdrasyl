@@ -467,13 +467,13 @@ async function refreshSerialButton(name, applicable) {
       }
       button.disabled = false;
       button.textContent = "Serial console";
-      button.title = `Opens the serial line (port ${state.port}) in a terminal. It takes one session at a time, so a running config push or another open console blocks it.`;
+      button.title = `Opens the serial line (port ${state.port}) in a terminal.`;
       button.onclick = () => openSerialConsole(name);
       return;
     }
     button.disabled = false;
     button.textContent = "Enable serial console";
-    button.title = "Adds a network serial port - the VM is powered off and on again for that.";
+    button.title = "Add a serial console";
     button.onclick = async () => {
       if (!await showConfirm(
         `Add a serial console to "${name}"?\n\nThe VM is powered off and on again for that (a short interruption). ` +

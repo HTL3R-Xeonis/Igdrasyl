@@ -42,6 +42,8 @@ document.addEventListener("click", (event) => {
     userMenuName.title = username;
     document.getElementById("user-menu-admin-link").hidden = role !== "admin";
     userMenu.hidden = false;
+    window.currentUser = { username, role };
+    document.dispatchEvent(new CustomEvent("currentuser"));
   } catch {
     // Not fatal - the menu just stays blank; every other request already enforces login.
   }

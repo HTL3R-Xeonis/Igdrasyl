@@ -46,6 +46,12 @@ def ai_snippet_targets(_user: AiUser) -> list[str]:
     return ai_snippets.targets(app)
 
 
+@app.get("/config-snippets/ai/devices")
+def ai_snippet_devices(_user: AiUser) -> list[dict]:
+    _require_ai_config()
+    return ai_snippets.devices(app)
+
+
 @app.post("/config-snippets/ai/generate")
 def generate_ai_snippet(request: ai_snippets.GenerateRequest, user: AiUser) -> dict:
     _require_ai_config()

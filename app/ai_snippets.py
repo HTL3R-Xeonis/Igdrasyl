@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import tempfile
 import threading
 import time
@@ -159,6 +160,39 @@ _Operation = Annotated[
 _OPERATIONS = TypeAdapter(
     Annotated[list[_Operation], Field(min_length=1, max_length=20)]
 )
+
+
+class HostIPv4Settings(BaseModel):
+    """An IPv4 address on one interface of a host-like device (Linux, Windows, RouterOS, VPCS)."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    kind: Literal["ipv4"]
+    interface: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}$")
+    address: str = Field(pattern=r"^[0-9.]{7,15}/[0-9]{1,2}$")
+
+
+class HostnameSettings(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    kind: Literal["hostname"]
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
+
+
+_HostOperation = Annotated[
+    HostIPv4Settings | HostnameSettings, Field(discriminator="kind")
+]
+_HOST_OPERATIONS = TypeAdapter(
+    Annotated[list[_HostOperation], Field(min_length=1, max_length=20)]
+)
+# Platforms the generator can write for, and what each one is called in the device list.
+PLATFORM_LABELS = {
+    "iosv": "Cisco IOSv",
+    "iosvl2": "Cisco IOSvL2",
+    "linux": "Linux",
+    "windows": "Windows",
+    "routeros": "RouterOS",
+    "vpcs": "VPCS",
+}
+_HOST_PLATFORMS = frozenset({"linux", "windows", "routeros", "vpcs"})
 _PORT_PREFIX = re.compile(
     r"^(TenGigabitEthernet|GigabitEthernet|FastEthernet|Ethernet|Te|Gi|Fa|Eth|Et|e)(?=\d)",
     re.IGNORECASE,
@@ -213,42 +247,107 @@ class Draft:
     expires: float
 
 
+def platform_of(node) -> str | None:
+    """The platform the generator writes for, None where no renderer exists (see unsupported_reason)."""
+    image = str(getattr(node, "image", "")).lower()
+    if node.env == Environment.ON_GNS3:
+        match = _IOSV_IMAGE.fullmatch(node.image)
+        if match:
+            return "iosvl2" if match[1] else "iosv"
+        if "vpcs" in image:
+            return "vpcs"
+        return None
+    if node.env == Environment.ON_ESXI:
+        if "windows" in image:
+            return "windows"
+        if "mikrotik" in image or "routeros" in image:
+            return "routeros"
+        if "pfsense" in image or "opnsense" in image:
+            return None
+        return "linux"
+    return None
+
+
+def unsupported_reason(node) -> str:
+    image = str(getattr(node, "image", "")).lower()
+    if node.env == Environment.ON_ESXI and ("pfsense" in image or "opnsense" in image):
+        return "pfSense and OPNsense are configured through a menu, not by commands."
+    return "No configuration generator for this device type yet."
+
+
+def _graph_ready_for(app: FastAPI, node) -> bool:
+    """GNS3 nodes need the selected project and its GNS3 VM, ESXi VMs only the host they are on."""
+    if node.env == Environment.ON_GNS3:
+        return bool(
+            getattr(app.state, "project_id", None)
+            and getattr(app.state, "gns3_vm_ip", None)
+        )
+    return True
+
+
 def targets(app: FastAPI) -> list[str]:
     graph = getattr(app.state, "graph", None)
-    if (
-        graph is None
-        or not getattr(app.state, "project_id", None)
-        or not getattr(app.state, "gns3_vm_ip", None)
-    ):
+    if graph is None:
         return []
     return sorted(
         name
         for name, node in graph.nodes.items()
-        if node.env == Environment.ON_GNS3 and _IOSV_IMAGE.fullmatch(node.image)
+        if platform_of(node) is not None and _graph_ready_for(app, node)
     )
+
+
+def devices(app: FastAPI) -> list[dict]:
+    """Every device of the active project with the platform it would be written for, or why it can not be."""
+    graph = getattr(app.state, "graph", None)
+    if graph is None:
+        return []
+    result = []
+    for name, node in sorted(graph.nodes.items()):
+        platform = platform_of(node)
+        if platform is None:
+            reason = unsupported_reason(node)
+        elif not _graph_ready_for(app, node):
+            reason = "Select a GNS3 project on the host first."
+        else:
+            reason = ""
+        result.append(
+            {
+                "name": name,
+                "platform": platform,
+                "label": PLATFORM_LABELS.get(platform, ""),
+                "supported": not reason,
+                "reason": reason,
+            }
+        )
+    return result
 
 
 def _target(app: FastAPI, name: str) -> fix_jobs.FixTarget:
     target = fix_jobs.current_target(app, name)
     if name not in targets(app) or target is None:
-        raise TargetChanged("Choose a compatible device in the active GNS3 project.")
+        raise TargetChanged("Choose a supported device of the active project.")
     return target
 
 
 def _context(app: FastAPI, target: fix_jobs.FixTarget) -> dict:
+    node = app.state.graph.nodes[target.device]
+    platform = platform_of(node)
     try:
         ports = {port["name"] for port in list_node_ports(app, target.device)}
     except (requests.RequestException, RuntimeError, ValueError):
-        # Linked interfaces from the stored graph are available even if GNS3's port list is not.
+        # Linked interfaces from the stored graph are available even if GNS3's port list is not
+        # (and for ESXi VMs, which GNS3 does not know at all).
         ports = {local for local, _, _ in target.links}
+    # Only Cisco names are rewritten to their long form; a Linux "eth0" must stay "eth0".
+    name_of = _canonical_port if platform in {"iosv", "iosvl2"} else str
     return {
         "device": target.device,
         "role": target.role,
         "image": target.image,
-        "platform": "iosvl2" if _IOSV_IMAGE.fullmatch(target.image)[1] else "iosv",
-        "ports": sorted({_canonical_port(port) for port in ports})[:100],
+        "platform": platform,
+        "ports": sorted({name_of(port) for port in ports})[:100],
         "links": [
-            {"port": _canonical_port(local), "neighbor": peer, "neighbor_port": remote}
+            {"port": name_of(local), "neighbor": peer, "neighbor_port": remote}
             for local, peer, remote in target.links[:100]
         ],
     }
@@ -277,7 +376,77 @@ def _generate_settings(prompt: str, context: dict) -> object:
         _SLOTS.release()
 
 
+def _unicast(address: IPv4Interface) -> IPv4Interface:
+    ip = address.ip
+    if ip.is_unspecified or ip.is_multicast or ip.is_loopback or ip.is_link_local:
+        raise InvalidDraft("Choose a unicast IPv4 address.")
+    if address.network.prefixlen == 0:
+        raise InvalidDraft("Choose a prefix length between 1 and 32.")
+    return address
+
+
+def _compile_host(settings: object, ports: list[str], platform: str) -> list[str]:
+    """Commands for a Linux, Windows, RouterOS or VPCS device from validated settings (never from free text)."""
+    try:
+        operations = _HOST_OPERATIONS.validate_python(settings)
+    except (ValidationError, ValueError) as exc:
+        raise InvalidDraft(
+            "The reply contains unsupported configuration settings."
+        ) from exc
+    commands: list[str] = []
+    for operation in operations:
+        if isinstance(operation, HostnameSettings):
+            if platform == "windows":
+                raise InvalidDraft(
+                    "Hostnames are not supported for Windows (a restart is needed)."
+                )
+            commands.append(
+                {
+                    "linux": f"hostnamectl set-hostname {operation.name}",
+                    "routeros": f"/system identity set name={operation.name}",
+                    "vpcs": f"set pcname {operation.name}",
+                }[platform]
+            )
+            continue
+        if operation.interface not in ports:
+            raise InvalidDraft(
+                f"Interface {operation.interface} is not in the device's port list."
+            )
+        try:
+            address = _unicast(IPv4Interface(operation.address))
+        except ValueError as exc:
+            raise InvalidDraft("The IPv4 address is not valid.") from exc
+        if platform == "linux":
+            if " " in operation.interface:
+                raise InvalidDraft("The interface name is not valid for Linux.")
+            interface = shlex.quote(operation.interface)
+            commands.extend(
+                (
+                    f"ip address replace {address} dev {interface}",
+                    f"ip link set dev {interface} up",
+                )
+            )
+        elif platform == "windows":
+            commands.append(
+                f'netsh interface ip set address name="{operation.interface}" '
+                f"static {address.ip} {address.netmask}"
+            )
+        elif platform == "routeros":
+            commands.append(
+                f"/ip address add address={address} interface={operation.interface}"
+            )
+        else:
+            commands.append(f"ip {address}")
+    if platform == "linux" and any(c.startswith("ip address") for c in commands):
+        commands.insert(0, "# runtime change with ip(8): lost on reboot")
+    if platform == "vpcs":
+        commands.append("save")
+    return commands
+
+
 def _compile(settings: object, ports: list[str], platform: str) -> list[str]:
+    if platform in _HOST_PLATFORMS:
+        return _compile_host(settings, ports, platform)
     try:
         operations = _OPERATIONS.validate_python(settings)
         commands = ["configure terminal"]

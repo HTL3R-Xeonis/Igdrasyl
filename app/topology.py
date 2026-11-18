@@ -32,7 +32,7 @@ def load_graph() -> Graph:
     """
     if not Settings.TOPOLOGY_FILE:
         raise ValueError(
-            "No project selected. Choose Project on the host tile to select a topology."
+            "No project selected. Use Choose project… to select a topology."
         )
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()

@@ -183,7 +183,7 @@ def test_the_context_menus_are_not_moved_into_the_pop_out():
         in APP_JS
     )
     handler = APP_JS[APP_JS.index("function popInPanel") :]
-    handler = handler[: handler.index("showLandingView();")]
+    handler = handler[: handler.index("startView();")]
     assert 'getElementById("console-area")' in handler  # only to put the parts back
     assert "appendChild(consoleArea)" not in handler
     for menu in ("node-actions", "multi-actions", "link-actions"):

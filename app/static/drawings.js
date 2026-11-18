@@ -525,7 +525,7 @@ function updateStatusBar(connectionOk = statusConnectionOk) {
   if (selectedNames.size > 1) parts.push(`${selectedNames.size} selected`);
   text.textContent = connectionOk
     ? `${designMode ? "Design" : "Connected"}: ${parts.join(", ")}`
-    : "Disconnected - failed to reach the server";
+    : "Server not reachable";
   const zoomPercent = Math.round((1600 / viewBoxState.w) * 100);
   document.getElementById("zoom-readout").textContent = `${zoomPercent}%`;
   const zoomInput = document.getElementById("settings-zoom-input");

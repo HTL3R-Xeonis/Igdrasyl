@@ -41,6 +41,8 @@ function setWarningBanner(text, opts = {}) {
   document.getElementById("warning-banner-text").textContent = text && gns3VmProgress ? gns3VmProgress : text;
   banner.hidden = !text;
   retryBtn.hidden = !text || !opts.retryable;
+  // Offered while the host has no project selected (see app/topology.py): the dialog that sets one.
+  document.getElementById("warning-choose-project-btn").hidden = !text || !opts.chooseProject;
   // Offered when the selected library project isn't deployed to GNS3 yet.
   warningDeployProject = text && opts.deployable ? opts.deployable : null;
   document.getElementById("warning-deploy-btn").hidden = !warningDeployProject;
@@ -355,7 +357,7 @@ async function loadCanvas() {
       : health.esxi_ip
         ? `${health.gns3_project_name} @ ${health.esxi_ip}`
         : health.gns3_project_name;
-    setWarningBanner(health.warning || "", { retryable: !designMode, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project, gns3Vm: designMode ? null : health.gns3_vm });
+    setWarningBanner(health.warning || "", { retryable: !designMode, chooseProject: !designMode && !!health.esxi_ip && !health.gns3_project_name, deployable: designMode ? null : health.deployable_project, held: designMode ? null : health.held_project, gns3Vm: designMode ? null : health.gns3_vm });
     incrementalDeploy = health.incremental_deploy !== false;
     if (!designMode) {
       // Re-sync with a staging session that may already be open server-side (e.g. this page was reloaded).
@@ -392,6 +394,7 @@ async function loadCanvas() {
     }
     selectedNames = new Set([...selectedNames].filter((n) => nodesData[n]));
     if (selectedName && !nodesData[selectedName]) selectedName = null;
+    document.dispatchEvent(new CustomEvent("nodes-changed"));
     if (selectedNames.size < 2 && !document.getElementById("multi-actions").hidden) deselectNode();
     await refreshLiveLinks();
     renderCanvas();

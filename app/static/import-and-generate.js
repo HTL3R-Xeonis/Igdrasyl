@@ -222,6 +222,65 @@ function showLandingView() {
   showAppVersion();
 }
 
+// True only in the gateway deployment: /gateway/health is answered by the gateway process itself, a backend (or the
+// single-process app) has no such route. Cached; any failure counts as "not the gateway" (the old behaviour).
+let gatewayModeCache = null;
+async function isGatewayMode() {
+  if (gatewayModeCache === null) {
+    try { gatewayModeCache = (await fetch("/gateway/health", { cache: "no-store" })).ok; }
+    catch (error) { gatewayModeCache = false; }
+  }
+  return gatewayModeCache;
+}
+
+// Whether to skip the main menu after "?enter=1" (set by the login and by the server picker's Activate): the host must be
+// active. The gateway deployment has chosen one server for this browser; the single-process app only counts as "chosen"
+// when exactly one host is usable there.
+async function shouldAutoEnter() {
+  const health = await fetch("/health", { cache: "no-store" }).then(r => (r.ok ? r.json() : null));
+  if (!health || !health.esxi_ip) return false;
+  if (await isGatewayMode()) return true;
+  const profiles = await fetch("/settings-profiles", { cache: "no-store" }).then(r => (r.ok ? r.json() : []));
+  const usable = profiles.filter(profile => !profile.error);
+  return usable.length === 1 && usable[0].active === true;
+}
+
+// The page's first view. Without ?enter=1 this is the main menu exactly as before (reload, Back, bookmark, the Main Menu
+// button); with it the chosen server's canvas opens directly. The flag is removed from the address bar at once so a
+// reload inside the canvas behaves like any other reload.
+async function startView() {
+  const params = new URLSearchParams(window.location.search);
+  const wantsEnter = params.has("enter");
+  if (wantsEnter) {
+    params.delete("enter");
+    const rest = params.toString();
+    history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
+  }
+  try {
+    if (wantsEnter && await shouldAutoEnter()) {
+      await openLiveCanvas();
+      return;
+    }
+  } catch (error) {
+    // fall back to the main menu below: never a broken page
+  } finally {
+    document.documentElement.classList.remove("enter-pending");
+  }
+  showLandingView();
+}
+
+// Gateway deployment only: the entries that lead back to the server picker.
+async function showSwitchServerEntries() {
+  if (!await isGatewayMode()) return;
+  for (const id of ["switch-server-btn", "landing-switch-server"]) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.hidden = false;
+      el.addEventListener("click", () => window.location.assign("/pick-backend"));
+    }
+  }
+}
+
 // Plain text next to the footer links, from the backend's own /health
 // (app/version.py) - stays empty (and hidden by CSS) if /health fails.
 async function showAppVersion() {

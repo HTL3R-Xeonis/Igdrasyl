@@ -35,6 +35,7 @@ from __future__ import annotations
 from html import escape
 from threading import Lock
 from typing import Annotated, Any
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import (
@@ -128,7 +129,67 @@ def get_target(scope) -> tuple[str, int] | None:
     return ("127.0.0.1", port)
 
 
-def _pick_backend_page(user: tuple[str, str]) -> str:
+def _host_address(filename: str) -> str | None:
+    for profile in settings_profiles.list_profiles():
+        if profile["filename"] == filename:
+            return profile.get("esxi_ip") or None
+    return None
+
+
+def backend_status(scope) -> dict[str, str | None]:
+    """
+    What the in-page overlay and the "not reachable" page tell a person about the selected host's server: which profile,
+    what systemd says about its unit ("none" when nothing usable is selected, "running", "starting", "stopped") and the
+    host's address. Never raises; a profile the caller may not use counts as not selected.
+    """
+    filename = selected_backend(scope)
+    username = _caller_username(scope)
+    if not filename or not username or not users.can_access_host(username, filename):
+        return {"selected": None, "backend": "none", "host": None}
+    return {
+        "selected": filename,
+        "backend": backend_manager.state(filename),
+        "host": _host_address(filename),
+    }
+
+
+def describe_unavailable(scope) -> tuple[str | None, str]:
+    """app/proxy.py's `describe_unavailable`: the label and the state shown on the "not reachable" page."""
+    status = backend_status(scope)
+    backend = status["backend"]
+    return status["selected"], backend if backend == "starting" else (
+        "stopped" if backend == "stopped" else "unreachable"
+    )
+
+
+_PICKER_ERRORS = {
+    "forbidden": "You are not allowed to use {host}.",
+    "not_found": "{host} does not exist (any more).",
+    "invalid": "That host name is not valid.",
+    "missing_settings": "{host} is missing service addresses in its profile - an admin has to complete it.",
+    "no_port": "No free port is left for another server - ask an admin.",
+    "unhealthy": "{host} started but did not answer in time - try again, or ask an admin.",
+}
+
+
+def _picker_error_text(code: str | None, host: str | None) -> str:
+    """The one-line message of an activation that failed, from a fixed list (the query string only picks which one)."""
+    template = _PICKER_ERRORS.get(code or "")
+    if template is None:
+        return ""
+    shown = None
+    if host:
+        try:
+            settings_profiles._validate_name(host)
+            shown = host
+        except settings_profiles.InvalidProfileName:
+            shown = None
+    return template.format(host=shown or "that host")
+
+
+def _pick_backend_page(
+    user: tuple[str, str], error: str | None = None, host: str | None = None
+) -> str:
     username, role = user
     record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
     tiles = ""
@@ -163,7 +224,18 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
             f"{deploy}</div></div>"
         )
     if not tiles:
-        tiles = '<p class="backend-picker-empty">No host profiles exist yet - an admin creates one under Host Settings.</p>'
+        empty = (
+            "No host profiles yet - an admin creates one under Host Settings."
+            if role == "admin"
+            else "No host is available for your account - ask an admin."
+        )
+        tiles = f'<p class="backend-picker-empty">{empty}</p>'
+    error_text = _picker_error_text(error, host)
+    error_line = (
+        f'<p class="backend-picker-error" role="alert">{escape(error_text)}</p>'
+        if error_text
+        else ""
+    )
     admin_link = (
         '<a class="toolbar-btn" href="/admin.html">Admin Panel</a>'
         if role == "admin"
@@ -176,7 +248,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Choose a server</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-58">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
 <style>
   body {{ display: block; padding: 0 16px; }}
   main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}
@@ -204,6 +276,7 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
   .backend-tile-actions [data-deploy-status] {{ flex-basis: 100%; text-align: right; color: #aaa; font-size: 12px; }}
   .backend-tile-actions [data-deploy-status]:empty {{ display: none; }}
   .backend-picker-empty {{ color: #aaa; }}
+  .backend-picker-error {{ margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid #a04040; background: #3a2020; }}
   @media (max-width: 520px) {{
     .backend-tile {{ flex-direction: column; align-items: stretch; }}
     .backend-tile-actions {{ max-width: none; justify-content: flex-start; }}
@@ -220,8 +293,8 @@ def _pick_backend_page(user: tuple[str, str]) -> str:
     <button type="submit" class="toolbar-btn">Log out</button>
   </form>
 </header>
-<p class="backend-picker-sub">Signed in as {escape(username)}. Each server runs its own session.</p>
-{tiles}
+<p class="backend-picker-sub">Signed in as {escape(username)}.</p>
+{error_line}{tiles}
 <p class="backend-picker-version">v{__version__}</p>
 </main>
 <script src="/gateway/host-deploy.js?v=1" defer></script>
@@ -316,6 +389,17 @@ def register(app: FastAPI) -> None:
         audit_log.record("credentials_served", "collector", f"{ip} to {caller}")
         return JSONResponse({"username": login[0], "password": login[1]}, 200, headers)
 
+    @app.get("/gateway/status")
+    def gateway_status(request: Request, _user: AnyUser) -> JSONResponse:
+        """
+        For the in-page "Connection lost" overlay (app/static/connection-monitor.js): the selected host's server as
+        systemd sees it. Needs a session (it names a host profile), is answered by the gateway itself and never
+        proxied, so it still answers while that server is down.
+        """
+        return JSONResponse(
+            backend_status(request.scope), headers={"Cache-Control": "no-store"}
+        )
+
     @app.get("/gateway/health")
     def gateway_health() -> dict[str, str]:
         """
@@ -330,8 +414,10 @@ def register(app: FastAPI) -> None:
         return {"status": "ok", "version": __version__}
 
     @app.get("/pick-backend", response_class=HTMLResponse)
-    def pick_backend(user: AnyUser) -> str:
-        return _pick_backend_page(user)
+    def pick_backend(
+        user: AnyUser, error: str | None = None, host: str | None = None
+    ) -> str:
+        return _pick_backend_page(user, error, host)
 
     # --- User accounts (app/users.py) -----------------------------------
 
@@ -608,34 +694,45 @@ def register(app: FastAPI) -> None:
         everyone - it no longer does); see restart below for the
         explicit, admin-only, affects-everyone-on-it action.
         """
+
+        def refuse(status: int, code: str, message: str) -> Response:
+            # A browser form post lands back on the picker with a one-line message; everything else keeps the JSON error.
+            if error_pages.wants_html(request):
+                query = urlencode({"error": code, "host": filename})
+                return RedirectResponse(f"/pick-backend?{query}", status_code=303)
+            raise HTTPException(status, message)
+
         try:
             settings_profiles.profile_path(filename)
         except settings_profiles.InvalidProfileName as exc:
-            raise HTTPException(400, str(exc)) from exc
+            return refuse(400, "invalid", str(exc))
         except FileNotFoundError as exc:
-            raise HTTPException(404, str(exc)) from exc
+            return refuse(404, "not_found", str(exc))
         username, role = user
         record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
         if not users.can_access_host(record, filename):
-            raise HTTPException(403, f"Not allowed to use host {filename!r}")
+            return refuse(403, "forbidden", f"Not allowed to use host {filename!r}")
         missing = required_settings.missing_api_settings(
             settings_profiles.profile_path(filename)
         )
         if missing:
             message = required_settings.explain(filename, missing)
             logger.error(message)
-            raise HTTPException(400, message)
+            return refuse(400, "missing_settings", message)
         try:
             port = backend_manager.ensure_running(filename)
         except backend_ports.NoFreePort as exc:
-            raise HTTPException(503, str(exc)) from exc
+            return refuse(503, "no_port", str(exc))
         if not backend_manager.wait_healthy(port):
-            raise HTTPException(
-                503, f"{filename} started but didn't answer healthy in time"
+            return refuse(
+                503,
+                "unhealthy",
+                f"{filename} started but didn't answer healthy in time",
             )
         audit_log.record("host_activate", username, filename)
+        # ?enter=1 asks the page to open the chosen server's canvas instead of the main menu (static/import-and-generate.js startView)
         response = (
-            RedirectResponse("/", status_code=303)
+            RedirectResponse("/?enter=1", status_code=303)
             if error_pages.wants_html(request)
             else JSONResponse({"status": "active"})
         )

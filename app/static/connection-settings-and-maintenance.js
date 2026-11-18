@@ -111,22 +111,7 @@ async function openConnectionSettings(filename = null) {
         input.required = !field.optional;
         input.placeholder = field.optional ? "Automatic / not configured" : field.default;
         label.appendChild(input);
-        if (field.help) {
-          const row = document.createElement("span");
-          row.className = "info-row";
-          const infoBtn = document.createElement("button");
-          infoBtn.type = "button";
-          infoBtn.className = "info-btn";
-          infoBtn.setAttribute("aria-label", "More information");
-          infoBtn.title = field.help;
-          infoBtn.textContent = "?";
-          const popover = document.createElement("span");
-          popover.className = "info-popover";
-          popover.hidden = true;
-          popover.textContent = field.help;
-          row.append(infoBtn, popover);
-          label.appendChild(row);
-        }
+        if (field.help) label.appendChild(makeInfoButton(field.help));
         section.appendChild(label);
       }
       connectionFields.appendChild(section);
@@ -155,20 +140,8 @@ function buildCredentialsSection() {
     input.name = SECRET_PREFIX + key;
     input.autocomplete = "new-password";
     input.spellcheck = false;
-    const row = document.createElement("span");
-    row.className = "info-row";
-    const infoBtn = document.createElement("button");
-    infoBtn.type = "button";
-    infoBtn.className = "info-btn";
-    infoBtn.setAttribute("aria-label", "More information");
     const fullHelp = `${help} Stored on the server only, never shown again.`;
-    infoBtn.title = fullHelp;
-    infoBtn.textContent = "?";
-    const popover = document.createElement("span");
-    popover.className = "info-popover";
-    popover.hidden = true;
-    popover.textContent = fullHelp;
-    row.append(infoBtn, popover);
+    const row = makeInfoButton(fullHelp);
     label.append(text, input, row);
     section.appendChild(label);
   }
@@ -270,20 +243,46 @@ document.getElementById("connection-close").addEventListener("click", closeConne
 connectionDialog.addEventListener("cancel", event => { event.preventDefault(); if (!connectionBusy) closeConnectionSettings(); });
 connectionApply.addEventListener("click", async () => { connectionDialog.close(); await enterHost(connectionFilename, false); });
 
+// Opens the live canvas of the active host (the host's own banner shows what is missing: no project, host down, ...).
+async function openLiveCanvas() {
+  designMode = false;
+  liveHistory = { undo: [], redo: [] };
+  lastPersistedDrawings = [];
+  drawingsLoaded = false;
+  initialFitDone = false;
+  applyDesignModeUI();
+  document.getElementById("landing-view").hidden = true;
+  document.getElementById("app-view").hidden = false;
+  try {
+    await loadCanvas();
+  } catch (err) {
+    setWarningBanner(`Failed to load: ${err}`, { retryable: true });
+  }
+}
+
+// Gateway deployment: choosing another host only points this browser's session at it - nothing restarts.
+async function switchGatewayHost(filename) {
+  const resp = await fetch(`/settings-profiles/${encodeURIComponent(filename)}/activate`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    await showAlert(`Could not switch to "${filename}": ${body.detail || resp.status}`, { title: "Switch host" });
+    return;
+  }
+  window.location.assign("/?enter=1");
+}
+
 async function enterHost(filename, isActive) {
   if (isActive) {
-    designMode = false;
-    liveHistory = { undo: [], redo: [] };
-    lastPersistedDrawings = [];
-    drawingsLoaded = false;
-    initialFitDone = false;
-    applyDesignModeUI();
-    document.getElementById("landing-view").hidden = true;
-    document.getElementById("app-view").hidden = false;
-    try {
-      await loadCanvas();
-    } catch (err) {
-      setWarningBanner(`Failed to load: ${err}`, { retryable: true });
+    await openLiveCanvas();
+    return;
+  }
+
+  if (await isGatewayMode()) {
+    if (await showConfirm(`Switch to "${filename}"?`, { title: "Switch host", confirmLabel: "Switch" })) {
+      await switchGatewayHost(filename);
     }
     return;
   }
@@ -309,16 +308,7 @@ async function enterHost(filename, isActive) {
   // reload the page outright - simplest way to get every piece of
   // state back in sync with the newly active host, rather than trying
   // to patch it all in place.
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    try {
-      const resp = await fetch("/health");
-      if (resp.ok) { window.location.reload(); return; }
-    } catch (err) {
-      // still restarting - keep polling
-    }
-  }
+  if (await connectionMonitor.waitUntilBack(30000)) { window.location.reload(); return; }
   await showAlert(`Server didn't come back after activating "${filename}" - check it manually.`, { title: "Switch host" });
   await loadLandingHostGrid();
 }

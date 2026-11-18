@@ -392,16 +392,42 @@ function clearAiSnippetDraft() {
 async function refreshAiSnippetTargets() {
   clearAiSnippetDraft();
   aiSnippetGenerate.disabled = true;
+  const previous = aiSnippetDevice.value;
   aiSnippetDevice.replaceChildren(new Option("Loading devices…", ""));
   try {
-    const devices = await settingsRequest("/config-snippets/ai/targets");
-    aiSnippetDevice.replaceChildren(new Option(devices.length ? "Choose a device…" : "No compatible devices", ""));
-    for (const name of devices) aiSnippetDevice.add(new Option(name, name));
+    const devices = await settingsRequest("/config-snippets/ai/devices");
+    const supported = devices.filter(device => device.supported);
+    aiSnippetDevice.replaceChildren(new Option(supported.length ? "Choose a device…" : "No supported devices", ""));
+    for (const device of devices) {
+      const option = new Option(
+        device.supported ? `${device.name} (${device.label})` : `${device.name} - not supported`,
+        device.name,
+      );
+      option.disabled = !device.supported;
+      aiSnippetDevice.add(option);
+    }
+    const unsupported = devices.filter(device => !device.supported);
+    aiSnippetStatus.textContent = unsupported.length
+      ? `Not supported: ${[...new Set(unsupported.map(device => device.reason))].join(" ")}`
+      : "";
+    if (supported.some(device => device.name === previous)) aiSnippetDevice.value = previous;
+    aiSnippetGenerate.disabled = !aiSnippetDevice.value;
   } catch (error) {
     aiSnippetDevice.replaceChildren(new Option("Could not load devices", ""));
     aiSnippetStatus.textContent = error.message;
   }
 }
+
+// The target list follows the canvas: a VM added while the panel is open shows up without closing it.
+let aiSnippetNodeKey = "";
+document.addEventListener("nodes-changed", () => {
+  const key = Object.keys(nodesData).sort().join("\n");
+  const changed = key !== aiSnippetNodeKey;
+  aiSnippetNodeKey = key;
+  if (changed && !aiSnippetPanel.hidden && !aiSnippetForm.hidden && !aiSnippetDevice.disabled) {
+    refreshAiSnippetTargets();
+  }
+});
 
 function setAiSnippetBusy(busy) {
   aiSnippetPush.disabled = busy;
@@ -787,7 +813,8 @@ popOutButton.addEventListener("click", (evt) => {
   });
 });
 
-showLandingView();
+startView();
+showSwitchServerEntries();
 initPalette();
 
 // The template service decides whether any topology validates at all; when
@@ -813,7 +840,8 @@ async function refreshTemplateBanner() {
     const refreshBtn = document.getElementById("template-refresh-btn");
     refreshBtn.hidden = health.ok || !health.refreshable;
   } catch (err) {
-    // Backend not reachable right now - the other screens already say so.
+    // Backend not reachable right now: the fetch wrapper in connection-monitor.js has already noticed and shows the
+    // "Connection lost" overlay, so nothing more to do here.
   }
 }
 refreshTemplateBanner();

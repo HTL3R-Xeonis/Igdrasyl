@@ -62,7 +62,7 @@ def test_login_with_correct_credentials_sets_a_cookie_and_redirects(
     anon = TestClient(main_module.app, follow_redirects=False)
     resp = anon.post("/login", data={"username": "alice", "password": "correct-horse"})
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/"
+    assert resp.headers["location"] == "/?enter=1"
     assert auth.SESSION_COOKIE in resp.cookies
 
 

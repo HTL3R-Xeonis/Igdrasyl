@@ -109,5 +109,10 @@ app.add_middleware(RequestLoggingMiddleware)
 # Registered last, deliberately - see this module's own docstring and
 # app/main.py's identical reasoning for its static-file mount.
 app.mount(
-    "/", make_proxy_app(routes_gateway.get_target, redirect_html_to="/pick-backend")
+    "/",
+    make_proxy_app(
+        routes_gateway.get_target,
+        redirect_html_to="/pick-backend",
+        describe_unavailable=routes_gateway.describe_unavailable,
+    ),
 )
