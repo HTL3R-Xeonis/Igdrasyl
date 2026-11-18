@@ -489,10 +489,30 @@ def _compile(settings: object, ports: list[str], platform: str) -> list[str]:
         ) from exc
 
 
+def _supported_text(platform: str) -> str:
+    """What the selected device kind can be configured with, for a prompt the model could not map."""
+    if platform in {"iosv", "iosvl2"}:
+        kinds = "VLANs, interface descriptions and access ports"
+        if platform == "iosv":
+            kinds = "interface descriptions and IPv4 addresses"
+    elif platform == "windows":
+        kinds = "IPv4 addresses (no host name)"
+    else:
+        kinds = "IPv4 addresses and the host name"
+    return (
+        f"Nothing in the prompt can be configured on this device. It supports: {kinds}."
+    )
+
+
 def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
     target = _target(app, request.device)
     context = _context(app, target)
-    settings = _generate_settings(request.prompt, context)
+    try:
+        settings = _generate_settings(request.prompt, context)
+    except InvalidDraft as exc:
+        if str(exc):
+            raise
+        raise InvalidDraft(_supported_text(context["platform"])) from exc
     commands = _compile(settings, context["ports"], context["platform"])
     if _target(app, request.device) != target:
         raise TargetChanged("The project or device changed. Generate a new draft.")

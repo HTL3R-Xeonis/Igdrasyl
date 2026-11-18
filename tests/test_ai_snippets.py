@@ -434,3 +434,17 @@ def test_a_draft_for_a_linux_vm_is_pushed_like_any_other(client, mixed_nodes):
                 break
             time.sleep(0.01)
     assert push.call_args.args[0] == {"web1": ["hostnamectl set-hostname web-1"]}
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        ("iosvl2", "VLANs"),
+        ("iosv", "IPv4 addresses"),
+        ("windows", "no host name"),
+        ("linux", "host name"),
+    ],
+)
+def test_an_unmappable_prompt_names_what_the_device_supports(platform, expected):
+    text = ai_snippets._supported_text(platform)
+    assert expected in text and text.startswith("Nothing in the prompt")
