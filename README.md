@@ -431,7 +431,8 @@ ranges have dedicated inputs and validation.
 variable must (`ESXI_TEMPLATE_SERVER_URL`, ..., which is how the appliance points everything somewhere else). The built-in
 lab addresses of TopologyBuilder are not used as a fallback: activating a profile without them is refused with a message
 naming the missing keys (HTTP 400 on the gateway), and a backend started with such a profile stops with the same text in
-its log.
+its log. A profile written for the retired OVA deploy service still has `api.ova_deploy_url`: replace that line by
+`api.ova_base_url` (the key is ignored otherwise and the profile is refused for the missing new key).
 
 **Passwords** can be pasted into the Credentials section. The settings loader
 does not accept passwords in YAML, so they are stored apart from it, per host, in
