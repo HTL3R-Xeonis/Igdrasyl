@@ -638,3 +638,247 @@ def test_the_generator_gets_untouched_linux_port_names(client, mixed_nodes):
     assert context["links"] == [
         {"port": "ens160", "neighbor": "SW1", "neighbor_port": "Ethernet1"}
     ]
+
+
+@pytest.fixture
+def esxi_linux_vm(client, mixed_nodes, monkeypatch):
+    """web1: Linux on ESXi with two linked interfaces; the guest names them ens192 and ens224 (found by MAC)."""
+    from app import guest_nics
+
+    edges = client.app.state.graph._edges
+    added = [("web1", "eth0", "SW1", "Ethernet1"), ("web1", "eth1", "R1", "gi0/1")]
+    edges.extend(added)
+    esxi = MagicMock()
+    esxi.get_vm.return_value.guest.toolsRunningStatus = "guestToolsRunning"
+    esxi.get_vm.return_value.guest.guestOperationsReady = True
+    esxi.find_vm_nic_mac_by_port_group.side_effect = lambda vm, group: {
+        "web1_eth0": "00:50:56:a1:00:02",
+        "web1_eth1": "00:50:56:a1:00:03",
+    }.get(group)
+    client.app.state.esxi_connection = esxi
+    calls = []
+
+    def guest(process_manager, vm, auth, command, is_windows, **_):
+        calls.append(command)
+        return 0, (
+            "2: ens192: <UP> mtu 1500\\    link/ether 00:50:56:a1:00:02 brd ff:ff:ff:ff:ff:ff\n"
+            "3: ens224: <UP> mtu 1500\\    link/ether 00:50:56:a1:00:03 brd ff:ff:ff:ff:ff:ff\n"
+        )
+
+    monkeypatch.setattr(guest_nics, "run_command_in_guest", guest)
+    monkeypatch.setattr(
+        guest_nics, "guest_credentials_for_image", lambda image: ("root", "pw")
+    )
+    yield calls
+    for edge in added:
+        edges.remove(edge)
+
+
+def test_a_linux_esxi_draft_is_written_with_the_guests_interface_names(
+    client, esxi_linux_vm
+):
+    response, upstream = _draft(
+        client,
+        ["ip address replace 10.0.0.5/24 dev ens192"],
+        request={"device": "web1", "prompt": "address on the link to SW1"},
+    )
+    assert response.status_code == 200, response.text
+    context = upstream.call_args.kwargs["json"]["context"]
+    assert context["ports"] == ["ens192", "ens224"]
+    assert context["links"] == [
+        {"port": "ens192", "neighbor": "SW1", "neighbor_port": "Ethernet1"},
+        {"port": "ens224", "neighbor": "R1", "neighbor_port": "gi0/1"},
+    ]
+    draft = response.json()
+    assert draft["interfaces"] == [
+        {"topology": "eth0", "guest": "ens192"},
+        {"topology": "eth1", "guest": "ens224"},
+    ]
+    assert draft["warnings"] == []
+    assert esxi_linux_vm == ["ip -o link"]
+    # the draft still belongs to the unchanged target, so it can be pushed
+    with patch("app.push_jobs.push_all", return_value=[]):
+        started = client.post(f"{_URL}/push", json={"draft_id": draft["draft_id"]})
+        assert started.status_code == 202, started.text
+        _wait_for(client, started.json()["job_id"])
+
+
+_FOUR = [
+    {"topology": "eth0", "guest": "ens192"},
+    {"topology": "eth1", "guest": "ens224"},
+    {"topology": "eth2", "guest": "ens160"},
+    {"topology": "eth3", "guest": "ens161"},
+]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        # all at once: eth2 -> ens160 is not hit again, eth0 -> ens192 does not turn into eth1 -> ...
+        (
+            "eth0 10.0.0.1/24, eth1 10.0.1.1/24, eth2 10.0.2.1/24, eth3 down",
+            "ens192 10.0.0.1/24, ens224 10.0.1.1/24, ens160 10.0.2.1/24, ens161 down",
+        ),
+        ("swap eth0 and eth1", "swap ens192 and ens224"),
+        ("ETH0 and Eth1.", "ens192 and ens224."),
+        ("VLAN 30 on eth0.30 and (eth1)", "VLAN 30 on ens192.30 and (ens224)"),
+        # not a whole token: words, addresses, paths, other names
+        ("method0 and meth0 and eth00", "method0 and meth0 and eth00"),
+        (
+            "host 10.0.0.eth0 /etc/eth0 net-eth0 eth0/1",
+            "host 10.0.0.eth0 /etc/eth0 net-eth0 eth0/1",
+        ),
+        ("eth4 stays, as does lo", "eth4 stays, as does lo"),
+        ("nothing to rewrite", "nothing to rewrite"),
+    ],
+)
+def test_the_prompt_names_the_interfaces_the_guest_has(prompt, expected):
+    assert ai_snippets.rewrite_prompt(prompt, _FOUR) == expected
+
+
+def test_the_prompt_is_not_touched_without_resolved_names():
+    assert ai_snippets.rewrite_prompt("address on eth0", []) == "address on eth0"
+    same = [{"topology": "eth0", "guest": "eth0"}]
+    assert ai_snippets.rewrite_prompt("address on eth0", same) == "address on eth0"
+
+
+def test_the_longest_name_wins_over_a_shorter_one_it_starts_with():
+    names = [
+        {"topology": "eth1", "guest": "ens1"},
+        {"topology": "eth10", "guest": "ens10"},
+    ]
+    assert ai_snippets.rewrite_prompt("eth10 and eth1", names) == "ens10 and ens1"
+
+
+def test_the_draft_gets_the_rewritten_prompt_and_the_aliases(client, esxi_linux_vm):
+    response, upstream = _draft(
+        client,
+        ["ip address replace 10.0.0.5/24 dev ens192"],
+        request={"device": "web1", "prompt": "address 10.0.0.5/24 on eth0, not eth1"},
+    )
+    assert response.status_code == 200, response.text
+    sent = upstream.call_args.kwargs["json"]
+    assert sent["prompt"] == "address 10.0.0.5/24 on ens192, not ens224"
+    assert sent["context"]["interface_aliases"] == {
+        "ens192": "eth0",
+        "ens224": "eth1",
+    }
+    assert response.json()["prompt_used"] == sent["prompt"]
+
+
+def test_an_unchanged_prompt_is_reported_as_it_was_typed(client, esxi_linux_vm):
+    response, upstream = _draft(
+        client, ["x"], request={"device": "web1", "prompt": "the port towards SW1"}
+    )
+    assert response.json()["prompt_used"] == "the port towards SW1"
+    assert upstream.call_args.kwargs["json"]["prompt"] == "the port towards SW1"
+    assert "interface_aliases" in upstream.call_args.kwargs["json"]["context"]
+
+
+def test_the_fallback_neither_rewrites_the_prompt_nor_sends_aliases(
+    client, esxi_linux_vm
+):
+    client.app.state.esxi_connection.get_vm.return_value.guest.toolsRunningStatus = (
+        "guestToolsNotRunning"
+    )
+    response, upstream = _draft(
+        client, ["x"], request={"device": "web1", "prompt": "address on eth0"}
+    )
+    assert response.status_code == 200, response.text
+    sent = upstream.call_args.kwargs["json"]
+    assert sent["prompt"] == "address on eth0"
+    assert "interface_aliases" not in sent["context"]
+    assert response.json()["prompt_used"] == "address on eth0"
+
+
+def test_gns3_devices_send_no_aliases(client, esxi_linux_vm):
+    response, upstream = _draft(
+        client, ["vlan 30"], request={"device": "SW1", "prompt": "vlan 30 on Ethernet0"}
+    )
+    assert response.status_code == 200, response.text
+    assert "interface_aliases" not in upstream.call_args.kwargs["json"]["context"]
+
+
+def test_the_prompt_limit_also_holds_after_the_rewrite(client, esxi_linux_vm):
+    # 1500 characters as typed pass the request model; "ens192" is longer than "eth0": 1400 + 2 * 100 > 1500
+    prompt = ("eth0 " * 280)[: ai_snippets.MAX_PROMPT_LENGTH].strip()
+    assert len(prompt) <= ai_snippets.MAX_PROMPT_LENGTH
+    response, upstream = _draft(
+        client, ["x"], request={"device": "web1", "prompt": prompt}
+    )
+    assert response.status_code == 422
+    assert "once the interface names" in response.json()["detail"]
+    upstream.assert_not_called()
+
+
+def test_an_older_generator_that_refuses_the_aliases_gets_the_draft_without_them(
+    client, esxi_linux_vm
+):
+    refusal = Mock(status_code=422)
+    refusal.json.return_value = {
+        "detail": [
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "context", "interface_aliases"],
+                "msg": "Extra inputs are not permitted",
+            }
+        ]
+    }
+    with patch(
+        "app.ai_snippets.requests.post", side_effect=[refusal, _reply(["x"])]
+    ) as upstream:
+        response = client.post(
+            f"{_URL}/generate", json={"device": "web1", "prompt": "address on eth0"}
+        )
+    assert response.status_code == 200, response.text
+    first, second = (call.kwargs["json"] for call in upstream.call_args_list)
+    assert "interface_aliases" in first["context"]
+    assert "interface_aliases" not in second["context"]
+    # the names themselves still are the guest's
+    assert second["prompt"] == "address on ens192"
+    assert second["context"]["ports"] == ["ens192", "ens224"]
+
+
+def test_another_422_is_not_retried(client, esxi_linux_vm):
+    refusal = Mock(status_code=422)
+    refusal.json.return_value = {"detail": "No."}
+    with patch("app.ai_snippets.requests.post", return_value=refusal) as upstream:
+        response = client.post(
+            f"{_URL}/generate", json={"device": "web1", "prompt": "address"}
+        )
+    assert response.status_code == 422
+    assert upstream.call_count == 1
+
+
+def test_a_failed_name_lookup_keeps_the_topology_names_and_warns(client, esxi_linux_vm):
+    client.app.state.esxi_connection.get_vm.return_value.guest.toolsRunningStatus = (
+        "guestToolsNotRunning"
+    )
+    response, upstream = _draft(
+        client,
+        ["ip address replace 10.0.0.5/24 dev eth0"],
+        request={"device": "web1", "prompt": "address"},
+    )
+    assert response.status_code == 200, response.text
+    context = upstream.call_args.kwargs["json"]["context"]
+    assert context["ports"] == ["eth0", "eth1"]
+    assert [link["port"] for link in context["links"]] == ["eth0", "eth1"]
+    draft = response.json()
+    assert draft["interfaces"] == []
+    assert draft["warnings"] == [
+        "could not resolve guest interface names, topology names used"
+    ]
+    assert esxi_linux_vm == []
+
+
+def test_gns3_nodes_and_appliances_are_not_looked_up_in_a_guest(
+    client, esxi_linux_vm, mixed_nodes
+):
+    mixed_nodes["R1"] = _node("Cisco IOSv 15.9", Environment.ON_GNS3, "ROUTER")
+    mixed_nodes["R1"].name = "R1"
+    for device in ("SW1", "R1", "mt1", "fw1"):
+        response, _ = _draft(client, ["x"], request={"device": device, "prompt": "do"})
+        assert response.status_code == 200, response.text
+        assert response.json()["interfaces"] == []
+    client.app.state.esxi_connection.get_vm.assert_not_called()
+    assert esxi_linux_vm == []

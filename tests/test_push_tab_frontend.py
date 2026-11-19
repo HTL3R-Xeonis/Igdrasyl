@@ -49,13 +49,64 @@ def test_the_waiting_line_names_the_devices_and_is_empty_without_any():
     assert _waiting_text(None) == ""
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_ai_review_box_shows_the_topology_name_next_to_the_guest_name():
+    source = read_app_js()
+    match = re.search(
+        r"^function aiSnippetInterfaceText\(.*?^\}", source, re.DOTALL | re.MULTILINE
+    )
+    assert match, "aiSnippetInterfaceText is missing from the frontend scripts"
+    draft = {
+        "interfaces": [
+            {"topology": "eth0", "guest": "ens192"},
+            {"topology": "eth1", "guest": "eth1"},
+        ]
+    }
+    script = (
+        f"{match.group(0)}\nprocess.stdout.write(JSON.stringify("
+        f"[aiSnippetInterfaceText({json.dumps(draft)}), aiSnippetInterfaceText({{}})]));"
+    )
+    shown = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    ).stdout
+    assert json.loads(shown) == ["eth0 (guest ens192), eth1", ""]
+    assert 'id="push-snippet-ai-interfaces"' in (STATIC / "index.html").read_text()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_review_box_shows_the_prompt_as_sent_only_when_it_differs():
+    source = read_app_js()
+    match = re.search(
+        r"^function aiSnippetPromptNote\(.*?^\}", source, re.DOTALL | re.MULTILINE
+    )
+    assert match, "aiSnippetPromptNote is missing from the frontend scripts"
+    cases = [
+        [{"prompt_used": "address on ens192"}, "address on eth0"],
+        [{"prompt_used": "address on eth0"}, "address on eth0"],
+        [{}, "address on eth0"],
+        [{"prompt_used": 5}, "x"],
+    ]
+    script = (
+        f"{match.group(0)}\nprocess.stdout.write(JSON.stringify("
+        f"{json.dumps(cases)}.map(([d, e]) => aiSnippetPromptNote(d, e))));"
+    )
+    shown = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    ).stdout
+    assert json.loads(shown) == ["Prompt as sent: address on ens192", "", "", ""]
+    html = (STATIC / "index.html").read_text()
+    assert 'id="push-snippet-ai-prompt-used"' in html
+    # shown as text, never as markup
+    assert "aiSnippetPromptUsed.textContent = promptNote" in source
+
+
 def test_the_progress_view_uses_the_waiting_line_and_the_scripts_got_a_new_version():
     source = read_app_js()
     progress = source[source.index("function renderPushProgress") :]
     progress = progress[: progress.index("\n}\n")]
     assert "pushWaitingText(job.waiting_for)" in progress
     html = (STATIC / "index.html").read_text()
-    assert "/consoles-and-push.js?v=ginnungagap-60" in html
+    assert "/consoles-and-push.js?v=ginnungagap-61" in html
 
 
 def test_the_job_status_endpoint_hands_waiting_for_to_the_page(client, app_state):

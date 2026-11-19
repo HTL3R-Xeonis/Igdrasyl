@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.graph.environment import Environment
 from src.settings import Settings
 
-from app import fix_jobs, push_jobs
+from app import fix_jobs, guest_nics, push_jobs
 from app.config_push import DeviceSpec
 from app.gns3_state import list_node_ports
 
@@ -100,10 +100,13 @@ def available() -> bool:
     )
 
 
+MAX_PROMPT_LENGTH = 1500
+
+
 class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device: str = Field(min_length=1, max_length=200)
-    prompt: str = Field(min_length=1, max_length=1500)
+    prompt: str = Field(min_length=1, max_length=MAX_PROMPT_LENGTH)
 
     @field_validator("prompt")
     @classmethod
@@ -292,6 +295,71 @@ def _context(app: FastAPI, target: fix_jobs.FixTarget) -> dict:
     }
 
 
+def _with_guest_names(
+    app: FastAPI, context: dict
+) -> tuple[dict, list[dict[str, str]], list[str]]:
+    """
+    For a Linux or Windows VM on ESXi the topology names (eth0, ...) do not exist in the guest: replace the ports and
+    links of `context` by the names the guest really has (found through the NIC's MAC, see app/guest_nics.py).
+    Returns (context for the generator, [{"topology", "guest"}] for the review box, warnings). Anything else - GNS3
+    nodes, appliances reached over serial - is returned unchanged; a failed lookup keeps the topology names and warns.
+    """
+    if context["platform"] not in {"linux", "windows"}:
+        return context, [], []
+    node = app.state.graph.nodes[context["device"]]
+    if node.env != Environment.ON_ESXI:
+        return context, [], []
+    wanted = {*context["ports"], *(link["port"] for link in context["links"])}
+    found = guest_nics.resolve(app, node, sorted(wanted))
+    if not found.names:
+        return context, [], found.warnings
+    guest = found.names
+    renamed = {
+        **context,
+        "ports": sorted({guest.get(port, port) for port in context["ports"]}),
+        "links": [
+            {**link, "port": guest.get(link["port"], link["port"])}
+            for link in context["links"]
+        ],
+    }
+    interfaces = [
+        {"topology": topology, "guest": name}
+        for topology, name in sorted(guest.items())
+    ]
+    # guest name -> the name the topology (and so the user's request) uses; sent only when there is one
+    aliases = {
+        name: topology for topology, name in sorted(guest.items()) if name != topology
+    }
+    if aliases:
+        renamed["interface_aliases"] = aliases
+    return renamed, interfaces, found.warnings
+
+
+def rewrite_prompt(prompt: str, interfaces: list[dict[str, str]]) -> str:
+    """
+    The prompt with every topology interface name that was resolved replaced by the guest's name, so the request
+    and the context's ports speak of the same interface. One pass with one pattern (longest names first), never
+    one name after the other: eth2 -> ens160 must not be hit again by a later replacement. Only whole tokens
+    count - not inside words ("method0"), paths, host names or addresses ("10.0.0.eth0") - and case is ignored.
+    A VLAN suffix stays: "eth0.30" becomes "<guest>.30".
+    """
+    mapping = {
+        item["topology"].lower(): item["guest"]
+        for item in interfaces
+        if item["topology"] != item["guest"]
+    }
+    if not mapping:
+        return prompt
+    names = sorted(mapping, key=len, reverse=True)
+    pattern = re.compile(
+        r"(?<![\w.\-/])(?:"
+        + "|".join(re.escape(name) for name in names)
+        + r")(?![\w/]|-\w)",
+        re.IGNORECASE,
+    )
+    return pattern.sub(lambda match: mapping[match[0].lower()], prompt)
+
+
 def _plain(text: str, limit: int) -> str:
     """Text for the user: control and formatting characters become spaces, whitespace is collapsed, then cut to `limit`."""
     cleaned = "".join(
@@ -316,18 +384,45 @@ def _refusal_reason(response: requests.Response) -> str:
     return reason or "The generator refused this request."
 
 
+def _rejects_aliases(response: requests.Response) -> bool:
+    """True if a 422 is FastAPI's "extra input not permitted" for context.interface_aliases (an older generator)."""
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(detail, list) and any(
+        isinstance(item, dict)
+        and "interface_aliases" in [str(part) for part in item.get("loc") or []]
+        and "extra" in str(item.get("type", ""))
+        for item in detail
+    )
+
+
 def _request_draft(prompt: str, context: dict) -> object:
     url = _generator_url()
     if not _SLOTS.acquire(blocking=False):
         raise Busy
-    try:
-        response = requests.post(
+
+    def post(body_context: dict) -> requests.Response:
+        return requests.post(
             f"{url}/api/config-draft",
-            json={"prompt": prompt, "context": context},
+            json={"prompt": prompt, "context": body_context},
             headers={"Authorization": f"Bearer {service_token()}"},
             timeout=min(90, Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS),
             allow_redirects=False,
         )
+
+    try:
+        response = post(context)
+        if (
+            response.status_code == 422
+            and "interface_aliases" in context
+            and _rejects_aliases(response)
+        ):
+            # A generator from before the aliases refuses the unknown field: ask again without it.
+            response = post(
+                {k: v for k, v in context.items() if k != "interface_aliases"}
+            )
         if response.status_code == 422:
             raise InvalidDraft(_refusal_reason(response))
         if response.status_code != 200:
@@ -521,15 +616,21 @@ def all_warnings(generator_warnings: list[str], commands: list[str]) -> list[str
 
 def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
     target = _target(app, request.device)
-    context = _context(app, target)
+    context, interfaces, name_warnings = _with_guest_names(app, _context(app, target))
+    prompt = rewrite_prompt(request.prompt, interfaces)
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        raise InvalidDraft(
+            f"The prompt is longer than {MAX_PROMPT_LENGTH} characters once the interface names are "
+            "written as the guest has them. Shorten it."
+        )
     commands, generator_warnings = validate_reply(
-        _request_draft(request.prompt, context), context["platform"]
+        _request_draft(prompt, context), context["platform"]
     )
     if _target(app, request.device) != target:
         raise TargetChanged("The project or device changed. Generate a new draft.")
     if not get_enabled() or not available():
         raise GenerationDisabled("AI configuration has been disabled.")
-    warnings = all_warnings(generator_warnings, commands)
+    warnings = all_warnings([*name_warnings, *generator_warnings], commands)
     draft_id = uuid.uuid4().hex
     with _DRAFT_LOCK:
         if not hasattr(app.state, "ai_snippet_drafts"):
@@ -550,6 +651,8 @@ def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
         "platform": context["platform"],
         "commands": commands,
         "warnings": warnings,
+        "interfaces": interfaces,
+        "prompt_used": prompt,
     }
 
 

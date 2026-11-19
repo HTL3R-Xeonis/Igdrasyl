@@ -109,7 +109,7 @@ def _login_page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Sign in</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-60">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-61">
 <style>
   html, body {{ height: 100%; }}
   body {{
@@ -118,7 +118,7 @@ def _login_page(
   }}
   body::before {{
     content: ""; position: fixed; inset: -20px;
-    background: url("/login-bg.jpg?v=ginnungagap-60") center center / cover no-repeat;
+    background: url("/login-bg.jpg?v=ginnungagap-61") center center / cover no-repeat;
     filter: blur(3px) brightness(0.62) saturate(1.1);
     transform: scale(1.05);
     z-index: -2;

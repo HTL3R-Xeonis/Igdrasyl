@@ -700,6 +700,34 @@ left alone, and the result lists the command as written. Linux, RouterOS, pfSens
 get every command exactly as written, one at a time, in a separate shell each (like any manual push). Nothing is
 saved to a device's startup configuration unless a command does it.
 
+**Interface names inside the guest.** The names of the topology (`eth0`, `eth1`, ...) do not exist in a VM on ESXi: a
+Linux guest calls its vmxnet3 NICs `ens160`, `ens192`, `ens224`, ... (by PCI slot, so a hot-added NIC can get a name that
+sorts between the others), a Windows guest `Ethernet0`, `Ethernet1`, ... For a `linux` or `windows` device the Operator
+therefore resolves the real names before it calls the generator (`app/guest_nics.py`): for each linked interface it takes
+the MAC of the VM's NIC that sits on the port group `<node>_<interface>` (ESXi), reads the guest's own NIC list through
+guest operations with the template's login (`ip -o link`; on Windows `Get-NetAdapter` in PowerShell) and joins the two
+by MAC. The generator then gets the guest names in `context.ports` and `context.links` and writes commands for them
+(`ip addr add ... dev ens192`, `-InterfaceAlias "Ethernet1"`); the review box lists `Interfaces: eth0 (guest ens192), ...`
+and the draft carries the same as `interfaces: [{"topology", "guest"}]`. Nothing is cached: every draft asks ESXi and the
+guest again. If VMware Tools is not running, the NIC list can not be read or a MAC is not found, nothing is blocked: the
+topology names are used and the draft carries the warning `could not resolve guest interface names, topology names used`
+(when only some interfaces fail: `could not resolve the guest interface name of eth1, topology name used`). Two guest
+interfaces with one MAC (a bridge on top of a NIC) are not guessed between. GNS3 nodes (their consoles use the real names)
+and appliances reached over serial (MikroTik, pfSense/OPNsense) are not changed.
+
+Because the generator only knows the guest names, the prompt is rewritten as well, but only when at least one name was
+really resolved (never in the fallback): every topology interface name in the text becomes the guest's name, ignoring
+case, in one pass with one pattern (longest names first, so `eth2` to `ens160` is never rewritten again by a later rule).
+Only whole tokens are replaced - not parts of words (`method0`), paths, host names or addresses (`10.0.0.eth0`) - and a
+VLAN suffix stays (`eth0.30` becomes `ens192.30`). The rewritten text is returned as `prompt_used`, and the review box shows
+`Prompt as sent: ...` (as plain text) only when it differs from what was typed. The 1500 character limit also applies to the
+rewritten prompt: if the longer guest names push it over, the draft is refused with a reason instead of being sent. In
+addition the context carries `interface_aliases` (`{"ens192": "eth0", ...}`, guest name to topology name, only for resolved
+interfaces whose names differ), so a loose mention such as "the port towards SW1" or an `eth0` the rewrite did not touch is
+still unambiguous for the generator. The field is only sent when there is an alias; a generator from before it answers
+`422` ("extra inputs are not permitted" for `interface_aliases`), and the Operator then repeats the request once without the
+field, so old and new generators both work.
+
 **The generator contract.** `POST {generator}/api/config-draft` with `{"prompt", "context"}` and the Bearer token.
 `200` answers `{"commands": [str, ...], "warnings": [str, ...]}` - 1 to 200 commands of 1 to 500 characters, one line
 each. `422` with a `detail` text means the generator refuses the request; the Operator shows that text to the user

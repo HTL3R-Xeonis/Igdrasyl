@@ -343,7 +343,22 @@ const aiSnippetStatus = document.getElementById("push-snippet-ai-status");
 const aiSnippetPush = document.getElementById("push-snippet-ai-push");
 const aiSnippetWarnings = document.getElementById("push-snippet-ai-warnings");
 const aiSnippetWarningList = document.getElementById("push-snippet-ai-warning-list");
+const aiSnippetInterfaces = document.getElementById("push-snippet-ai-interfaces");
+const aiSnippetPromptUsed = document.getElementById("push-snippet-ai-prompt-used");
+
+// The prompt as it went to the generator (interface names written as the guest has them), only if it differs from the input.
+function aiSnippetPromptNote(draft, entered) {
+  const used = typeof draft.prompt_used === "string" ? draft.prompt_used : "";
+  return used && used !== entered ? `Prompt as sent: ${used}` : "";
+}
 let aiSnippetDraft = null;
+
+// "eth0 (guest ens192), eth1 (guest ens224)": the topology name next to the name the VM really has (plain text).
+function aiSnippetInterfaceText(draft) {
+  return (draft.interfaces || [])
+    .map(item => item.topology === item.guest ? item.topology : `${item.topology} (guest ${item.guest})`)
+    .join(", ");
+}
 
 async function refreshSnippetNames() {
   const snippets = await settingsRequest("/config-snippets");
@@ -398,6 +413,10 @@ function showAiSnippetWarnings(warnings) {
 function clearAiSnippetDraft() {
   aiSnippetDraft = null;
   showAiSnippetWarnings([]);
+  aiSnippetInterfaces.hidden = true;
+  aiSnippetInterfaces.textContent = "";
+  aiSnippetPromptUsed.hidden = true;
+  aiSnippetPromptUsed.textContent = "";
   aiSnippetReview.hidden = true;
   aiSnippetStatus.textContent = "";
 }
@@ -474,6 +493,12 @@ aiSnippetForm.addEventListener("submit", async (event) => {
     });
     document.getElementById("push-snippet-ai-commands").textContent = aiSnippetDraft.commands.join("\n");
     showAiSnippetWarnings(aiSnippetDraft.warnings || []);
+    const interfaceText = aiSnippetInterfaceText(aiSnippetDraft);
+    aiSnippetInterfaces.textContent = interfaceText ? `Interfaces: ${interfaceText}` : "";
+    aiSnippetInterfaces.hidden = !interfaceText;
+    const promptNote = aiSnippetPromptNote(aiSnippetDraft, prompt);
+    aiSnippetPromptUsed.textContent = promptNote;
+    aiSnippetPromptUsed.hidden = !promptNote;
     aiSnippetReview.hidden = false;
     aiSnippetStatus.textContent = "Draft for " + aiSnippetDraft.device;
   } catch (error) {
@@ -493,8 +518,10 @@ aiSnippetPush.addEventListener("click", async () => {
     const warned = draft.warnings && draft.warnings.length
       ? `Warnings:\n${draft.warnings.map(text => `- ${text}`).join("\n")}\n\n`
       : "";
+    const interfaceText = aiSnippetInterfaceText(draft);
+    const named = interfaceText ? `Interfaces: ${interfaceText}\n\n` : "";
     if (!await showConfirm(
-      `Push these commands to ${draft.device}?\n\n${warned}${draft.commands.join("\n")}`,
+      `Push these commands to ${draft.device}?\n\n${named}${warned}${draft.commands.join("\n")}`,
       { title: "Push AI configuration", confirmLabel: "Push", danger: true }
     )) return;
     const { job_id } = await settingsRequest("/config-snippets/ai/push", {

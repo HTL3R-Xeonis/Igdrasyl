@@ -1795,6 +1795,7 @@ input:focus, select:focus, textarea:focus {
 #push-snippet-ai-form { display: grid; gap: 6px; margin-top: 8px; }
 #push-snippet-ai-form textarea { height: auto; }
 #push-snippet-ai-commands { white-space: pre-wrap; overflow-wrap: anywhere; }
+#push-snippet-ai-interfaces, #push-snippet-ai-prompt-used { margin: 8px 0; overflow-wrap: anywhere; }
 #push-snippet-ai-warnings {
   margin: 8px 0; padding: 8px 12px; border: 1px solid var(--warn, #c9a227); border-radius: 6px;
   overflow-wrap: anywhere;
