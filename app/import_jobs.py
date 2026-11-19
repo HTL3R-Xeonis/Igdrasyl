@@ -176,6 +176,11 @@ def run_import_job(app: FastAPI, job: ImportJob, zip_bytes: bytes) -> None:
             f"Import job {job.id} failed after {time.monotonic() - started:.1f}s: "
             f"{type(exc).__name__}: {exc}"
         )
+    except Exception as exc:
+        job.error = f"Unexpected deployment failure ({type(exc).__name__}). Check the server logs."
+        job.error_kind = "deploy_failed"
+        job.status = "error"
+        logger.exception(f"Import job {job.id} failed unexpectedly")
 
 
 def poll_progress(app: FastAPI, job: ImportJob) -> int:

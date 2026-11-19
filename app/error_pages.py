@@ -78,7 +78,7 @@ def unavailable_html(host: str | None, backend_state: str) -> str:
 <meta http-equiv="refresh" content="10">
 <title>Connection lost - Ginnungagap</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-64">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-65">
 <style>
   body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}
   .cl-page {{ min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }}
@@ -128,7 +128,7 @@ def render(status_code: int, detail: str | None = None) -> Response:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{status_code} - {escape(title)}</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-64">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-65">
 <style>
   /* styles.css lays <body> out as the single-page app - this is its own page. */
   body {{ display: block; height: auto; min-height: 100vh; overflow: auto; }}

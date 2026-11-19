@@ -637,6 +637,10 @@ the live canvas gets the same except where a change would touch real VMs.
 saved - it saves the design to the library under that name and deploys it in one step (a different
 name than the open project's saves a new project). Save Project also just asks for a name.
 
+When preparing a different project in gateway mode, its backend restarts before activation so it loads the selected
+topology path. Deployment preview checks the loaded project as well as the saved selection. A deployment request with
+a stale project receives HTTP 409. Unexpected failures in an import worker finish the job with an error status.
+
 **Deploy from the warning banner**: when the project selected for the active host
 does not exist in GNS3 yet ("No GNS3 project named ... has this topology actually been
 deployed?"), the banner shows a **Deploy project...** button next to Retry. It asks

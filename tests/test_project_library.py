@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from src.graph.environment import Environment
+from src.settings import Settings
 
 from app import design, project_library, project_selection
 
@@ -141,7 +142,10 @@ def test_open_and_save_library_project_from_design_canvas(client, app_state):
     assert project_library.load_design(project["id"]).layout["R1"] == {"x": 5, "y": 6}
 
 
-def test_deployment_preview_is_read_only_and_descriptive(client, tmp_path, monkeypatch):
+@pytest.mark.parametrize("loaded", [True, False])
+def test_deployment_preview_is_read_only_and_descriptive(
+    client, tmp_path, monkeypatch, loaded
+):
     profiles = tmp_path / "profiles"
     profiles.mkdir()
     host = profiles / "host.yml"
@@ -158,17 +162,28 @@ def test_deployment_preview_is_read_only_and_descriptive(client, tmp_path, monke
         "nodes:\n  - {names: [R1, R2], role: ROUTER, image: VPCS}\nedges:\n  - [R1, eth0, R2, eth0]\n",
     )
     project_selection.save_selection("host.yml", "", project["id"])
+    monkeypatch.setattr(
+        Settings,
+        "TOPOLOGY_FILE",
+        str(project_library.topology_path(project["id"])) if loaded else None,
+    )
 
     response = client.get(f"/projects/{project['id']}/deploy-preview/host.yml")
     assert response.status_code == 200
     preview = response.json()
     assert preview["host"]["active"] is True
     assert preview["selected"] is True
-    assert preview["requires_restart"] is False
+    assert preview["requires_restart"] is (not loaded)
     assert preview["node_count"] == 2
     assert preview["edge_count"] == 1
     assert preview["roles"] == {"ROUTER": 2}
     assert preview["mode"] == "full"
+    if not loaded:
+        with patch("app.import_jobs.start_job") as start:
+            response = client.post(f"/projects/{project['id']}/deploy/host.yml")
+        assert response.status_code == 409
+        assert "Restart" in response.json()["detail"]
+        start.assert_not_called()
 
 
 def test_deploy_requires_active_selected_host(client, tmp_path, monkeypatch):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Annotated, Any
 
 import requests
@@ -366,7 +367,21 @@ def download_library_project(project_id: str):
 @app.get("/projects/{project_id}/deploy-preview/{filename}")
 def preview_library_deployment(project_id: str, filename: str):
     preview = settings_call(project_library.deployment_preview, project_id, filename)
-    return {**preview, "held": holds.entry(project_id) is not None}
+    requires_restart = preview["requires_restart"] or (
+        preview["host"]["active"] and not _project_loaded(project_id)
+    )
+    return {
+        **preview,
+        "requires_restart": requires_restart,
+        "held": holds.entry(project_id) is not None,
+    }
+
+
+def _project_loaded(project_id: str) -> bool:
+    topology_file = Settings.TOPOLOGY_FILE
+    return bool(topology_file) and Path(topology_file).resolve() == (
+        project_library.topology_path(project_id).resolve()
+    )
 
 
 @app.post("/projects/{project_id}/deploy/{filename}")
@@ -383,6 +398,11 @@ def deploy_library_project(project_id: str, filename: str):
             409,
             "This project is on hold - resume it instead of deploying it again "
             "(its VMs and GNS3 project are kept).",
+        )
+    if not _project_loaded(project_id):
+        raise HTTPException(
+            409,
+            "Restart this host's backend to load the selected project before deploying.",
         )
     clash = holds.held_gns3_names(exclude_project_id=project_id).get(
         app.state.project_name

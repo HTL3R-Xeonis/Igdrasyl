@@ -4,6 +4,8 @@ import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app import import_jobs
 from app.config_push import DeviceResult
 
@@ -159,6 +161,18 @@ def test_run_import_job_marks_error_on_deploy_failure(app_state):
 
     assert job.status == "error"
     assert job.error_kind == "deploy_failed"
+
+
+@pytest.mark.parametrize("error", [TypeError("bad path"), KeyError("missing field")])
+def test_unexpected_import_failure_finishes_the_job(app_state, error):
+    app = _fake_app(app_state)
+    job = import_jobs.create_job(app, {"R1"})
+    with patch("app.project_bundle.apply_import", side_effect=error):
+        import_jobs.run_import_job(app, job, b"irrelevant")
+    assert job.status == "error"
+    assert job.error_kind == "deploy_failed"
+    assert type(error).__name__ in job.error
+    assert str(error) not in job.error
 
 
 def test_run_import_job_auto_pushes_when_result_says_so(app_state):

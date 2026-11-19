@@ -306,6 +306,17 @@ async function restartIntoProject(preview) {
   const restarting = "Restarting with the selected host and project…";
   if (deploymentDialog.open) deploymentStatus.textContent = restarting;
   else setMenubarBusy(restarting);
+  if (await isGatewayMode()) {
+    try {
+      await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/restart`, { method: "POST" });
+      await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, { method: "POST" });
+    } catch (error) {
+      sessionStorage.removeItem("pendingLibraryDeployment");
+      throw error;
+    }
+    window.location.reload();
+    return;
+  }
   try { await fetch(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
   if (await connectionMonitor.waitUntilBack(30000)) { window.location.reload(); return; }
   throw new Error("Server did not return after restart");
