@@ -306,6 +306,22 @@
         </form>
         <p id="push-snippet-ai-status" role="status"></p>
         <div id="push-snippet-ai-review" hidden>
+          <div class="info-row">
+            <strong>Commands to review</strong>
+            <button class="info-btn" type="button" aria-label="More information">i</button>
+            <span class="info-popover" hidden>
+              The commands come from the generator and are checked there and here. Nothing is sent
+              before you confirm. Flagged commands stay in the draft - the warnings only point out what
+              deserves a second look. On pushing, Cisco IOS commands are entered in global configuration
+              mode and left again afterwards (also after an error), a Windows VM runs each command in
+              PowerShell, and every other device gets them as written. Nothing is saved to the
+              device's startup configuration unless a command does it.
+            </span>
+          </div>
+          <div id="push-snippet-ai-warnings" role="alert" hidden>
+            <strong>Warnings</strong>
+            <ul id="push-snippet-ai-warning-list"></ul>
+          </div>
           <pre id="push-snippet-ai-commands"></pre>
           <button class="toolbar-btn" id="push-snippet-ai-push" type="button">Review and push…</button>
         </div>

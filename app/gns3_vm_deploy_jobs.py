@@ -170,8 +170,7 @@ def run_deploy_job(
 
         job.stage = "looking up the GNS3 VM template"
         ova_filename = ova_templates.filename_for(template_id)
-        # Imported by the OVA deploy service straight from the template share
-        # onto the ESXi host: nothing multi-GB passes through this machine.
+        # The ESXi host pulls the OVA itself from the template file server: nothing multi-GB passes through this machine.
         ip_address = deploy_fresh_gns3_vm(
             app.state.esxi_connection,
             Settings.ESXI.GNS3_VM_NAME,

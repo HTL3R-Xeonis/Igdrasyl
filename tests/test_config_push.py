@@ -1,3 +1,5 @@
+import base64
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -498,7 +500,9 @@ def test_one_device_that_raises_does_not_take_the_others_down(graph):
     app.state.esxi_connection.get_vm.return_value = MagicMock()
     boom = {"VM1": RuntimeError("kaboom")}
 
-    def fake_guest_ops(node, commands, esxi, progress=None, continue_on_error=False):
+    def fake_guest_ops(
+        node, commands, esxi, progress=None, continue_on_error=False, native_shell=False
+    ):
         if node.name in boom:
             raise boom[node.name]
         return cp.DeviceResult(device=node.name, transport="guest_ops", ok=True)
@@ -595,11 +599,15 @@ def test_push_all_processes_network_devices_first_but_returns_the_order_asked_fo
     app = _app_with_nodes(VM1=("ON_ESXI", "debian"), SW1=("ON_GNS3", "Cisco IOSvL2"))
     order: list[str] = []
 
-    def fake_guest(node, commands, esxi, progress, continue_on_error=False):
+    def fake_guest(
+        node, commands, esxi, progress, continue_on_error=False, native_shell=False
+    ):
         order.append(node.name)
         return _result(node.name, ok=True)
 
-    def fake_netmiko(node, commands, ip, port, progress, continue_on_error=False):
+    def fake_netmiko(
+        node, commands, ip, port, progress, continue_on_error=False, native_shell=False
+    ):
         order.append(node.name)
         return _result(node.name, ok=True)
 
@@ -619,3 +627,161 @@ def test_push_all_processes_network_devices_first_but_returns_the_order_asked_fo
 
     assert order == ["SW1", "VM1"]
     assert [r.device for r in results] == ["VM1", "SW1"]
+
+
+# ---- native_shell: commands the way the device's own shell expects them ----
+
+
+async def _recording_ios(received, fail_on, reader, writer):
+    """Like _fake_ios, but remembers every line the console was sent."""
+    writer.write(b"\r\nR1#")
+    await writer.drain()
+    buf = b""
+    try:
+        while True:
+            chunk = await reader.read(1)
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+            buf += chunk
+            if chunk in (b"\n", b"\r"):
+                line = buf.strip().decode(errors="replace")
+                buf = b""
+                if line:
+                    received.append(line)
+                if line == fail_on:
+                    writer.write(b"\r\n% Invalid input detected\r\nR1#")
+                else:
+                    writer.write(b"\r\nR1#")
+                await writer.drain()
+    except Exception:
+        pass
+
+
+def _push_ios(graph, fake_tcp_server, commands, fail_on=None, node="R1", **options):
+    received: list[str] = []
+    port = fake_tcp_server(lambda r, w: _recording_ios(received, fail_on, r, w))
+    result = cp._push_via_netmiko(
+        graph.nodes[node], commands, "127.0.0.1", port, **options
+    )
+    # Netmiko's own session set-up (terminal width/length) is not part of the push
+    return result, [line for line in received if not line.startswith("terminal ")]
+
+
+def test_native_shell_enters_and_leaves_ios_configuration_mode(graph, fake_tcp_server):
+    result, received = _push_ios(
+        graph, fake_tcp_server, ["vlan 30", "name Lab"], native_shell=True
+    )
+    assert result.ok is True
+    assert received == ["configure terminal", "vlan 30", "name Lab", "end"]
+    # the wrapping is not a command of the push: result and progress count only the given ones
+    assert [c.command for c in result.commands] == ["vlan 30", "name Lab"]
+    assert result.total_commands == 2
+
+
+def test_native_shell_leaves_configuration_mode_after_a_failed_command(
+    graph, fake_tcp_server
+):
+    result, received = _push_ios(
+        graph,
+        fake_tcp_server,
+        ["good", "bad command", "never runs"],
+        fail_on="bad command",
+        native_shell=True,
+    )
+    assert result.ok is False
+    assert received == ["configure terminal", "good", "bad command", "end"]
+
+
+def test_native_shell_stops_when_configuration_mode_cannot_be_entered(
+    graph, fake_tcp_server
+):
+    result, received = _push_ios(
+        graph,
+        fake_tcp_server,
+        ["vlan 30"],
+        fail_on="configure terminal",
+        native_shell=True,
+    )
+    assert result.ok is False and result.executed == 0
+    assert "configuration mode" in result.error
+    assert received == ["configure terminal"]  # no command ran, no stray "end"
+
+
+def test_without_native_shell_the_console_gets_the_commands_verbatim(
+    graph, fake_tcp_server
+):
+    result, received = _push_ios(graph, fake_tcp_server, ["configure terminal", "end"])
+    assert result.ok is True
+    assert received == ["configure terminal", "end"]
+
+
+def test_native_shell_leaves_consoles_that_are_not_cisco_ios_alone(
+    graph, fake_tcp_server
+):
+    # SW1 is a VPCS node: generic telnet, no configuration mode
+    result, received = _push_ios(
+        graph, fake_tcp_server, ["ip 10.0.0.8/24"], node="SW1", native_shell=True
+    )
+    assert result.ok is True
+    assert received == ["ip 10.0.0.8/24"]
+
+
+def _guest_programs(graph, image, commands, native_shell):
+    """The programs a guest-operations push starts in a fake VM: (path, arguments) per command."""
+    node = SimpleNamespace(name="VM1", image=image)
+    fake_esxi = MagicMock()
+    process_manager = fake_esxi.content.guestOperationsManager.processManager
+    process_manager.StartProgramInGuest.return_value = 7
+    process_manager.ListProcessesInGuest.return_value = [
+        MagicMock(endTime="t", exitCode=0)
+    ]
+    with patch.object(cp, "guest_credentials_for_image", return_value=("u", "p")):
+        result = cp._push_via_guest_ops(
+            node, commands, fake_esxi, native_shell=native_shell
+        )
+    assert result.ok is True
+    return [
+        (call.args[2].programPath, call.args[2].arguments)
+        for call in process_manager.StartProgramInGuest.call_args_list
+    ], result
+
+
+def test_native_shell_runs_windows_commands_in_powershell(graph):
+    command = 'Get-NetIPAddress | Where-Object { $_.IPAddress -like "10.*" }'
+    programs, result = _guest_programs(graph, "Windows 10", [command], True)
+    path, arguments = programs[0]
+    assert path.endswith("cmd.exe")
+    assert "powershell -NoProfile -NonInteractive" in arguments
+    encoded = arguments.split("-EncodedCommand ")[1].split(")")[0]
+    assert command in base64.b64decode(encoded).decode("utf-16-le")
+    assert (
+        result.commands[0].command == command
+    )  # the result names the command as given
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cmd /c ver", "powershell -Command Get-Date", "pwsh -c 1", "PowerShell.exe 1"],
+)
+def test_a_windows_command_that_names_its_interpreter_is_not_wrapped(command):
+    assert cp.windows_powershell_command(command) == command
+
+
+def test_windows_commands_are_verbatim_without_native_shell(graph):
+    programs, _ = _guest_programs(graph, "Windows 10", ["ipconfig"], False)
+    assert "ipconfig" in programs[0][1] and "-EncodedCommand" not in programs[0][1]
+
+
+def test_native_shell_leaves_linux_commands_to_bash_as_they_are(graph):
+    programs, _ = _guest_programs(graph, "debian", ["ip link set dev eth0 up"], True)
+    path, arguments = programs[0]
+    assert path == "/bin/bash" and "ip link set dev eth0 up" in arguments
+    assert "powershell" not in arguments
+
+
+def test_device_spec_native_shell_is_off_by_default():
+    assert cp.DeviceSpec(commands=["a"]).native_shell is False
+    spec = cp.normalize({"X": {"commands": ["a"], "native_shell": True}})["X"]
+    assert spec.native_shell is True

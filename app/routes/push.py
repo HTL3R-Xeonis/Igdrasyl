@@ -67,7 +67,7 @@ def generate_ai_snippet(request: ai_snippets.GenerateRequest, user: AiUser) -> d
         ) from exc
     except ai_snippets.InvalidDraft as exc:
         raise HTTPException(
-            422, str(exc) or "Describe supported settings for the selected device."
+            422, str(exc) or "The generator did not return a usable draft."
         ) from exc
     except ai_snippets.GeneratorUnavailable as exc:
         raise HTTPException(502, "The snippet generator is unavailable.") from exc

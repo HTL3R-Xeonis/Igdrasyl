@@ -341,6 +341,8 @@ const aiSnippetGenerate = document.getElementById("push-snippet-ai-generate");
 const aiSnippetReview = document.getElementById("push-snippet-ai-review");
 const aiSnippetStatus = document.getElementById("push-snippet-ai-status");
 const aiSnippetPush = document.getElementById("push-snippet-ai-push");
+const aiSnippetWarnings = document.getElementById("push-snippet-ai-warnings");
+const aiSnippetWarningList = document.getElementById("push-snippet-ai-warning-list");
 let aiSnippetDraft = null;
 
 async function refreshSnippetNames() {
@@ -383,8 +385,19 @@ aiSnippetToggle.addEventListener("click", async () => {
   }
 });
 
+// Warnings are plain text (textContent only): they come from the generator and from this program.
+function showAiSnippetWarnings(warnings) {
+  aiSnippetWarningList.replaceChildren(...warnings.map(text => {
+    const item = document.createElement("li");
+    item.textContent = text;
+    return item;
+  }));
+  aiSnippetWarnings.hidden = warnings.length === 0;
+}
+
 function clearAiSnippetDraft() {
   aiSnippetDraft = null;
+  showAiSnippetWarnings([]);
   aiSnippetReview.hidden = true;
   aiSnippetStatus.textContent = "";
 }
@@ -460,6 +473,7 @@ aiSnippetForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ device, prompt }),
     });
     document.getElementById("push-snippet-ai-commands").textContent = aiSnippetDraft.commands.join("\n");
+    showAiSnippetWarnings(aiSnippetDraft.warnings || []);
     aiSnippetReview.hidden = false;
     aiSnippetStatus.textContent = "Draft for " + aiSnippetDraft.device;
   } catch (error) {
@@ -476,8 +490,11 @@ aiSnippetPush.addEventListener("click", async () => {
   setAiSnippetBusy(true);
   manualPush.disabled = true;
   try {
+    const warned = draft.warnings && draft.warnings.length
+      ? `Warnings:\n${draft.warnings.map(text => `- ${text}`).join("\n")}\n\n`
+      : "";
     if (!await showConfirm(
-      `Push these commands to ${draft.device}?\n\n${draft.commands.join("\n")}`,
+      `Push these commands to ${draft.device}?\n\n${warned}${draft.commands.join("\n")}`,
       { title: "Push AI configuration", confirmLabel: "Push", danger: true }
     )) return;
     const { job_id } = await settingsRequest("/config-snippets/ai/push", {

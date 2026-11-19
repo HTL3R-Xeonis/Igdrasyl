@@ -16,7 +16,7 @@ API_SETTINGS = (
     ("esxi_template_server_url", "ESXI_TEMPLATE_SERVER_URL"),
     ("gns3_template_server_url", "GNS3_TEMPLATE_SERVER_URL"),
     ("topology_generator_url", "TOPOLOGY_GENERATOR_URL"),
-    ("ova_deploy_url", "OVA_DEPLOY_URL"),
+    ("ova_base_url", "OVA_BASE_URL"),
 )
 
 

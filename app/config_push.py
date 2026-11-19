@@ -22,6 +22,8 @@ which a family of commands representing modal CLI transitions needs.
 
 from __future__ import annotations
 
+import base64
+import re
 import time
 from collections.abc import Callable
 from typing import Any, Literal
@@ -79,10 +81,15 @@ class DeviceSpec(BaseModel):
     without answer, a grep without hit); the device still counts as failed. Default: stop at
     the first failing command. A command that could not even be started, a lost connection
     and a failed @reboot always stop the device.
+    native_shell: run the commands the way the device's own shell expects them - a Cisco IOS console
+    gets them in global configuration mode (entered before the first command, left again afterwards,
+    also after a failure) and a Windows VM runs each one in PowerShell instead of cmd.exe; every other
+    device gets them verbatim. Default: verbatim everywhere.
     """
 
     commands: list[str]
     continue_on_error: bool = False
+    native_shell: bool = False
     via: Literal["auto", "guest_ops", "serial"] = "auto"
     profile: str | None = None
     username: str | None = None
@@ -175,6 +182,29 @@ def _looks_like_ios_error(output: str) -> bool:
     return any(marker in lowered for marker in _IOS_ERROR_MARKERS)
 
 
+# A command that already names its interpreter is left alone by native_shell.
+_EXPLICIT_WINDOWS_SHELL = re.compile(
+    r"^\s*(?:cmd|powershell|pwsh)(?:\.exe)?(?:\s|$)", re.IGNORECASE
+)
+
+
+def windows_powershell_command(command: str) -> str:
+    """
+    The cmd.exe command line that runs `command` in PowerShell. The script travels base64-encoded
+    (-EncodedCommand), so quotes, pipes and % signs reach PowerShell exactly as written instead of
+    being interpreted by cmd.exe first; -OutputFormat Text keeps progress and error records out of
+    the output as XML. A command that starts with cmd, powershell or pwsh is returned unchanged.
+    """
+    if _EXPLICIT_WINDOWS_SHELL.match(command):
+        return command
+    script = f"$ProgressPreference = 'SilentlyContinue'; {command}"
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return (
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass "
+        f"-OutputFormat Text -EncodedCommand {encoded}"
+    )
+
+
 def _push_via_netmiko(
     node: GenericNode,
     commands: list[str],
@@ -182,6 +212,7 @@ def _push_via_netmiko(
     console_port: int,
     progress: Callable[[int, int], None] | None = None,
     continue_on_error: bool = False,
+    native_shell: bool = False,
 ) -> DeviceResult:
     from netmiko import ConnectHandler
     from netmiko.exceptions import (
@@ -235,7 +266,28 @@ def _push_via_netmiko(
     results: list[CommandResult] = []
     overall_ok = True
     not_ready = False
+    config_mode = native_shell and device_type == "cisco_ios_telnet"
+    in_config_mode = False
     try:
+        if config_mode:
+            try:
+                entered = conn.send_command_timing("configure terminal")
+            except ReadTimeout:
+                entered = None
+            if entered is None or _looks_like_ios_error(entered):
+                return DeviceResult(
+                    device=node.name,
+                    transport="netmiko",
+                    ok=False,
+                    error=(
+                        "the console did not answer in time (the device is still booting)"
+                        if entered is None
+                        else f"could not enter configuration mode: {entered.strip()[:300]}"
+                    ),
+                    not_ready=entered is None,
+                    total_commands=len(commands),
+                )
+            in_config_mode = True
         for command in commands:
             try:
                 output = conn.send_command_timing(command)
@@ -263,6 +315,15 @@ def _push_via_netmiko(
                 if not continue_on_error:
                     break
     finally:
+        if in_config_mode:
+            try:
+                conn.send_command_timing(
+                    "end"
+                )  # never leave the console in configuration mode
+            except Exception as exc:
+                logger.warning(
+                    f"Config push: could not leave configuration mode: {exc}"
+                )
         conn.disconnect()
 
     return _finish(
@@ -395,6 +456,7 @@ def _push_via_guest_ops(
     esxi_connection: Any,
     progress: Callable[[int, int], None] | None = None,
     continue_on_error: bool = False,
+    native_shell: bool = False,
 ) -> DeviceResult:
     from pyVmomi import vim
 
@@ -437,7 +499,9 @@ def _push_via_guest_ops(
                 process_manager,
                 vm,
                 auth,
-                command,
+                windows_powershell_command(command)
+                if native_shell and is_windows
+                else command,
                 is_windows,
                 file_manager=file_manager,
                 esxi_host=Settings.ESXI.IP,
@@ -828,6 +892,7 @@ def push_all(
                     console_port,
                     progress,
                     spec.continue_on_error,
+                    spec.native_shell,
                 )
                 if result.not_ready:
                     result.error = _with_load_hint(result.error, app)
@@ -859,6 +924,7 @@ def push_all(
                             app.state.esxi_connection,
                             progress,
                             spec.continue_on_error,
+                            spec.native_shell,
                         )
                     )
             else:

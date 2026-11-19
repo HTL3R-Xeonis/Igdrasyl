@@ -82,8 +82,8 @@ def list_public() -> list[dict]:
 
 def filename_for(template_id: str) -> str:
     """
-    The exact OVA filename on the template share for a catalog id - what the
-    OVA deploy service takes (it imports straight from that share).
+    The exact OVA filename on the template file server for a catalog id - what
+    the ESXi host is told to pull.
     :raises ValueError: an invalid id
     :raises RuntimeError: the catalog is unavailable, or has no such template
     """

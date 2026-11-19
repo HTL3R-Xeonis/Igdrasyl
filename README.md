@@ -341,8 +341,9 @@ For a first deployment without those settings, the Operator can select the only
 GNS3 OVA from the catalog and reuse a standard port group on the ESXi management
 network. It prefers `VM Network` when it shares the same uplink switch and VLAN
 as the management VMkernel interface. Select the missing settings in host
-settings when discovery is inconclusive. The OVA deploy service imports the
-template from its share and needs valid credentials for the target ESXi host.
+settings when discovery is inconclusive. The ESXi host pulls the
+template OVA itself from the HTTP server named by `api.ova_base_url`, so that server has to be
+reachable from the host, and the Operator needs valid credentials for the target ESXi host.
 
 An existing same-named VM is always powered off and renamed as a
 timestamped backup first, never touched destructively by default. Two
@@ -426,7 +427,7 @@ profile. Optional values, booleans, ports, protected port-group lists, and MAC
 ranges have dedicated inputs and validation.
 
 **Service addresses**: a host profile must name the four services it uses (`api.esxi_template_server_url`,
-`api.gns3_template_server_url`, `api.topology_generator_url`, `api.ova_deploy_url`) - or the matching environment
+`api.gns3_template_server_url`, `api.topology_generator_url`, `api.ova_base_url` - the HTTP server the ESXi hosts pull the template OVAs from) - or the matching environment
 variable must (`ESXI_TEMPLATE_SERVER_URL`, ..., which is how the appliance points everything somewhere else). The built-in
 lab addresses of TopologyBuilder are not used as a fallback: activating a profile without them is refused with a message
 naming the missing keys (HTTP 400 on the gateway), and a backend started with such a profile stops with the same text in
@@ -439,9 +440,7 @@ does not accept passwords in YAML, so they are stored apart from it, per host, i
 more). The Operator refuses to open an ESXi session if its password is missing.
 Creating the live topology backend requires both passwords. The error names
 the missing service and points to Host settings > Credentials.
-The ESXi password of the active host also travels
-with every OVA deploy request to the deploy service, which has no password list of its
-own. They are write-only: the server only reports
+They are write-only: the server only reports
 *whether* one is stored, an empty field keeps it, and they never appear in the
 YAML, the preview, the Test connections request or the log. Deleting a host
 deletes its stored passwords; a changed password takes effect after
@@ -676,25 +675,56 @@ The library is shared across projects on this Operator instance. Files are store
 (`TOPOLOGYOPERATOR_CONFIG_SNIPPETS_DIR`); keep credentials out of shared snippets.
 
 **View → Config Push → Generate with AI** takes a device and a prompt. The Operator supplies the
-active device's role, image, platform, interfaces and adjacent links to the model. Every device of the
-active project is listed, with the platform it is written for; the Operator renders commands from
-validated settings only (the model never writes commands):
+active device's role, image, platform, interfaces and adjacent links to the generator service, which
+answers with the device's real commands - for any device and any request, there is no list of
+allowed settings. Every device that can receive a push is offered, with the platform it is written for:
 
-| Platform | Which devices | Settings | Pushed through |
+| Platform | Which devices | Commands | Pushed through, and how |
 |---|---|---|---|
-| Cisco IOSvL2 | GNS3 `Cisco IOSvL2` | VLAN creation, Access VLAN, port descriptions | console (Netmiko) |
-| Cisco IOSv | GNS3 `Cisco IOSv` | IPv4 on routed ports, port descriptions | console (Netmiko) |
-| Linux | any ESXi VM that is not Windows, MikroTik or pfSense/OPNsense (ubuntu, debian, mint, rocky ...) | IPv4 on an interface (`ip address replace`, runtime only, lost on reboot), hostname (`hostnamectl`) | guest operations (VMware Tools) |
-| Windows | ESXi Windows VMs | IPv4 on an interface (`netsh`) | guest operations |
-| RouterOS | ESXi MikroTik VMs | IPv4 on an interface, identity (hostname) | serial console |
-| VPCS | GNS3 `VPCS` | IPv4 address, PC name (followed by `save`) | console (Netmiko) |
+| `iosvl2`, `iosv` | GNS3 `Cisco IOSvL2` / `Cisco IOSv` | Cisco IOS lines without `configure terminal`, `end` or `write` | console (Netmiko); entered in global configuration mode, left again afterwards (also after an error) |
+| `linux` | any ESXi VM that is not Windows, MikroTik or pfSense/OPNsense | shell commands as root | guest operations (`/bin/bash -c` with the template's root login) or serial console, as written |
+| `windows` | ESXi Windows VMs | PowerShell or cmd one-liners | guest operations; each command runs in PowerShell (see below) |
+| `routeros` | ESXi MikroTik VMs | RouterOS terminal commands | serial console, as written |
+| `pfsense` | ESXi pfSense / OPNsense VMs | shell commands as root | serial console (menu option 8, shell), as written |
+| `vpcs` | GNS3 `VPCS` | VPCS commands | console (Netmiko), as written |
+| `other` | any other GNS3 template with a telnet console | the node's own console commands | console (Netmiko), as written |
 
-Devices without a renderer (pfSense/OPNsense, other GNS3 templates) stay in the list, greyed out,
-with a one-line reason. The list follows the canvas: a node added while the panel is open appears
-without closing it. `GET /config-snippets/ai/devices` carries the same list with the reasons.
-**Review and push…** confirms the target and commands before the normal Config Push job runs.
-The push appears in History. A draft belongs to its author and target, can be used once, and
-expires in ten minutes.
+The wrapping is the push path's own `native_shell` option (`DeviceSpec.native_shell`, also usable in a manual
+push as `{"commands": [...], "native_shell": true}`; default off = every command verbatim). On a Cisco IOS console it
+sends `configure terminal` first and `end` last, even when a command failed, so the console is never left in
+configuration mode; neither line shows up in the results. On a Windows VM each command is run as
+`powershell -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ...` (the script travels base64-encoded, so
+quotes, pipes and `%` reach PowerShell unchanged); a command that already starts with `cmd`, `powershell` or `pwsh` is
+left alone, and the result lists the command as written. Linux, RouterOS, pfSense/OPNsense, VPCS and other GNS3 nodes
+get every command exactly as written, one at a time, in a separate shell each (like any manual push). Nothing is
+saved to a device's startup configuration unless a command does it.
+
+**The generator contract.** `POST {generator}/api/config-draft` with `{"prompt", "context"}` and the Bearer token.
+`200` answers `{"commands": [str, ...], "warnings": [str, ...]}` - 1 to 200 commands of 1 to 500 characters, one line
+each. `422` with a `detail` text means the generator refuses the request; the Operator shows that text to the user
+unchanged. Any other answer is reported as "generator unavailable".
+
+**Safety model.** The commands are never pushed without a human step:
+
+- *Defensive validation.* The Operator checks the reply again: 1 to 200 commands, at most 500 characters and one plain
+  line each (no control characters, no NUL, no markdown fence), blank lines dropped, at most 20 000 bytes in total. A Cisco
+  draft that enters or leaves configuration mode itself has those lines removed, because the push does it. Anything else
+  is refused with a reason; no command is ever restricted by kind.
+- *Advisory warnings.* The Operator scans the commands locally and adds its own warnings to the generator's: restart or
+  power-off (`reload`, `reboot`, `shutdown /r`, `@reboot`), erasing or formatting (`erase`, `write erase`, `format`,
+  `mkfs`, `dd of=/dev/`), recursive deletion (`rm -rf`, `Remove-Item -Recurse`, `rd /s`), shutting down an interface or
+  network service (`shutdown`, `ip link set ... down`, `Disable-NetAdapter`), firewall flushing, default-route changes
+  and credentials (`password`, `secret`, `username`, `chpasswd`; these warnings never repeat the command). The scan is
+  a short pattern list, not a proof of safety. Flagged commands stay in the draft - warnings inform the reviewer, they
+  never block.
+- *Review.* The draft and its warnings are shown as plain text; **Review and push…** asks again with the warnings in the
+  confirmation. The draft belongs to its author and target, can be used once and expires in ten minutes. The push only
+  starts if the device and the project are still the ones the draft was made for.
+- *Admin switch and audit.* The feature is off until an administrator enables it (below) and is checked again right
+  before the push. Every push appears in History / `GET /config-push/audit` with the note `AI snippet`.
+
+Devices stay in the list; the list follows the canvas, a node added while the panel is open appears without closing it.
+`GET /config-snippets/ai/devices` carries the same list. **Review and push…** runs the normal Config Push job.
 
 An administrator enables the feature in **Admin Panel → AI configuration**. It defaults to off.
 The Operator stores the switch in `ai_config.json` and checks it again before pushing.
@@ -763,6 +793,9 @@ Windows is not supported. A device stops at its first failing command, the other
 - **Carrying on after an error**: by default a device stops at its first failing command. `"continue_on_error": true` in the
   object keeps running the remaining commands (useful for a ping without answer or a `grep` without hit); the device still
   counts as failed. A command that could not even be started, a lost connection and a failed `@reboot` always stop it.
+- **The device's own shell**: `"native_shell": true` in the object enters Cisco IOS global configuration mode before the commands
+  and leaves it afterwards, and runs Windows commands in PowerShell; every other device gets the commands verbatim (the AI
+  drafts use this, see Generate with AI).
 
 **Restarting a device in the middle of a push.** Two lines in a device's command list are not sent but steer the push:
 `@reboot [seconds]` restarts the device, waits until it is back and then carries on with the next commands;

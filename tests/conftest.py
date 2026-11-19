@@ -41,7 +41,7 @@ def _service_urls_in_the_environment(monkeypatch):
         "ESXI_TEMPLATE_SERVER_URL",
         "GNS3_TEMPLATE_SERVER_URL",
         "TOPOLOGY_GENERATOR_URL",
-        "OVA_DEPLOY_URL",
+        "OVA_BASE_URL",
     ):
         monkeypatch.setenv(name, "http://services.test:8000")
 

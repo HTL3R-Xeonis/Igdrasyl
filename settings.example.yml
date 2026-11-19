@@ -108,5 +108,6 @@ api:
   # language prompt into a topology config, same one TopologyBuilder's
   # own `generate`/`generate-deploy` CLI commands use.
   topology_generator_url: http://10.20.20.172:8002
-  # Imports OVAs onto the ESXi host (GNS3 VM deploy, adding nodes); it logs in with this profile's ESXi password.
-  ova_deploy_url: http://10.20.20.172:8003
+  # Base URL of the HTTP server that serves the template OVA files; the ESXi host pulls each OVA from
+  # <ova_base_url>/<template source dir>/<file> itself (GNS3 VM deploy, adding nodes).
+  ova_base_url: http://10.20.20.181:80

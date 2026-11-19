@@ -25,6 +25,7 @@ from app import push_audit
 from app.config_push import (
     DEFAULT_WAIT_SECONDS,
     DeviceResult,
+    DeviceSpec,
     normalize,
     push_all,
     push_all_waiting,
@@ -64,6 +65,16 @@ class PushJob:
         }
 
 
+def _storable(devices: dict[str, Any]) -> dict[str, Any]:
+    """The pushed configs as plain JSON data (a DeviceSpec becomes its non-default fields), as a project bundle stores them."""
+    return {
+        name: entry.model_dump(exclude_defaults=True)
+        if isinstance(entry, DeviceSpec)
+        else entry
+        for name, entry in devices.items()
+    }
+
+
 def _run(
     app: FastAPI,
     job: PushJob,
@@ -82,7 +93,7 @@ def _run(
         with target_lock, push_audit.track(job.audit_note) as audit:
             if verify_target:
                 verify_target()
-                app.state.last_config_push = devices
+                app.state.last_config_push = _storable(devices)
             if wait_seconds > 0:
                 job.results = push_all_waiting(
                     devices,
@@ -138,7 +149,7 @@ def start_job(
     )
     app.state.push_job = job
     if verify_target is None:
-        app.state.last_config_push = devices
+        app.state.last_config_push = _storable(devices)
     threading.Thread(
         target=_run, args=(app, job, devices, wait_seconds, verify_target), daemon=True
     ).start()

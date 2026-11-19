@@ -23,6 +23,6 @@ api:
   # esxi_template_server_url: http://10.20.20.171:8000
   # gns3_template_server_url: http://10.20.20.171:8001
   # topology_generator_url: http://10.20.20.172:8002
-  # ova_deploy_url: http://10.20.20.172:8003
+  # ova_base_url: http://10.20.20.181:80
 # generate_max_retries: 3
 # incremental_deploy: true

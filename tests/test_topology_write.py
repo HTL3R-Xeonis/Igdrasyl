@@ -466,12 +466,12 @@ def test_a_failed_add_node_restores_the_topology_file(app_state, temp_topology_f
 
     def failing_add(file, name, role, image):
         temp_topology_file.write_text(before + "\n# half written\n")
-        raise RuntimeError("OVA deploy request failed")
+        raise RuntimeError("OVA import failed")
 
     backend = MagicMock()
     backend.add_node.side_effect = failing_add
     with patch("app.topology_write.get_or_create_backend", return_value=backend):
-        with pytest.raises(RuntimeError, match="OVA deploy"):
+        with pytest.raises(RuntimeError, match="OVA import"):
             topology_write.add_node(main_module.app, "VM9", "VM", "debian")
 
     assert temp_topology_file.read_text() == before

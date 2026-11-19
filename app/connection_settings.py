@@ -47,7 +47,7 @@ FIELDS.update(
             )
         },
         "gns3.parent_interface": Settings.GNS3.PARENT_INTERFACE,
-        "api.ova_deploy_url": Settings.API.OVA_DEPLOY_URL,
+        "api.ova_base_url": Settings.API.OVA_BASE_URL,
     }
 )
 GROUPS = [
@@ -438,7 +438,7 @@ def test_connections(filename, values, gns3_ip=None):
             ("ESXi templates", "api.esxi_template_server_url"),
             ("GNS3 templates", "api.gns3_template_server_url"),
             ("Topology generator", "api.topology_generator_url"),
-            ("OVA deployment", "api.ova_deploy_url"),
+            ("OVA file server", "api.ova_base_url"),
         )
     )
     if (

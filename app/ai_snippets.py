@@ -1,35 +1,33 @@
-"""Create reviewed configuration drafts for a single live device."""
+"""
+Reviewed configuration drafts for a single live device.
+
+The generator service answers with the device's own commands (already syntax-checked there). They are
+validated here once more, scanned for dangerous commands (advisory warnings, never a block), shown to the
+user and only pushed after that review - see README, "Generate with AI".
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import shlex
 import tempfile
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass
-from ipaddress import IPv4Interface
 from pathlib import Path
-from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 import requests
 from fastapi import FastAPI
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    TypeAdapter,
-    ValidationError,
-    field_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.graph.environment import Environment
 from src.settings import Settings
 
 from app import fix_jobs, push_jobs
+from app.config_push import DeviceSpec
 from app.gns3_state import list_node_ports
 
 _SLOTS = threading.BoundedSemaphore(2)
@@ -115,75 +113,7 @@ class GenerateRequest(BaseModel):
         return value.strip()
 
 
-class VlanId(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    vlan_id: int = Field(ge=2, le=4094)
-
-    @field_validator("vlan_id")
-    @classmethod
-    def check_reserved(cls, value: int) -> int:
-        if 1002 <= value <= 1005:
-            raise ValueError("Use a VLAN ID outside the reserved range 1002–1005.")
-        return value
-
-
-class VlanSettings(VlanId):
-    kind: Literal["vlan"]
-    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
-
-
-class InterfaceSettings(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    interface: str = Field(
-        pattern=r"^(?:GigabitEthernet|FastEthernet|TenGigabitEthernet|Ethernet)[0-9]{1,3}(?:/[0-9]{1,3}){0,2}$"
-    )
-
-
-class DescriptionSettings(InterfaceSettings):
-    kind: Literal["description"]
-    description: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
-
-
-class AccessVlanSettings(InterfaceSettings, VlanId):
-    kind: Literal["access_vlan"]
-
-
-class IPv4Settings(InterfaceSettings):
-    kind: Literal["ipv4"]
-    address: str = Field(pattern=r"^[0-9.]{7,15}/[0-9]{1,2}$")
-
-
-_Operation = Annotated[
-    VlanSettings | DescriptionSettings | AccessVlanSettings | IPv4Settings,
-    Field(discriminator="kind"),
-]
-_OPERATIONS = TypeAdapter(
-    Annotated[list[_Operation], Field(min_length=1, max_length=20)]
-)
-
-
-class HostIPv4Settings(BaseModel):
-    """An IPv4 address on one interface of a host-like device (Linux, Windows, RouterOS, VPCS)."""
-
-    model_config = ConfigDict(strict=True, extra="forbid")
-    kind: Literal["ipv4"]
-    interface: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}$")
-    address: str = Field(pattern=r"^[0-9.]{7,15}/[0-9]{1,2}$")
-
-
-class HostnameSettings(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    kind: Literal["hostname"]
-    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
-
-
-_HostOperation = Annotated[
-    HostIPv4Settings | HostnameSettings, Field(discriminator="kind")
-]
-_HOST_OPERATIONS = TypeAdapter(
-    Annotated[list[_HostOperation], Field(min_length=1, max_length=20)]
-)
-# Platforms the generator can write for, and what each one is called in the device list.
+# Platforms the generator writes for, and what each one is called in the device list.
 PLATFORM_LABELS = {
     "iosv": "Cisco IOSv",
     "iosvl2": "Cisco IOSvL2",
@@ -191,8 +121,10 @@ PLATFORM_LABELS = {
     "windows": "Windows",
     "routeros": "RouterOS",
     "vpcs": "VPCS",
+    "pfsense": "pfSense/OPNsense",
+    "other": "GNS3 node",
 }
-_HOST_PLATFORMS = frozenset({"linux", "windows", "routeros", "vpcs"})
+_CISCO_PLATFORMS = frozenset({"iosv", "iosvl2"})
 _PORT_PREFIX = re.compile(
     r"^(TenGigabitEthernet|GigabitEthernet|FastEthernet|Ethernet|Te|Gi|Fa|Eth|Et|e)(?=\d)",
     re.IGNORECASE,
@@ -210,13 +142,22 @@ _PORT_NAMES = {
     "e": "Ethernet",
 }
 
+# Limits of a draft (the generator promises the same ones; they are enforced here again).
+MAX_COMMANDS = 200
+MAX_COMMAND_LENGTH = 500
+MAX_DRAFT_BYTES = 20_000
+MAX_WARNINGS = 50
+MAX_WARNING_LENGTH = 300
+_MAX_RAW_ENTRIES = 1000
+_MAX_REASON_LENGTH = 500
+
 
 def _canonical_port(port: str) -> str:
     return _PORT_PREFIX.sub(lambda match: _PORT_NAMES[match[0].lower()], port)
 
 
 class InvalidDraft(Exception):
-    """The proposed settings cannot be applied to this device."""
+    """The generator refused the request, or its reply is not a usable draft; the message is for the user."""
 
 
 class GeneratorUnavailable(Exception):
@@ -245,10 +186,11 @@ class Draft:
     owner: str
     commands: tuple[str, ...]
     expires: float
+    warnings: tuple[str, ...] = ()
 
 
 def platform_of(node) -> str | None:
-    """The platform the generator writes for, None where no renderer exists (see unsupported_reason)."""
+    """The platform the generator writes for; None where the device has no config-push transport at all."""
     image = str(getattr(node, "image", "")).lower()
     if node.env == Environment.ON_GNS3:
         match = _IOSV_IMAGE.fullmatch(node.image)
@@ -256,23 +198,20 @@ def platform_of(node) -> str | None:
             return "iosvl2" if match[1] else "iosv"
         if "vpcs" in image:
             return "vpcs"
-        return None
+        return "other"
     if node.env == Environment.ON_ESXI:
         if "windows" in image:
             return "windows"
         if "mikrotik" in image or "routeros" in image:
             return "routeros"
         if "pfsense" in image or "opnsense" in image:
-            return None
+            return "pfsense"
         return "linux"
     return None
 
 
 def unsupported_reason(node) -> str:
-    image = str(getattr(node, "image", "")).lower()
-    if node.env == Environment.ON_ESXI and ("pfsense" in image or "opnsense" in image):
-        return "pfSense and OPNsense are configured through a menu, not by commands."
-    return "No configuration generator for this device type yet."
+    return "This device has no configuration push transport."
 
 
 def _graph_ready_for(app: FastAPI, node) -> bool:
@@ -339,7 +278,7 @@ def _context(app: FastAPI, target: fix_jobs.FixTarget) -> dict:
         # (and for ESXi VMs, which GNS3 does not know at all).
         ports = {local for local, _, _ in target.links}
     # Only Cisco names are rewritten to their long form; a Linux "eth0" must stay "eth0".
-    name_of = _canonical_port if platform in {"iosv", "iosvl2"} else str
+    name_of = _canonical_port if platform in _CISCO_PLATFORMS else str
     return {
         "device": target.device,
         "role": target.role,
@@ -353,7 +292,31 @@ def _context(app: FastAPI, target: fix_jobs.FixTarget) -> dict:
     }
 
 
-def _generate_settings(prompt: str, context: dict) -> object:
+def _plain(text: str, limit: int) -> str:
+    """Text for the user: control and formatting characters become spaces, whitespace is collapsed, then cut to `limit`."""
+    cleaned = "".join(
+        " " if unicodedata.category(char) in {"Cc", "Cf", "Cs", "Zl", "Zp"} else char
+        for char in text
+    )
+    return " ".join(cleaned.split())[:limit]
+
+
+def _refusal_reason(response: requests.Response) -> str:
+    """The generator's own reason of a 422, passed on to the user as it is (FastAPI validation lists are joined)."""
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        detail = None
+    if isinstance(detail, list):
+        detail = " ".join(
+            str(item.get("msg", "")) if isinstance(item, dict) else str(item)
+            for item in detail
+        )
+    reason = _plain(detail, _MAX_REASON_LENGTH) if isinstance(detail, str) else ""
+    return reason or "The generator refused this request."
+
+
+def _request_draft(prompt: str, context: dict) -> object:
     url = _generator_url()
     if not _SLOTS.acquire(blocking=False):
         raise Busy
@@ -366,7 +329,7 @@ def _generate_settings(prompt: str, context: dict) -> object:
             allow_redirects=False,
         )
         if response.status_code == 422:
-            raise InvalidDraft
+            raise InvalidDraft(_refusal_reason(response))
         if response.status_code != 200:
             raise GeneratorUnavailable
         return response.json()
@@ -376,148 +339,197 @@ def _generate_settings(prompt: str, context: dict) -> object:
         _SLOTS.release()
 
 
-def _unicast(address: IPv4Interface) -> IPv4Interface:
-    ip = address.ip
-    if ip.is_unspecified or ip.is_multicast or ip.is_loopback or ip.is_link_local:
-        raise InvalidDraft("Choose a unicast IPv4 address.")
-    if address.network.prefixlen == 0:
-        raise InvalidDraft("Choose a prefix length between 1 and 32.")
-    return address
+_ENTER_CONFIG_MODE = re.compile(
+    r"^conf(?:ig(?:ure)?)?(?:\s+t(?:erminal)?)?$", re.IGNORECASE
+)
 
 
-def _compile_host(settings: object, ports: list[str], platform: str) -> list[str]:
-    """Commands for a Linux, Windows, RouterOS or VPCS device from validated settings (never from free text)."""
-    try:
-        operations = _HOST_OPERATIONS.validate_python(settings)
-    except (ValidationError, ValueError) as exc:
+def _check_command(number: int, command: str) -> str:
+    if "```" in command:
+        raise InvalidDraft(f"Command {number} contains a markdown code fence.")
+    if len(command) > MAX_COMMAND_LENGTH:
         raise InvalidDraft(
-            "The reply contains unsupported configuration settings."
-        ) from exc
-    commands: list[str] = []
-    for operation in operations:
-        if isinstance(operation, HostnameSettings):
-            if platform == "windows":
-                raise InvalidDraft(
-                    "Hostnames are not supported for Windows (a restart is needed)."
-                )
-            commands.append(
-                {
-                    "linux": f"hostnamectl set-hostname {operation.name}",
-                    "routeros": f"/system identity set name={operation.name}",
-                    "vpcs": f"set pcname {operation.name}",
-                }[platform]
-            )
-            continue
-        if operation.interface not in ports:
+            f"Command {number} is longer than {MAX_COMMAND_LENGTH} characters."
+        )
+    for char in command:
+        if char != "\t" and unicodedata.category(char) in {
+            "Cc",
+            "Cf",
+            "Cs",
+            "Zl",
+            "Zp",
+        }:
             raise InvalidDraft(
-                f"Interface {operation.interface} is not in the device's port list."
+                f"Command {number} contains a control character or a line break."
             )
-        try:
-            address = _unicast(IPv4Interface(operation.address))
-        except ValueError as exc:
-            raise InvalidDraft("The IPv4 address is not valid.") from exc
-        if platform == "linux":
-            if " " in operation.interface:
-                raise InvalidDraft("The interface name is not valid for Linux.")
-            interface = shlex.quote(operation.interface)
-            commands.extend(
-                (
-                    f"ip address replace {address} dev {interface}",
-                    f"ip link set dev {interface} up",
-                )
-            )
-        elif platform == "windows":
-            commands.append(
-                f'netsh interface ip set address name="{operation.interface}" '
-                f"static {address.ip} {address.netmask}"
-            )
-        elif platform == "routeros":
-            commands.append(
-                f"/ip address add address={address} interface={operation.interface}"
-            )
-        else:
-            commands.append(f"ip {address}")
-    if platform == "linux" and any(c.startswith("ip address") for c in commands):
-        commands.insert(0, "# runtime change with ip(8): lost on reboot")
-    if platform == "vpcs":
-        commands.append("save")
-    return commands
+    return command
 
 
-def _compile(settings: object, ports: list[str], platform: str) -> list[str]:
-    if platform in _HOST_PLATFORMS:
-        return _compile_host(settings, ports, platform)
-    try:
-        operations = _OPERATIONS.validate_python(settings)
-        commands = ["configure terminal"]
-        for operation in operations:
-            if isinstance(operation, VlanSettings):
-                if platform != "iosvl2":
-                    raise InvalidDraft("VLAN definitions need an IOSvL2 switch.")
-                commands.extend(
-                    (f"vlan {operation.vlan_id}", f"name {operation.name}", "exit")
-                )
-                continue
-            if operation.interface not in ports:
-                raise InvalidDraft(
-                    f"Interface {operation.interface} is not in the device's port list."
-                )
-            commands.append(f"interface {operation.interface}")
-            if isinstance(operation, DescriptionSettings):
-                commands.append(f"description {operation.description}")
-            elif isinstance(operation, AccessVlanSettings):
-                if platform != "iosvl2":
-                    raise InvalidDraft("Access ports need an IOSvL2 switch.")
-                commands.extend(
-                    (
-                        "switchport mode access",
-                        f"switchport access vlan {operation.vlan_id}",
-                    )
-                )
-            else:
-                if platform != "iosv":
-                    raise InvalidDraft(
-                        "This draft supports IPv4 addresses on IOSv routed ports."
-                    )
-                address = IPv4Interface(operation.address)
-                commands.append(f"ip address {address.ip} {address.netmask}")
-            commands.append("exit")
-        return [*commands, "end"]
-    except (ValidationError, ValueError) as exc:
-        raise InvalidDraft(
-            "The reply contains unsupported configuration settings."
-        ) from exc
+def validate_reply(reply: object, platform: str | None) -> tuple[list[str], list[str]]:
+    """
+    (commands, the generator's warnings) from the generator's 200 answer - checked, not interpreted:
+    any command is allowed, but it must be one plain line (no control characters, no markdown fence),
+    the list must be 1..MAX_COMMANDS lines of at most MAX_COMMAND_LENGTH characters and MAX_DRAFT_BYTES in
+    total. Blank lines are dropped. A Cisco draft may not enter or leave configuration mode itself: the
+    push does that (see DeviceSpec.native_shell).
+    :raises InvalidDraft: with the reason, for the user
+    """
+    raw_warnings = reply.get("warnings") if isinstance(reply, dict) else None
+    if (
+        not isinstance(reply, dict)
+        or not isinstance(reply.get("commands"), list)
+        or not isinstance(raw_warnings or [], list)
+    ):
+        raise InvalidDraft("The generator's reply is not a list of commands.")
+    raw = reply["commands"]
+    if len(raw) > _MAX_RAW_ENTRIES:
+        raise InvalidDraft(f"The draft has more than {MAX_COMMANDS} commands.")
+    commands: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise InvalidDraft(
+                "The generator's reply contains a command that is not text."
+            )
+        line = item.strip()
+        if line:
+            commands.append(_check_command(len(commands) + 1, line))
+    if platform in _CISCO_PLATFORMS:
+        while commands and _ENTER_CONFIG_MODE.match(commands[0]):
+            commands.pop(0)
+        while commands and commands[-1].lower() == "end":
+            commands.pop()
+    if not commands:
+        raise InvalidDraft("The generator returned no commands for this request.")
+    if len(commands) > MAX_COMMANDS:
+        raise InvalidDraft(f"The draft has more than {MAX_COMMANDS} commands.")
+    if sum(len(command.encode("utf-8")) + 1 for command in commands) > MAX_DRAFT_BYTES:
+        raise InvalidDraft(f"The draft is larger than {MAX_DRAFT_BYTES} bytes.")
+    warnings = [
+        text
+        for text in (
+            _plain(warning, MAX_WARNING_LENGTH)
+            for warning in raw_warnings or []
+            if isinstance(warning, str)
+        )
+        if text
+    ]
+    return commands, warnings
 
 
-def _supported_text(platform: str) -> str:
-    """What the selected device kind can be configured with, for a prompt the model could not map."""
-    if platform in {"iosv", "iosvl2"}:
-        kinds = "VLANs, interface descriptions and access ports"
-        if platform == "iosv":
-            kinds = "interface descriptions and IPv4 addresses"
-    elif platform == "windows":
-        kinds = "IPv4 addresses (no host name)"
-    else:
-        kinds = "IPv4 addresses and the host name"
-    return (
-        f"Nothing in the prompt can be configured on this device. It supports: {kinds}."
-    )
+# A command may start with sudo (Linux) or do (Cisco, from configuration mode).
+_START = r"^\s*(?:sudo\s+|do\s+)?"
+
+
+def _rule(*alternatives: str) -> re.Pattern[str]:
+    return re.compile("|".join(alternatives))
+
+
+_RESTART = _rule(
+    _START + r"(?:reload|reboot|halt|poweroff)\b",
+    _START + r"(?:init\s+[06]\b|shutdown\s+\S|systemctl\s+(?:reboot|poweroff|halt)\b)",
+    _START + r"(?:(?:restart|stop)-computer\b|/system\s+(?:reboot|shutdown)\b)",
+    r"^\s*@(?:reboot|wait-reboot)\b",
+)
+_ERASE = _rule(
+    r"\bwrite\s+erase\b",
+    _START + r"(?:erase|format|mkfs(?:\.\w+)?|wipefs|fdisk|parted|shred)\b",
+    _START + r"(?:diskpart|format-volume|clear-disk)\b",
+    _START + r"delete\s+(?:/\S+\s+)*(?:flash|nvram|vlan)",
+    _START + r"dd\s+.*\bof=/dev/",
+    _START + r"/system\s+reset-configuration\b",
+    r"\bfactory-?reset\b",
+)
+_RECURSIVE_DELETE = _rule(
+    _START + r"rm\s+(?:-\S*r\S*|--recursive)\b",
+    _START + r"(?:rd|rmdir)\s+/s\b",
+    _START + r"del\s+.*/s\b",
+    r"\bremove-item\b.*-recurse",
+)
+_LINK_DOWN = _rule(
+    r"^\s*shutdown\s*$",
+    _START + r"ip\s+link\s+(?:set\s+(?:dev\s+)?\S+\s+down|delete)\b",
+    _START + r"(?:ifdown|disable-netadapter)\b",
+    _START + r"(?:ifconfig\s+\S+\s+down|nmcli\s+.*\b(?:down|disconnect))\b",
+    _START + r"systemctl\s+(?:stop|disable)\s+(?:network\S*|systemd-networkd|sshd?)\b",
+    r"\bnetsh\s+interface\s+set\s+interface\b.*\bdisable",
+    r"^\s*/interface\s+(?:\S+\s+)?disable\b",
+)
+_FIREWALL = _rule(
+    r"\biptables\b.*(?:\s-f\b|--flush)",
+    r"\bnft\s+flush\b",
+    r"\bufw\s+(?:disable|reset)\b",
+    r"\bset-netfirewallprofile\b.*-enabled\s+false",
+    r"\badvfirewall\s+set\b.*\bstate\s+off",
+)
+# a route or gateway command that names the default route
+_DEFAULT_ROUTE = _rule(
+    r"(?=.*(?:\broute\b|\bgateway\b|\bgw\b))"
+    r"(?=.*(?:\bdefault\b|\b0\.0\.0\.0(?:/0|\s+(?:mask\s+)?0\.0\.0\.0)|::/0))"
+)
+_CREDENTIALS = _rule(
+    r"\b(?:password|passwd|secret|snmp-server\s+community|key-string|private-key)\b",
+    r"\b(?:pre-shared-key|psk|chpasswd|convertto-securestring|authorized_keys)\b",
+    r"\b(?:username|useradd|usermod|new-localuser|set-localuser)\b",
+    r"\bnet\s+user\b",
+    r"^\s*/user\s+(?:add|set)\b",
+)
+# (pattern on the lower-cased command, what the command does, whether the warning quotes it)
+_ADVISORIES: tuple[tuple[re.Pattern[str], str, bool], ...] = (
+    (_RESTART, "restarts or powers off the device", True),
+    (_ERASE, "erases or formats data (configuration, files or disks)", True),
+    (_RECURSIVE_DELETE, "deletes files recursively", True),
+    (
+        _LINK_DOWN,
+        "shuts down an interface or a network service (the connection may drop)",
+        True,
+    ),
+    (_FIREWALL, "changes or disables the firewall", True),
+    (_DEFAULT_ROUTE, "changes the default route", True),
+    (
+        _CREDENTIALS,
+        "sets or changes credentials (the command is not repeated here)",
+        False,
+    ),
+)
+
+
+def advisory_warnings(commands: list[str]) -> list[str]:
+    """
+    Warnings of this program for commands that deserve a second look. Purely advisory: a flagged command
+    stays in the draft, the reviewer decides. The scan is a short list of patterns, not a safety proof.
+    """
+    found: list[str] = []
+    for number, command in enumerate(commands, 1):
+        lowered = command.lower()
+        for pattern, text, quote in _ADVISORIES:
+            if pattern.search(lowered):
+                shown = _plain(command, 80) if quote else ""
+                found.append(
+                    f"Command {number} {text}" + (f": {shown}" if shown else ".")
+                )
+    return found
+
+
+def all_warnings(generator_warnings: list[str], commands: list[str]) -> list[str]:
+    """The generator's warnings first, then this program's own, without repeats."""
+    merged: list[str] = []
+    for warning in [*generator_warnings, *advisory_warnings(commands)]:
+        if warning not in merged:
+            merged.append(warning)
+    return merged[:MAX_WARNINGS]
 
 
 def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
     target = _target(app, request.device)
     context = _context(app, target)
-    try:
-        settings = _generate_settings(request.prompt, context)
-    except InvalidDraft as exc:
-        if str(exc):
-            raise
-        raise InvalidDraft(_supported_text(context["platform"])) from exc
-    commands = _compile(settings, context["ports"], context["platform"])
+    commands, generator_warnings = validate_reply(
+        _request_draft(request.prompt, context), context["platform"]
+    )
     if _target(app, request.device) != target:
         raise TargetChanged("The project or device changed. Generate a new draft.")
     if not get_enabled() or not available():
         raise GenerationDisabled("AI configuration has been disabled.")
+    warnings = all_warnings(generator_warnings, commands)
     draft_id = uuid.uuid4().hex
     with _DRAFT_LOCK:
         if not hasattr(app.state, "ai_snippet_drafts"):
@@ -529,8 +541,16 @@ def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
                 del drafts[key]
         if len(drafts) >= _MAX_DRAFTS:
             del drafts[next(iter(drafts))]
-        drafts[draft_id] = Draft(target, owner, tuple(commands), now + _DRAFT_TTL)
-    return {"draft_id": draft_id, "device": request.device, "commands": commands}
+        drafts[draft_id] = Draft(
+            target, owner, tuple(commands), now + _DRAFT_TTL, tuple(warnings)
+        )
+    return {
+        "draft_id": draft_id,
+        "device": request.device,
+        "platform": context["platform"],
+        "commands": commands,
+        "warnings": warnings,
+    }
 
 
 def push_draft(app: FastAPI, draft_id: str, owner: str) -> push_jobs.PushJob:
@@ -551,7 +571,13 @@ def push_draft(app: FastAPI, draft_id: str, owner: str) -> push_jobs.PushJob:
         verify_target()
         job = push_jobs.start_job(
             app,
-            {draft.target.device: list(draft.commands)},
+            # native_shell: the push puts the commands where the device expects them (IOS
+            # configuration mode, PowerShell on Windows) - the same path a manual push takes.
+            {
+                draft.target.device: DeviceSpec(
+                    commands=list(draft.commands), native_shell=True
+                )
+            },
             wait_seconds=0,
             audit_note="AI snippet",
             verify_target=verify_target,
