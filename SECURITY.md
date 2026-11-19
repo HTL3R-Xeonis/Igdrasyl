@@ -1,4 +1,4 @@
-# Security policy
+# Security policy - Igdrasyl (formerly TopologyOperator)
 
 ## Reporting a vulnerability
 

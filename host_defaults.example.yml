@@ -2,7 +2,7 @@
 #
 # Copy to host_defaults.yml (next to the app, or point
 # TOPOLOGYOPERATOR_HOST_DEFAULTS at another path) and keep only the lines you
-# want to change - everything else stays at TopologyBuilder's own default.
+# want to change - everything else stays at Mjonyr's own default.
 # Same layout as a host settings file. Edits apply the next time the form is
 # opened, no restart needed. Passwords are not accepted here (enter them in
 # the form's Credentials section). Existing hosts are not affected.

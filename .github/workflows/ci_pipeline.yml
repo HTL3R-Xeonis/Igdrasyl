@@ -32,7 +32,7 @@ jobs:
 
       # TESTS
       # LITERAL_API_VALUES makes template-lookup calls (Environment.
-      # get_environment, via TopologyBuilder) return a hardcoded set
+      # get_environment, via Mjonyr) return a hardcoded set
       # instead of hitting the real template-listing services - already
       # set unconditionally at the top of tests/conftest.py, listed here
       # too for clarity/in case that ever changes.

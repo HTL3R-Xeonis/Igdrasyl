@@ -1,4 +1,4 @@
-"""The app presents itself as Ginnungagap (internal names stay TopologyOperator) and the landing page keeps its
+"""The app presents itself as Ginnungagap (Igdrasyl, formerly TopologyOperator, is only the code name of the component) and the landing page keeps its
 no-tooltip rule."""
 
 import re

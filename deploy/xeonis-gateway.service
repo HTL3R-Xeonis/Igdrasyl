@@ -14,8 +14,8 @@ After=network-online.target
 
 [Service]
 Type=exec
-WorkingDirectory=/opt/ginnungagap/TopologyOperator
-ExecStart=/opt/ginnungagap/TopologyOperator/.venv/bin/uvicorn app.gateway_main:app --host 0.0.0.0 --port 80
+WorkingDirectory=/opt/ginnungagap/Igdrasyl
+ExecStart=/opt/ginnungagap/Igdrasyl/.venv/bin/uvicorn app.gateway_main:app --host 0.0.0.0 --port 80
 Restart=on-failure
 RestartSec=2
 

@@ -18,8 +18,8 @@ After=network-online.target
 
 [Service]
 Type=exec
-WorkingDirectory=/opt/ginnungagap/TopologyOperator
-ExecStart=/opt/ginnungagap/TopologyOperator/.venv/bin/python3 /opt/ginnungagap/TopologyOperator/deploy/xeonis-backend-launch.py %i
+WorkingDirectory=/opt/ginnungagap/Igdrasyl
+ExecStart=/opt/ginnungagap/Igdrasyl/.venv/bin/python3 /opt/ginnungagap/Igdrasyl/deploy/xeonis-backend-launch.py %i
 Restart=on-failure
 RestartSec=2
 

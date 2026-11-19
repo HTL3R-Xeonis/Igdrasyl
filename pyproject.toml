@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "topologyoperator"
 dynamic = ["version"]
-description = "GUI tool for operating topologies already deployed by TopologyBuilder."
+description = "Igdrasyl (formerly TopologyOperator): the web app of Ginnungagap for operating topologies already deployed by Mjonyr."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
 dependencies = [
-    # dev, not main - TopologyBuilder's main branch is permanently not
+    # dev, not main - Mjonyr's (formerly TopologyBuilder) main branch is permanently not
     # merged into (standing project decision, unrelated to code quality).
-    "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@dev",
+    "topologybuilder @ git+https://github.com/HTL3R-Xeonis/Mjonyr.git@dev",
     "fastapi==0.121.2",
     "uvicorn[standard]==0.38.0",
     "netmiko==4.7.0",

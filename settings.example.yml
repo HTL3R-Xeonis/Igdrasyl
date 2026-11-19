@@ -1,15 +1,15 @@
-# Optional settings overrides for TopologyOperator, loaded via the
+# Optional settings overrides for Igdrasyl (formerly TopologyOperator), loaded via the
 # TOPOLOGYOPERATOR_SETTINGS env var.
 # Copy this file to settings.yml (git-ignored) and fill in your own values.
 #
-# This reuses TopologyBuilder's own Settings class/YAML schema wholesale -
+# This reuses Mjonyr's own Settings class/YAML schema wholesale -
 # Select the topology separately using Project on the host tile.
 # Set both passwords in the host profile under Host settings > Credentials.
 # ESXi operations need the ESXi password. The live topology backend also
 # needs the GNS3 VM password for VLAN configuration.
 
 # A host can be configured before any topology exists. Project selection
-# is stored separately by TopologyOperator, outside this host profile.
+# is stored separately by Igdrasyl, outside this host profile.
 
 # Log storage is managed by the server and is not part of a host profile.
 
@@ -49,7 +49,7 @@ esxi:
   # won't match every host's naming (e.g. "PG-GNS3-TRUNK" with hyphens).
   # Phase B's write endpoints fail with "Could not auto-detect the GNS3
   # VM's trunk interface" if this doesn't match. Same value the
-  # TopologyBuilder deploy that created this topology used.
+  # Mjonyr deploy that created this topology used.
   # trunk_port_group: PG-GNS3-TRUNK
   # Must be the SAME vSwitch the GNS3 VM's trunk port group actually
   # lives on - defaults to "internal_network" if omitted, which is only
@@ -57,7 +57,7 @@ esxi:
   # silent: ESXi-hosted nodes deploy and power on fine, but their traffic
   # never reaches the GNS3 VM at all (two isolated vSwitches, no uplink
   # between them) - confirmed live the hard way. Same value the
-  # TopologyBuilder deploy that created this topology used.
+  # Mjonyr deploy that created this topology used.
   # virtual_switch: vSwitch0
   # Port groups a non-incremental deploy (incremental_deploy: false
   # above) must never delete, besides the trunk (always protected) and
@@ -88,7 +88,7 @@ esxi:
   # default) leaves the MAC exactly as before this setting existed.
   # gns3_vm_mac_range: ["00:50:56:00:10:00", "00:50:56:00:1f:ff"]
   # ESXi datastore to place a freshly deployed GNS3 VM on - reuses the
-  # same datastore setting TopologyBuilder's own node deploys use.
+  # same datastore setting Mjonyr's own node deploys use.
   # Unset auto-picks whichever datastore has the most free space.
   # datastore: datastore1
 
@@ -105,7 +105,7 @@ api:
   # addresses are not used as a fallback.
   # Powers the landing page's "Generate via LLM" action (POST
   # /design/generate) - an LLM-backed service that turns a natural-
-  # language prompt into a topology config, same one TopologyBuilder's
+  # language prompt into a topology config, same one Mjonyr's
   # own `generate`/`generate-deploy` CLI commands use.
   topology_generator_url: http://10.20.20.172:8002
   # Base URL of the HTTP server that serves the template OVA files; the ESXi host pulls each OVA from

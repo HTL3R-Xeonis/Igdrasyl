@@ -247,7 +247,7 @@ def _pick_backend_page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Choose a server</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-61">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-63">
 <style>
   body {{ display: block; padding: 0 16px; }}
   main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}

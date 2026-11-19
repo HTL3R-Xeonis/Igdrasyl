@@ -317,7 +317,18 @@ async function loadAuditLog() {
   }
 }
 
+// The component's code name and version (from /health, plain text): "Igdrasyl v1.2.1". The name alone stays if /health fails.
+async function showAbout() {
+  try {
+    const { version } = await request("/health");
+    if (version) document.getElementById("ap-about").textContent = `Igdrasyl v${version}`;
+  } catch {
+    // keep the plain name from the page
+  }
+}
+
 (async () => {
+  showAbout();
   try {
     const me = await request("/me");
     if (me.role !== "admin") {
@@ -327,7 +338,7 @@ async function loadAuditLog() {
     }
     await loadProfiles();
     refreshCreationHostsControls();
-    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog(), loadTemplateShare()]);
+    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog(), loadTemplateShare(), loadUpdates()]);
   } catch {
     window.location.href = "/login";
   }

@@ -1,5 +1,5 @@
 "use strict";
-// One admin section at a time, chosen by the URL hash (#users, #ai, #logs, #templates, #audit).
+// One admin section at a time, chosen by the URL hash (#users, #ai, #logs, #templates, #updates, #audit).
 (() => {
   const panels = [...document.querySelectorAll("section.ap-panel")];
   const links = [...document.querySelectorAll("#ap-nav a")];

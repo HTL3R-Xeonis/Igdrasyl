@@ -1,5 +1,10 @@
 # Deployment: gateway + per-profile backends
 
+This is the deployment of Igdrasyl (formerly TopologyOperator). The checkout lives in `/opt/ginnungagap/Igdrasyl` in the unit
+files here (it was `/opt/ginnungagap/TopologyOperator` before the rename: an installation that still uses the old folder
+keeps working, because the unit files that are already installed are not touched; the unit names `xeonis-gateway` and
+`xeonis-backend@<profile>` and all `TOPOLOGYOPERATOR_*` variables are unchanged).
+
 One gateway process owns login and the shared user store and proxies every request to the backend of the host the
 caller picked; every host profile has its own backend process (`xeonis-backend@<profile>`). The units here run as
 systemd *user* units of one unprivileged account. A single process started directly (`uvicorn app.main:app`) is still a

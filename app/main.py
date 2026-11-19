@@ -46,6 +46,7 @@ from app.auth_middleware import AuthMiddleware
 from app.request_logging import RequestLoggingMiddleware
 from app.routes import auth as _auth_routes
 from app.routes.template_share import router as template_share_router
+from app.routes.updates import router as updates_router
 
 # Importing a route module registers its routes. Starlette tries routes in registration order, so this
 # order is the matching order; the frontend mount below must stay last. "auth" registers itself via
@@ -79,6 +80,7 @@ app.include_router(console.router)
 app.include_router(serial_console.router)
 app.include_router(vm_screen.router)
 app.include_router(template_share_router)
+app.include_router(updates_router)
 
 
 @app.exception_handler(StarletteHTTPException)

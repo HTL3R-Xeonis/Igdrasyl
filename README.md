@@ -1,16 +1,24 @@
-# Ginnungagap
+# Igdrasyl (formerly TopologyOperator)
 
-*(The project, repository and Python package are still called TopologyOperator, as are the `TOPOLOGYOPERATOR_*`
-environment variables; "Ginnungagap" is the name shown in the app. In Norse myth it is the void between ice and fire
-from which the world arises - here, the empty canvas from which a lab arises.)*
+**Igdrasyl is the web app (the "operator") of [Ginnungagap](https://github.com/HTL3R-Xeonis/Ginnungagap-Appliance).**
+"Ginnungagap" is the name of the whole product and the name shown in the app; Igdrasyl is the code name of this component.
+The repository used to be called TopologyOperator (the Python package `topologyoperator`, the `TOPOLOGYOPERATOR_*`
+environment variables, the import root `app`, the systemd unit names and every stored marker keep their names on
+purpose). In Norse myth Ginnungagap is the void between ice and fire from which the world arises - here, the empty canvas
+from which a lab arises.
+
+The other components: [Mjonyr](https://github.com/HTL3R-Xeonis/Mjonyr) (formerly TopologyBuilder; the deploy library and
+CLI this app is built on), Mimyr (formerly Topology Generator; the LLM topology and config-draft service), Hugyn and Munyn
+(formerly Docker-Server-Files; the ESXi and GNS3 template services), Idynoun (the updater, `ginnungagap update`) and
+Haymdal (the connection and health watchman, see "Connection lost" below).
 
 A GUI tool for *operating* topologies already deployed by
-[TopologyBuilder](https://github.com/HTL3R-Xeonis/TopologyBuilder): a
+[Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr): a
 GNS3-like canvas, in-window access to each device's console/screen,
 automated per-device configuration push from a second config file, and
 a portable `.topoproj` bundle format for exporting/importing a whole
 project (topology + configs + canvas layout + drawings) in one file. A
-separate tool from TopologyBuilder itself, depending on it as a library
+separate tool from Mjonyr itself, depending on it as a library
 rather than duplicating its ESXi/GNS3 connection code.
 
 **Status: feature-complete and verified end-to-end against real
@@ -46,7 +54,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   it holds). Because of the shared scope the order matters only for code that runs while a file loads; a function defined in a
   later file can be used by a callback at any time. Tests that look at the frontend read all of them in load order
   (`tests/frontend_js.py`).
-- Depends on TopologyBuilder as an installed library
+- Depends on Mjonyr as an installed library
   (`ESXiConnection`/`GNS3Connection`/`Settings`/`Graph`), not a copy of
   its code. Its top-level package name is `src`, so this project's own
   code lives under `app/` specifically to avoid a namespace collision.
@@ -108,7 +116,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   and node canvas positions. Live import and export require an active host
   profile. Import runs as a background job
   (`app/import_jobs.py`) with an approximate live-polled progress
-  percentage, since a deploy can take minutes and TopologyBuilder's own
+  percentage, since a deploy can take minutes and Mjonyr's own
   deploy has no progress-callback hook. The status also carries
   `elapsed_seconds`, `phase` ("creating devices", then "finishing (network
   links, VLAN setup, checks)") and `pending` (the devices not created yet),
@@ -118,13 +126,13 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   running its own config-push automatically right after the deploy
   succeeds (`manifest.json`'s `auto_config_push`). Verified live against a
   real, full (non-incremental) import: the bar, clock and phase text all
-  update correctly. That same test also found TopologyBuilder's own
+  update correctly. That same test also found Mjonyr's own
   deploy call could hang indefinitely if the ESXi/GNS3-VM connection died
   mid-deploy (no timeout anywhere in that path) - fixed there
   (`ESXiConnection`/`GNS3VMInterfaceSetup` now bound every task wait and
   SSH read), so a future import fails with a clear error instead of
   hanging forever.
-- Node canvas positions (`app/layout.py`) are a TopologyOperator-owned
+- Node canvas positions (`app/layout.py`) are a Igdrasyl-owned
   concern, independent of GNS3's own node x/y - saved from drags, a
   bundle's own layout.json, or a shared force-directed default
   (`src.graph.layout.compute_node_positions`) for whatever neither of
@@ -155,13 +163,13 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 - **Generate via LLM** (`app/generate_jobs.py`): a landing-page action
   that turns a natural-language prompt into a topology via the Topology
   Generator API (`src.connections.topology_generator_client`), mirroring
-  TopologyBuilder's own CLI `generate` command's retry-until-valid loop,
+  Mjonyr's own CLI `generate` command's retry-until-valid loop,
   then opens the result straight into design mode instead of writing a
   file. You can attach up to five PDF, PNG, JPEG, Word (.docx), TXT, Markdown
   or CSV files (10 MiB total) with an optional prompt. When you attach exactly one
   PNG or JPEG screenshot, select **Match screenshot layout** to place device icons
   according to their positions in the image. This requires a vision model and
-  an updated Topology Generator. Local text models can use extracted text and OCR
+  an updated Mimyr. Local text models can use extracted text and OCR
   for ordinary attachment generation. Runs as a background job
   (`POST /design/generate` or `POST /design/generate/attachments` → `job_id`,
   `GET /design/generate/{job_id}` polls attempt/status/warnings). When every
@@ -193,7 +201,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   files from before this scheme (`app.<timestamp>.log`) are not touched - delete
   them by hand if they are in the way.
 - **Template service status** (`app/template_health.py`): when the service
-  that tells TopologyBuilder which images exist is down or lists nothing,
+  that tells Mjonyr which images exist is down or lists nothing,
   every topology fails to validate with "Image X not found" - which points at
   the topology although the cause is elsewhere (it happened when the ESXi
   password changed and the service could no longer log in). The app now asks
@@ -215,7 +223,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   image on a healthy service is reported at once. The collectors on the service
   host stop a run after 120 s (`TimeoutStartSec`) and cut ESXi connections that
   stop answering (60 s), so a host that goes down mid-run cannot block the
-  timer for hours (see Docker-Server-Files).
+  timer for hours (see Hugyn and Munyn).
 - **Robustness** (`tests/test_route_robustness.py`): every route is called with garbage bodies and odd path values
   while ESXi and GNS3 are unreachable, while no host is active, and while a fake GNS3 answers 500, 404 or non-JSON
   everywhere; none may answer 500 (deliberate refusals are 4xx/502/503). A random sequence of design operations with
@@ -238,7 +246,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   `{interface, peer, peer_interface}` next to the older `interfaces` map.
   If the interfaces match no live link, the request fails instead of
   hitting the link that does exist. `verify` checks each link by its ports,
-  and TopologyBuilder creates each one in GNS3 by its own interface pair.
+  and Mjonyr creates each one in GNS3 by its own interface pair.
 - **Automatic label placement**: port labels you have not moved are placed on the first free spot next to their link endpoint (text
   grows away from the node; nudged outward/sideways around icons, names, other labels and the lines of *other* links;
   lying on its own line is fine), so a switch with five links no longer
@@ -284,7 +292,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   the GNS3 VM on its own (that stays with the startup check and the File menu).
 
 - **Health check and orphan cleanup** (`app/maintenance.py`): File menu >
-  "Health Check…" runs TopologyBuilder's structural `verify` against the
+  "Health Check…" runs Mjonyr's structural `verify` against the
   live lab (GNS3 nodes started, ESXi VMs powered on, trunk NIC, port groups,
   links) and, if anything fails, offers its curated low-risk repairs (start
   stopped GNS3 nodes, power on stopped ESXi VMs, create missing port groups -
@@ -298,7 +306,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   - and can delete them after a second, explicit confirmation (irreversible).
 - **Suggest fix** appears on failed Health Check rows that identify a device or link. Pick a target and
   optionally describe your goal. The Operator sends the failed check, target role and image, and adjacent
-  links to the configured Topology Generator. Review its explanation, warnings and commands before
+  links to the configured generator service (Mimyr). Review its explanation, warnings and commands before
   choosing **Add to Config Push**. This only appends to the editor; it preserves other devices and target
   options and never saves or pushes. Some structural checks can only be addressed in the topology or
   hypervisor, so the generator can return advice without commands.
@@ -324,7 +332,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 ## GNS3 VM Deploy
 
 Replaces the configured GNS3 VM with a freshly imported one from its own
-OVA (`src.gns3_vm_deploy.deploy_fresh_gns3_vm`, in TopologyBuilder) -
+OVA (`src.gns3_vm_deploy.deploy_fresh_gns3_vm`, in Mjonyr) -
 available two ways. The new VM always gets **4 vCPUs and 8 GB RAM** (set after the
 import, before it is powered on), whatever the OVA declares - the stock OVA's
 1 vCPU / 2 GB cannot boot a handful of IOSv nodes:
@@ -397,12 +405,12 @@ has something to click into immediately.
 Choose **Create/Design a Host** on the home screen to build a host
 profile. The whole form is one scrollable page: General, ESXi host, Networking, GNS3, API services and
 Credentials cover 21 host/runtime settings plus both passwords, with
-TopologyBuilder defaults filled in and automatic options left blank.
+Mjonyr defaults filled in and automatic options left blank.
 The generated YAML at the bottom updates while you type. **Download YAML**
 saves a local copy; **Create host** adds a named profile without activating it
 or deploying anything. Existing filenames are rejected rather than overwritten.
 
-**Default values** of the form come from TopologyBuilder, optionally overridden
+**Default values** of the form come from Mjonyr, optionally overridden
 by a dedicated file: copy `host_defaults.example.yml` to `host_defaults.yml` (or
 set `TOPOLOGYOPERATOR_HOST_DEFAULTS`), keep only the lines to change - same
 layout as a host settings file, no passwords. It is read each time the form is
@@ -429,7 +437,7 @@ ranges have dedicated inputs and validation.
 **Service addresses**: a host profile must name the four services it uses (`api.esxi_template_server_url`,
 `api.gns3_template_server_url`, `api.topology_generator_url`, `api.ova_base_url` - the HTTP server the ESXi hosts pull the template OVAs from) - or the matching environment
 variable must (`ESXI_TEMPLATE_SERVER_URL`, ..., which is how the appliance points everything somewhere else). The built-in
-lab addresses of TopologyBuilder are not used as a fallback: activating a profile without them is refused with a message
+lab addresses of Mjonyr are not used as a fallback: activating a profile without them is refused with a message
 naming the missing keys (HTTP 400 on the gateway), and a backend started with such a profile stops with the same text in
 its log. A profile written for the retired OVA deploy service still has `api.ova_deploy_url`: replace that line by
 `api.ova_base_url` (the key is ignored otherwise and the profile is refused for the missing new key).
@@ -474,7 +482,7 @@ library - no new dependency. Accounts live in `users.json` (gitignored, path
 overridable via `TOPOLOGYOPERATOR_USERS_FILE`); the session-signing secret is
 generated once into `session_secret.key` next to it and persists across restarts.
 (Behind the gateway these files must be absolute shared paths - see `deploy/README.md`; a gateway or managed backend
-without them refuses to start.) If TopologyBuilder's test switch `LITERAL_API_VALUES` is set, startup logs a warning
+without them refuses to start.) If Mjonyr's test switch `LITERAL_API_VALUES` is set, startup logs a warning
 that the template lists are hardcoded and the template services are not asked.
 If `users.json` doesn't exist at startup, one `admin` account is created with the
 default password `admin` - deliberately predictable, not a generated secret, since
@@ -570,7 +578,7 @@ a 5-minute window) - a plain count for everyone, and for an admin the actual
 usernames too, so restarting a shared host doesn't surprise someone else
 using it.
 
-**Connection lost.** When the server stops answering, the canvas shows a full-screen "Connection lost" card instead of
+**Connection lost (Haymdal).** When the server stops answering, the canvas shows a full-screen "Connection lost" card instead of
 failing quietly (`app/static/connection-monitor.js`, client-side so it keeps working while the server is away). It wraps
 `fetch` once: a network error or a gateway 502/503/504 that is not the app's own JSON body, two checks 3 seconds apart,
 and a heartbeat every 20 seconds while the tab is visible. The card names the layer that is down - Browser, Gateway,
@@ -646,7 +654,7 @@ ESXi share every 15), so that button - and, once a started GNS3 VM has an addres
 after a few seconds because the GNS3 service inside a fresh VM needs a moment longer than its address) and waits up to a
 minute for them to list templates again. `/templates/health` reports `refreshable` (a service answered, so asking helps);
 a service without that endpoint, or not set up for it (the host needs the request folder and the `.path` unit from
-Docker-Server-Files), is simply left to its own timer - the answer says which one took the request.
+Hugyn and Munyn), is simply left to its own timer - the answer says which one took the request.
 
 ## Template Share
 
@@ -659,6 +667,38 @@ Enable **Allow admins to manage ESXi templates in the Admin Panel** in the Appli
 On a standalone or gateway installation, set `TOPOLOGYOPERATOR_TEMPLATE_SHARE_DIR` on the process serving the Admin Panel
 to the absolute path of its already mounted writable share. An optional `TOPOLOGYOPERATOR_TEMPLATE_REFRESH_MINUTES`
 sets the refresh interval shown in the panel. GNS3 templates are collected from GNS3.
+
+## Updates (Idynoun)
+
+On the Ginnungagap appliance the admin panel has a section **Updates**: per component the installed and the available
+version with the code names (Ginnungagap appliance, Igdrasyl, Mjonyr, Hugyn and Munyn, Mimyr), a **Check for updates**
+button and, when a check found a release, **Update now...** with a confirmation that names the release, the services it
+restarts and the backup that is made first. All explanatory text is behind the "i" icon next to the title. Idynoun is the
+appliance's updater (`ginnungagap update`); this app only shows what it left and asks it - it installs nothing itself and has
+no Docker socket or root.
+
+* **Admin only, never automatic.** `GET /admin/updates`, `POST /admin/updates/check` and `POST /admin/updates/apply` need the admin
+  role (`require_admin`; a regular or read-only user gets 403, a signed-out one 401). The apply takes exactly
+  `{"version": ..., "confirm": true}` (any other field is refused), only for the release the last check found, and not while a
+  request or an update is under way (409). A check that is older than the installed release (an update or a rollback ran since)
+  counts as out of date and offers nothing. Nothing in the page or the server applies an update by itself; there is no timer.
+* **How it reaches the host.** The appliance mounts the update state read-only (`TOPOLOGYOPERATOR_UPDATE_STATE_DIR`, files
+  `installed.json`, `available.json`, `transaction.json`, `web-status.json`) and one request folder
+  (`TOPOLOGYOPERATOR_UPDATE_REQUEST_DIR`, the only place this app writes: a single `request.json` with id, action, the
+  signed-in user name, the role and, for an apply, the confirmed version). The host's own systemd path unit validates it again
+  and runs `ginnungagap update --check` or `--apply --yes --version X` (appliance README, "Updating from the web"). Everything
+  read from those folders is treated as untrusted text: known fields only, cut to a safe length, no links followed, size
+  limit. Where the variables are not set (anything that is not the appliance) the section says it is not available and offers
+  nothing. `app/update_panel.py`, `app/routes/updates.py`, `app/static/admin-updates.js`.
+* **Audit.** The Operator's audit log (Accounts above) gets `update_check_requested`, `update_apply_requested` (user name, the
+  release, the request id) and, once the request ended, `update_result` (its outcome, under the name of who asked; written by
+  the next admin request that sees the finished result, once per request id). The host's update audit log names the same person
+  as `web:<user name>`.
+* **The restart.** While the web app itself is restarted by an update the page keeps asking with a back-off (2, 4, 8, then 15
+  seconds) and says so in the section; the admin page carries the same "Connection lost" overlay as the canvas
+  (`connection-monitor.js`), which covers the screen for the few seconds and reloads the page when the new version answers.
+  The overlay and the landing page carry no code names; the Updates section is the place for them.
+* Tests: `tests/test_update_panel.py` (fake state and request folders, no network).
 
 ## Device configs saved with the project
 
@@ -881,7 +921,7 @@ a host has the project selected or while it is on hold, and names the hosts.
 **Hold** (File > Hold Project...) parks the live project of the active host instead of deleting it: its ESXi
 VMs are powered off, its GNS3 project is closed (GNS3 stops every node when closing) and everything is kept.
 A later deployment - even a full one - leaves the parked VMs alone: they are renamed `<name> [hold <id8>]`
-and their annotation gets the prefix `topologyoperator-hold:<project id>`, which TopologyBuilder's cleanup
+and their annotation gets the prefix `topologyoperator-hold:<project id>`, which Mjonyr's cleanup
 (it only touches annotations starting with `topologybuilder-image:`, and finds VMs by node name) never
 matches. The record of what is parked lives in `holds.json` (gitignored; `TOPOLOGYOPERATOR_HOLDS_FILE`).
 While a project is on hold the banner shows **Resume project** (and no Deploy button), the library marks it
@@ -903,7 +943,7 @@ a VPCS behind it got `192.168.42.x`, resolved names and pinged 8.8.8.8. Requirem
 itself must reach the internet, and an ESXi VM only gets it when it is linked (through GNS3 switches)
 to the NAT node and runs a DHCP client. One uplink per topology is the sensible limit (all NAT nodes
 share the same network); to the topology file it is a normal node (`image: NAT`, `role: FW` -
-TopologyBuilder only knows five roles), deployed through its built-in-node path. The LLM generator
+Mjonyr only knows five roles), deployed through its built-in-node path. The LLM generator
 knows it too: ask for "internet access".
 
 ## Selecting a project independently
@@ -912,7 +952,7 @@ A host profile does not need a topology file. Use **Project** on its tile to
 choose a named project from the library and optionally override its GNS3 project
 name. The home screen's **Project library…** button creates empty projects or
 uploads topology YAML (up to 2 MB), and downloads their YAML again. Uploaded
-files are validated with TopologyBuilder's structural checks without contacting
+files are validated with Mjonyr's structural checks without contacting
 host template services; template availability is checked at activation.
 
 The application stores each project in `projects/<internal-id>/`, with its display
@@ -944,7 +984,7 @@ does not deploy it; importing a `.topoproj` remains an explicit deployment.
 Selections live in `project_selections.json`, keyed by host profile filename, and
 survive restarts. Override the store path with `TOPOLOGYOPERATOR_PROJECT_SELECTIONS`.
 The same topology can be selected for different hosts. Host YAML downloads contain
-no topology path. TopologyBuilder's global settings
+no topology path. Mjonyr's global settings
 are populated from the selection only at startup, so project changes use the
 same restart flow as host changes. Import and live edits require a selected project.
 
@@ -963,6 +1003,8 @@ same restart flow as host changes. Import and live edits require a selected proj
   only so a password may itself contain `;` or any other character;
   best-effort - one bad line doesn't stop the rest).
 - `GET/PUT /admin/ai-config` - admin-only AI configuration switch.
+- `GET /admin/updates`, `POST /admin/updates/check`, `POST /admin/updates/apply` - admin-only update section of the appliance
+  (see Updates above): the state, a request to look for a release, a request to install exactly the confirmed one.
 - `GET /admin/audit-log` - admin-only named security/admin events (see Accounts above).
 - `POST /admin/logs/summarize` - admin-only AI summary of the last 2,000 log
   lines (see Accounts above); `GET /logs/download` remains open to every
@@ -1089,7 +1131,8 @@ whereas git and the installed package metadata can be missing or stale there. `p
 
 It is reported as `version` by `GET /health` (backend) and `GET /gateway/health` (gateway), shown as `v1.1.0` in the
 landing page footer next to "View License" / "View Logs", and in the footer of the gateway's choose-a-server page. It is
-plain text - no hover effect or tooltip.
+plain text - no hover effect or tooltip. The header of the Admin Panel names the component next to it ("Igdrasyl v1.2.1"); the
+landing page and the "Connection lost" card carry no code names.
 
 ## Testing
 

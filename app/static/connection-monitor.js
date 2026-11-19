@@ -312,7 +312,7 @@
   }
 
   const STATE_WORDS = { ok: "reached", fail: "not reachable", unknown: "not checked" };
-  const INERT_IDS = ["app-view", "landing-view", "template-banner"];
+  const INERT_IDS = ["app-view", "landing-view", "template-banner", "ap"];
 
   const ui = {
     show(situation, details) {

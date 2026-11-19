@@ -30,7 +30,7 @@ def summarize(text: str) -> str:
             f"{url}/api/summarize-text",
             json={
                 "text": text,
-                "goal": "Summarize this TopologyOperator log for an operator - "
+                "goal": "Summarize this Igdrasyl log for an operator - "
                 "call out errors and warnings first.",
             },
             timeout=Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS,

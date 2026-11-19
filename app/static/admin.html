@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Admin</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-61">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-63">
 <style>
   /* styles.css lays <body> out for the single-page app (full height, no scrolling) - this page is its own document. */
   body { display: block; height: auto; min-height: 100vh; overflow: auto; }
@@ -16,6 +16,7 @@
   }
   #ap-head img { width: 28px; height: 28px; }
   #ap-head h1 { margin: 0; font-size: 18px; font-weight: 500; flex: 1; }
+  #ap-about { color: var(--dim); font-size: 13px; }
   #ap-head a { color: var(--dim); font-size: 13px; text-decoration: none; padding: 6px 12px;
     border: 1px solid var(--border); border-radius: 6px; }
   #ap-head a:hover { color: var(--text); border-color: var(--accent-dim); }
@@ -97,6 +98,19 @@
   .ap-share-wide { grid-column: 1 / -1; }
   #ap-share-progress { width: 100%; }
   .ap-share-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  #ap-updates-card[hidden], #ap-updates-progress-wrap[hidden], #ap-updates-log-card[hidden] { display: none; }
+  #ap-updates-body td:first-child { white-space: nowrap; }
+  .ap-updates-role { color: var(--dim); font-size: 12px; }
+  #ap-updates-body tr.ap-updates-changed td { color: var(--text); }
+  #ap-updates-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #ap-updates-progress { width: 100%; margin-top: 12px; }
+  #ap-updates-log { white-space: pre-wrap; margin: 10px 0 0; font-size: 12px; max-height: 40vh; overflow: auto; }
+  #ap-updates-dialog { width: min(520px, calc(100% - 32px)); max-height: 85vh; overflow: auto;
+    box-sizing: border-box; color: inherit; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 20px; }
+  #ap-updates-dialog::backdrop { background: #0009; }
+  #ap-updates-dialog h2 { margin: 0 0 10px; }
+  #ap-updates-plan, #ap-updates-dialog-notes { margin: 0 0 10px; padding-left: 20px; font-size: 13px; }
   #ap-logs-section .toolbar-btn { margin-right: 8px; }
   #ap-logs-summary {
     white-space: pre-wrap; margin-top: 12px; padding: 12px; border-radius: 5px;
@@ -110,6 +124,7 @@
   <div id="ap-head">
     <img src="/ginnungagap-mark.svg" alt="">
     <h1>Admin Panel</h1>
+    <span id="ap-about">Igdrasyl</span>
     <a href="/">Back to Ginnungagap</a>
   </div>
 
@@ -121,6 +136,7 @@
       <a href="#ai" data-panel="ai">AI configuration</a>
       <a href="#logs" data-panel="logs">Logs</a>
       <a href="#templates" data-panel="templates">Template Share</a>
+      <a href="#updates" data-panel="updates">Updates</a>
       <a href="#audit" data-panel="audit">Audit log</a>
     </nav>
     <div id="ap-panels">
@@ -232,6 +248,43 @@
       </dialog>
     </section>
 
+    <section id="ap-updates-section" class="ap-panel" data-panel="updates">
+      <h2 class="ap-panel-title">Updates<span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>Idynoun, the updater of this appliance, looks for a new release and installs it. A check only reads. Installing needs your confirmation: the new parts are built on this machine and restarted one by one, and the appliance goes back to the release it ran before if something is not healthy. The web app restarts for about 10 to 20 seconds and this page reconnects by itself. Nothing is installed automatically.</span></span></h2>
+      <p id="ap-updates-unavailable" class="ap-status" role="status"></p>
+      <div class="ap-card" id="ap-updates-card" hidden>
+      <p class="ap-status" id="ap-updates-release"></p>
+      <div class="ap-scroll">
+      <table id="ap-updates-table">
+        <thead><tr><th>Component</th><th>Installed</th><th>Available</th><th>Change</th><th>Restarts</th></tr></thead>
+        <tbody id="ap-updates-body"></tbody>
+      </table>
+      </div>
+      <div id="ap-updates-actions">
+        <button type="button" class="toolbar-btn" id="ap-updates-check">Check for updates</button>
+        <button type="button" class="toolbar-btn primary" id="ap-updates-apply" hidden>Update now…</button>
+      </div>
+      <p class="ap-status" id="ap-updates-status" role="status"></p>
+      <div id="ap-updates-progress-wrap" hidden>
+        <progress id="ap-updates-progress" max="8" aria-label="Update progress"></progress>
+        <p class="ap-status" id="ap-updates-phase" role="status"></p>
+      </div>
+      </div>
+      <details class="ap-card" id="ap-updates-log-card" hidden>
+        <summary>Log of the last request</summary>
+        <pre id="ap-updates-log"></pre>
+      </details>
+      <dialog id="ap-updates-dialog" aria-labelledby="ap-updates-dialog-title">
+        <h2 id="ap-updates-dialog-title">Install this release?</h2>
+        <ul id="ap-updates-plan"></ul>
+        <ul id="ap-updates-dialog-notes"></ul>
+        <p id="ap-updates-dialog-status" class="ap-status" role="status"></p>
+        <div class="ap-share-footer">
+          <button type="button" class="toolbar-btn" id="ap-updates-cancel">Cancel</button>
+          <button type="button" class="toolbar-btn primary" id="ap-updates-install">Install now</button>
+        </div>
+      </dialog>
+    </section>
+
     <section id="ap-audit-section" class="ap-panel" data-panel="audit">
       <h2 class="ap-panel-title">Audit log</h2>
       <div class="ap-card">
@@ -247,8 +300,28 @@
     </div>
   </div>
 </div>
-<script src="/admin-nav.js?v=ginnungagap-61"></script>
-<script src="/admin-template-share.js?v=ginnungagap-61"></script>
-<script src="/admin.js?v=ginnungagap-61"></script>
+
+<div id="connection-lost" role="alert" aria-live="assertive" hidden>
+  <div class="cl-card">
+    <img class="cl-mark" src="/ginnungagap-mark.svg" alt="">
+    <h1 class="cl-title" id="cl-title">Connection lost</h1>
+    <p class="cl-message" id="cl-message"></p>
+    <ul class="cl-layers" id="cl-layers"></ul>
+    <p class="cl-since" id="cl-since"></p>
+    <p class="cl-countdown" id="cl-countdown"></p>
+    <div class="cl-actions">
+      <button class="toolbar-btn" id="cl-retry" type="button">Retry now</button>
+      <a class="toolbar-btn" id="cl-picker" href="/pick-backend">Choose another server</a>
+      <form id="cl-signout" action="/logout" method="post"><button class="toolbar-btn" type="submit">Sign out</button></form>
+    </div>
+  </div>
+</div>
+<p id="cl-restored" role="status" hidden>Connected again</p>
+<script src="/connection-monitor.js?v=ginnungagap-63"></script>
+<script src="/info-popover.js?v=ginnungagap-63"></script>
+<script src="/admin-nav.js?v=ginnungagap-63"></script>
+<script src="/admin-template-share.js?v=ginnungagap-63"></script>
+<script src="/admin-updates.js?v=ginnungagap-63"></script>
+<script src="/admin.js?v=ginnungagap-63"></script>
 </body>
 </html>
