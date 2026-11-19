@@ -270,7 +270,10 @@ async function monitorLibraryDeployment(project, jobId) {
     setMenubarMessage(`Deployment failed: ${result.error}`); return;
   }
   await loadCanvas();
-  setMenubarMessage(`Deployed “${project.name}” successfully.${describePush(result.push_results)}`, { error: pushHadFailures(result.push_results) });
+  setMenubarMessage(`Deployed “${project.name}” successfully.${describePush(result.push_results)}`, {
+    error: pushHadFailures(result.push_results),
+    action: designMode ? { label: "Open live mode", onClick: openLiveCanvas } : null,
+  });
   showPushResults(result.push_results);
 }
 

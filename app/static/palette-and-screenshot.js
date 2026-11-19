@@ -423,7 +423,27 @@ function setMenubarMessage(text, opts = {}) {
     close.textContent = "\u00d7";
     close.setAttribute("aria-label", "Dismiss message");
     close.addEventListener("click", clearMenubarStatus);
-    el.append(label, close);
+    el.appendChild(label);
+    if (opts.action) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "toolbar-btn";
+      action.textContent = opts.action.label;
+      action.addEventListener("click", async () => {
+        if (action.disabled) return;
+        action.disabled = true;
+        try {
+          await opts.action.onClick();
+          action.remove();
+        } catch (error) {
+          setMenubarMessage(error.message, { error: true });
+        } finally {
+          action.disabled = false;
+        }
+      });
+      el.appendChild(action);
+    }
+    el.appendChild(close);
   }
   el.classList.toggle("menubar-error", opts.error ?? MENUBAR_ERROR_PATTERN.test(text));
 }

@@ -160,6 +160,9 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   deployment runs, hidden for the readonly role, and opens the dialog
   instead only when a value cannot be guessed (a design that was never
   saved needs a name; several hosts with none selected need a choice).
+  After a successful deployment, **Open live mode** appears beside the
+  success message. It opens the deployed topology on the active host
+  directly, without returning to the main menu or deploying again.
 - **Generate via LLM** (`app/generate_jobs.py`): a landing-page action
   that turns a natural-language prompt into a topology via the Topology
   Generator API (`src.connections.topology_generator_client`), mirroring
