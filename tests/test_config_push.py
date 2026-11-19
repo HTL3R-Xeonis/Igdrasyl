@@ -632,9 +632,10 @@ def test_push_all_processes_network_devices_first_but_returns_the_order_asked_fo
 # ---- native_shell: commands the way the device's own shell expects them ----
 
 
-async def _recording_ios(received, fail_on, reader, writer):
+async def _recording_ios(received, fail_on, reader, writer, initial_prompt="R1#"):
     """Like _fake_ios, but remembers every line the console was sent."""
-    writer.write(b"\r\nR1#")
+    prompt = initial_prompt
+    writer.write(f"\r\n{prompt}".encode())
     await writer.drain()
     buf = b""
     try:
@@ -650,18 +651,36 @@ async def _recording_ios(received, fail_on, reader, writer):
                 buf = b""
                 if line:
                     received.append(line)
-                if line == fail_on:
-                    writer.write(b"\r\n% Invalid input detected\r\nR1#")
+                if line == fail_on or (
+                    line == "configure terminal" and "(config" in prompt
+                ):
+                    writer.write(f"\r\n% Invalid input detected\r\n{prompt}".encode())
                 else:
-                    writer.write(b"\r\nR1#")
+                    if line == "configure terminal":
+                        prompt = "R1(config)#"
+                    elif line == "end":
+                        prompt = "R1#"
+                    elif line.startswith("interface "):
+                        prompt = "R1(config-if)#"
+                    writer.write(f"\r\n{prompt}".encode())
                 await writer.drain()
     except Exception:
         pass
 
 
-def _push_ios(graph, fake_tcp_server, commands, fail_on=None, node="R1", **options):
+def _push_ios(
+    graph,
+    fake_tcp_server,
+    commands,
+    fail_on=None,
+    node="R1",
+    initial_prompt="R1#",
+    **options,
+):
     received: list[str] = []
-    port = fake_tcp_server(lambda r, w: _recording_ios(received, fail_on, r, w))
+    port = fake_tcp_server(
+        lambda r, w: _recording_ios(received, fail_on, r, w, initial_prompt)
+    )
     result = cp._push_via_netmiko(
         graph.nodes[node], commands, "127.0.0.1", port, **options
     )
@@ -692,6 +711,47 @@ def test_native_shell_leaves_configuration_mode_after_a_failed_command(
     )
     assert result.ok is False
     assert received == ["configure terminal", "good", "bad command", "end"]
+
+
+@pytest.mark.parametrize("fail_on", [None, "bad command"])
+def test_native_shell_reuses_an_existing_global_configuration_prompt(
+    graph, fake_tcp_server, fail_on
+):
+    commands = ["interface GigabitEthernet0/0", "ip address 192.0.2.1 255.255.255.0"]
+    if fail_on:
+        commands.append(fail_on)
+    result, received = _push_ios(
+        graph,
+        fake_tcp_server,
+        commands,
+        fail_on=fail_on,
+        initial_prompt="R1(config)#",
+        native_shell=True,
+    )
+    assert result.ok is (fail_on is None)
+    assert received == commands + ["end"]
+    assert result.executed == len(commands)
+
+
+@pytest.mark.parametrize("initial_prompt", ["R1(config-if)#", "R1(config-router)#"])
+def test_native_shell_leaves_a_configuration_submode_before_entering_global_mode(
+    graph, fake_tcp_server, initial_prompt
+):
+    result, received = _push_ios(
+        graph,
+        fake_tcp_server,
+        ["interface GigabitEthernet0/0", "ip address 192.0.2.1 255.255.255.0"],
+        initial_prompt=initial_prompt,
+        native_shell=True,
+    )
+    assert result.ok is True
+    assert received == [
+        "end",
+        "configure terminal",
+        "interface GigabitEthernet0/0",
+        "ip address 192.0.2.1 255.255.255.0",
+        "end",
+    ]
 
 
 def test_native_shell_stops_when_configuration_mode_cannot_be_entered(

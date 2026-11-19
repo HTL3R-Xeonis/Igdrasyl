@@ -108,7 +108,9 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
   and can be opened offline. **Operator Project (.topoproj)** exports the existing Operator bundle.
 - **GNS3 Project (.gns3project)** streams the live controller's native archive without bundling base images
   or ESXi VMs. GNS3 requires the project's devices to be stopped before export; the Operator never stops
-  them for you. Use `.topoproj` to hand off an Operator topology with ESXi device definitions.
+  them for you. A confirmation reminds you to stop them before requesting the archive. Export failures
+  appear in a popup on the canvas instead of opening an error page. The browser buffers the archive
+  before starting the download. Use `.topoproj` to hand off an Operator topology with ESXi device definitions.
 - Project import/export (`app/project_bundle.py`): a `.topoproj` bundle
   (a plain zip) carries the topology YAML, a sanitized settings
   snapshot (used only as an ESXi/GNS3-target safety check on import,
@@ -747,8 +749,10 @@ allowed settings. Every device that can receive a push is offered, with the plat
 
 The wrapping is the push path's own `native_shell` option (`DeviceSpec.native_shell`, also usable in a manual
 push as `{"commands": [...], "native_shell": true}`; default off = every command verbatim). On a Cisco IOS console it
-sends `configure terminal` first and `end` last, even when a command failed, so the console is never left in
-configuration mode; neither line shows up in the results. On a Windows VM each command is run as
+checks the current prompt first: an existing global configuration prompt is reused; an interface or routing
+submode is left with `end` before entering global configuration mode. It sends `configure terminal` only
+when needed and finishes with `end`, even when a command failed, so the console is never left in
+configuration mode; these mode transitions do not show up in the results. On a Windows VM each command is run as
 `powershell -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ...` (the script travels base64-encoded, so
 quotes, pipes and `%` reach PowerShell unchanged); a command that already starts with `cmd`, `powershell` or `pwsh` is
 left alone, and the result lists the command as written. Linux, RouterOS, pfSense/OPNsense, VPCS and other GNS3 nodes

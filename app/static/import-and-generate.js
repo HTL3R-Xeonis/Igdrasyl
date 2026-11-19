@@ -41,6 +41,44 @@ async function pollGns3VmDeployJob(jobId) {
   }
 }
 
+let exportingGns3Project = false;
+async function exportNativeGns3Project(event) {
+  event.preventDefault();
+  if (exportingGns3Project) return;
+  exportingGns3Project = true;
+  try {
+    if (!await showConfirm(
+      "All devices in this GNS3 project must be stopped before exporting. If any are running, cancel and stop them first. Continue with the export?",
+      { title: "Export GNS3 project", confirmLabel: "Export" }
+    )) return;
+    setMenubarBusy("Preparing GNS3 project export…");
+    // Fetch first so a refused export is shown here instead of navigating to an error page.
+    const response = await fetch("/export/gns3project");
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(typeof body.detail === "string" ? body.detail : `Export failed (HTTP ${response.status}).`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = /filename="([^"]+)"/i.exec(response.headers.get("Content-Disposition") || "")?.[1] || "topology.gns3project";
+    document.body.appendChild(link);
+    try { link.click(); }
+    finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    setMenubarMessage("GNS3 project exported.");
+  } catch (error) {
+    setMenubarMessage(`GNS3 export failed: ${error.message}`, { error: true });
+    await showAlert(error.message, { title: "Export GNS3 project" });
+  } finally {
+    exportingGns3Project = false;
+  }
+}
+document.getElementById("export-gns3-btn").addEventListener("click", exportNativeGns3Project);
+
 document.getElementById("deploy-gns3-vm-btn").addEventListener("click", async () => {
   if (!await showConfirm(
     `Replace the GNS3 VM with a freshly imported one from its OVA?\n\n` +

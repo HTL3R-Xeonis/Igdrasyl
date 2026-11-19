@@ -271,8 +271,17 @@ def _push_via_netmiko(
     try:
         if config_mode:
             try:
-                entered = conn.send_command_timing("configure terminal")
-            except ReadTimeout:
+                prompt = conn.find_prompt(pattern=r"[>#]\s*$").strip()
+                # GNS3 shares the console with interactive users. It may already
+                # be in configuration mode; IOS rejects another "conf t" there.
+                in_config_mode = bool(re.search(r"\(config[^()\r\n]*\)#$", prompt))
+                if prompt.endswith("(config)#"):
+                    entered = ""
+                else:
+                    entered = conn.send_command_timing("end") if in_config_mode else ""
+                    if not _looks_like_ios_error(entered):
+                        entered = conn.send_command_timing("configure terminal")
+            except (ReadTimeout, ValueError):
                 entered = None
             if entered is None or _looks_like_ios_error(entered):
                 return DeviceResult(
