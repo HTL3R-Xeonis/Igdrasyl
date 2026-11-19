@@ -16,8 +16,7 @@ library project, instead of an inverse operation per endpoint. Strings
 copied, so the 100-step depth stays cheap.
 
 Only the design sketch has history. A live project's nodes and links are
-real VMs - those changes are deliberately not undoable (see the plan in
-handoff/PLAN_gui_gns3_parity.md).
+real VMs - those changes are deliberately not undoable.
 """
 
 from __future__ import annotations

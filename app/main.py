@@ -7,8 +7,7 @@ routes, every route module and the frontend, and nothing else.
 Everything else (GNS3 console proxy, config push, embedded VM screens)
 plugs into the connections/graph this module resolves once at startup.
 
-Two deployment shapes (design: TopologyBuilder/handoff/plans/PLAN_login_multiserver.md,
-setup: deploy/README.md). Started directly (uvicorn app.main:app) this module is a
+Two deployment shapes (setup: deploy/README.md). Started directly (uvicorn app.main:app) this module is a
 complete single-process app, login and first-boot admin included. Behind the gateway
 (app/gateway_main.py) it is one *backend* per host profile, reachable only through the
 gateway's proxy: deploy/xeonis-backend-launch.py sets TOPOLOGYOPERATOR_GATEWAY_BACKEND=1,

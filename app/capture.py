@@ -16,8 +16,8 @@ results) 404s here; GNS3 2.2's own endpoint reference
 (api.gns3.net/en/2.2/endpoints.html) confirms /pcap for this branch.
 Proxied through this app's own GET /links/{node1}/{node2}/capture/stream
 (app/main.py) rather than handing the browser a direct GNS3-VM URL, since
-only this backend (running on testbox) is guaranteed to reach the GNS3
-VM - see handoff/INFRASTRUCTURE.md's "Known access-path limits".
+only this backend (running in the lab network) is guaranteed to reach the
+GNS3 VM.
 
 Known upstream flakiness (confirmed live, not guessed): GNS3's own /pcap
 endpoint intermittently never sends a response at all - the exact same
@@ -26,8 +26,7 @@ this app's own client) can hang indefinitely with zero bytes back, a
 known class of issue in gns3-server's pcap streaming (e.g. GNS3/gns3-
 server#2513). _STREAM_CONNECT_TIMEOUT_SECONDS below bounds how long a
 hung attempt ties up a worker thread; it can't make GNS3's own endpoint
-actually respond. See handoff/INFRASTRUCTURE.md for the operator-facing
-note.
+actually respond.
 """
 
 from __future__ import annotations

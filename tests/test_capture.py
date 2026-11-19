@@ -103,7 +103,7 @@ def test_start_capture_reopens_the_project_first(app_state):
     Real bug found live: GNS3's own controller state can silently drift
     back to "closed" independently of node status, and every mutating
     per-link call (start_capture included) then 403s with "The project
-    is not opened" - confirmed against the real GNS3 VM on testbox.
+    is not opened" - confirmed against the real GNS3 VM in the lab.
     """
     app = _app_state(app_state)
     with (

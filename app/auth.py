@@ -1,8 +1,7 @@
 """
 Signed-cookie sessions for the login in app/users.py/app/routes/auth.py.
 Stdlib-only (hmac/secrets/hashlib) - no itsdangerous/Starlette
-SessionMiddleware, matching this project's lean dependency list (see the
-handoff plan this was built from).
+SessionMiddleware, matching this project's lean dependency list.
 
 A session token is "<username>:<role>:<expiry_unix_ts>" HMAC-SHA256 signed
 with a secret generated once and persisted to disk (not an env var - it

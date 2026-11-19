@@ -25,10 +25,9 @@ def guest_credentials_for_image(image: str) -> tuple[str, str] | None:
     The `root` user/password pair (parallel lists, index-matched) from
     the ESXi Template-API's per-template metadata for the given image,
     falling back to the first pair if no `root` entry exists (e.g. the
-    Windows templates, which only ever list one non-root account) - see
-    HANDOFF.md, confirmed live on this project's real infrastructure
-    (e.g. debian: users=[junioradmin, root], passwords=[junioradmin,
-    REMOVED]). Real bug found live: the first pair (junioradmin on
+    Windows templates, which only ever list one non-root account),
+    confirmed live on the lab's real infrastructure (e.g. debian:
+    users=[junioradmin, root], passwords=[junioradmin, <root password>]). Real bug found live: the first pair (junioradmin on
     every Linux template) has no passwordless sudo configured, so
     config-push commands needing root - i.e. almost anything that
     actually configures the guest - failed silently (guest-ops only

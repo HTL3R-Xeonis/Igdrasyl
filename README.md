@@ -480,6 +480,8 @@ If `users.json` doesn't exist at startup, one `admin` account is created with th
 default password `admin` - deliberately predictable, not a generated secret, since
 it's meant to be the very first login on a fresh install and changed right away via
 the admin panel; logged once at `WARNING` level as a reminder.
+For any installation that other people can reach, set `TOPOLOGYOPERATOR_BOOTSTRAP_PASSWORD` before the first start: that value
+becomes the first admin's password instead of `admin` (and is never logged). Without it, change the password at once.
 
 **After login the chosen server's canvas opens directly** (not the main menu). The login and the gateway's **Activate** both
 redirect to `/?enter=1`; the page (`startView()` in `app/static/import-and-generate.js`) removes the flag at once, checks `/health`
@@ -1081,7 +1083,7 @@ The frontend at `/` covers all of these.
 ## Application version
 
 The version (`MAJOR.MINOR.PATCH`, currently `1.1.0`) lives in exactly one place: the single line `__version__ = "1.1.0"` in
-`app/version.py`. It is a plain file under `app/` on purpose: a deploy by raw file copy (as on the lab testbox) carries it along,
+`app/version.py`. It is a plain file under `app/` on purpose: a deploy by raw file copy (as on a plain lab test machine) carries it along,
 whereas git and the installed package metadata can be missing or stale there. `pyproject.toml` reads the same value
 (`dynamic = ["version"]`), so a built package cannot disagree; a test fails if the two ever drift. To bump it, edit that one line.
 

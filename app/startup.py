@@ -56,8 +56,7 @@ def refresh_startup_state(app: FastAPI, allow_auto_deploy: bool = True) -> None:
     /nodes, /layout and GET /project/export, which all now check
     app.state.graph is None and 503 instead of crashing when this
     couldn't load it (previously an unhandled exception here failed the
-    whole FastAPI lifespan, refusing to start the process at all - see
-    handoff/INFRASTRUCTURE.md's "Template-listing API" outage note).
+    whole FastAPI lifespan, refusing to start the process at all).
     """
     warnings: list[str] = []
 

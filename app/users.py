@@ -7,8 +7,7 @@ writes) - a school-class install has few accounts, not enough to need
 one-file-per-user.
 
 Passwords are never stored or logged in the clear. hash_password/
-verify_password use stdlib hashlib.pbkdf2_hmac (no new dependency - see the
-handoff plan for why this project avoids adding passlib/bcrypt for this).
+verify_password use stdlib hashlib.pbkdf2_hmac (no new dependency: this project avoids adding passlib/bcrypt for this).
 The iteration count travels inside the stored hash string, so it can be
 raised later without a migration flag day - verify_password always uses
 whatever count a given hash was created with.
@@ -33,6 +32,7 @@ from app.settings_profiles import _SAFE_NAME_PATTERN
 _LOCK = Lock()
 _PBKDF2_ITERATIONS = 600_000
 _SALT_BYTES = 16
+BOOTSTRAP_PASSWORD_ENV_VAR = "TOPOLOGYOPERATOR_BOOTSTRAP_PASSWORD"
 VALID_ROLES = ("admin", "user", "readonly")
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,60}$")
 MIN_PASSWORD_LENGTH = 8
@@ -321,13 +321,19 @@ def ensure_bootstrap_admin() -> str | None:
     Deliberately predictable rather than random: this is meant to be the
     very first login on a fresh install, changed via the admin panel right
     after - not a secret handed out once.
-    :return: the password just set ("admin"), to be logged once by the
-        caller, or None if accounts already exist and nothing was created.
+    If TOPOLOGYOPERATOR_BOOTSTRAP_PASSWORD is set (non-empty), that value
+    becomes the first admin's password instead of the default - use it for
+    any installation that is reachable by other people. The value is never
+    returned, so it is never logged.
+    :return: the default password just set ("admin"), to be logged once by
+        the caller, or None if accounts already exist and nothing was
+        created, or if a password from the environment was used.
     """
     with _LOCK:
         if _read():
             return None
-        password = "admin"
+        custom = os.environ.get(BOOTSTRAP_PASSWORD_ENV_VAR, "")
+        password = custom or "admin"
         users = {
             "admin": {
                 "password_hash": hash_password(password),
@@ -336,4 +342,4 @@ def ensure_bootstrap_admin() -> str | None:
             }
         }
         _write(users)
-        return password
+        return None if custom else password

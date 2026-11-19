@@ -8,7 +8,7 @@ local socket, not a mock - `websockets.connect` is patched to redirect
 to that local server regardless of the (always wss://, self-signed-
 cert) URL vm_screen.py itself builds, since the TLS/URL-construction
 part is trivial string formatting already covered by live verification
-(see HANDOFF.md) and not worth a fake TLS cert just to unit-test.
+and not worth a fake TLS cert just to unit-test.
 """
 
 from __future__ import annotations

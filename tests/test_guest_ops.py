@@ -17,12 +17,12 @@ def test_guest_credentials_for_image_prefers_root():
             {
                 "name": "debian",
                 "users": ["junioradmin", "root"],
-                "passwords": ["junioradmin", "REMOVED"],
+                "passwords": ["junioradmin", "lab-root-pw"],
             }
         ]
     }
     with patch("app.guest_ops.APIHandler.get", return_value=templates):
-        assert guest_credentials_for_image("debian") == ("root", "REMOVED")
+        assert guest_credentials_for_image("debian") == ("root", "lab-root-pw")
 
 
 def test_guest_credentials_for_image_falls_back_without_root():

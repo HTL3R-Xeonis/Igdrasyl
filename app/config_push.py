@@ -3,7 +3,7 @@ Config-push engine: sends a device-name-keyed list of raw CLI commands to
 each device, transport auto-selected from its role/env (already known
 from the live topology graph) - GNS3 console devices go over Telnet via
 Netmiko, ESXi-hosted VMs go over pyvmomi's Guest Operations API. Per the
-project's design (see HANDOFF.md): stop pushing a device's remaining
+project's design: stop pushing a device's remaining
 commands on its first failure, but always continue on to the next
 device - implemented by catching/recording failures per-device rather
 than letting one raise out of push_all.

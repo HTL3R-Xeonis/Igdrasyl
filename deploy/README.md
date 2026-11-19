@@ -66,8 +66,7 @@ risk is editing one file's paths later and forgetting the other.
 3. **The secrets file** both units load via `EnvironmentFile=`
    (`/opt/ginnungagap/state/xeonis.env` in the unit files here) - same
    shape as this repo's own `.env.example`, plus the AI-snippet service
-   token mentioned in `TopologyBuilder/handoff/HANDOFF.md`'s AI-config
-   rollout entries:
+   token (`XEONIS_AI_SNIPPETS_TOKEN`, only if the generator's snippet endpoint is enabled):
    ```
    ESXI_PASSWORD=...
    GNS3_PASSWORD=...

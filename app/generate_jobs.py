@@ -182,8 +182,7 @@ def run_generate_job(
             # both depend on it) is unreachable - retrying won't help until
             # it's back, so stop immediately with a clear error instead of
             # burning through every remaining attempt against a known-down
-            # dependency (see handoff/INFRASTRUCTURE.md's template-service
-            # outage note).
+            # dependency.
             job.status = "error"
             job.error = f"Template service unavailable: {exc}"
             logger.warning(

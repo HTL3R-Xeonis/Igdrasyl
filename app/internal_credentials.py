@@ -1,6 +1,5 @@
 """
-Service-to-service endpoint: hands the ESXi login of one known host to the template collector (see
-TopologyBuilder/handoff/plans/PLAN_collector_credentials_from_operator.md). The Operator's host profiles stay the only
+Service-to-service endpoint: hands the ESXi login of one known host to the template collector). The Operator's host profiles stay the only
 store of a host's password; nothing here keeps a copy. Everything that could leak (token, password) stays out of logs,
 audit events and error texts.
 """

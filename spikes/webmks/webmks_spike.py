@@ -15,8 +15,7 @@ WebMKS connection - TLS completes, ticket acquisition succeeds, but the
 tunnel itself never sends a byte back - if that directory doesn't exist
 on the actual ESXi host serving the ticket. Confirmed happening on this
 lab's host after an ad-hoc hostd/rhttpproxy restart apparently never
-recreated it (see TopologyOperator's HANDOFF.md for the full
-investigation). ensure_ticket_directory() below checks/creates it via
+recreated it (found in a longer investigation). ensure_ticket_directory() below checks/creates it via
 SSH before printing the ticket URL, on whichever host actually ends up
 serving the ticket - so this keeps self-healing automatically if the
 same thing happens again here, or the first time it's hit against a
@@ -25,8 +24,7 @@ this exact lab host: even with the directory present, the connection
 still gets torn down one layer deeper (vmx's own mks subsystem logs
 "owner closed connection in recv callback" the instant it's accepted) -
 that part looks like a genuine host-build bug, not something fixable
-from here (see HANDOFF.md - same conclusion as the classic-VNC bypass's
-own dead end). Skipped entirely (with a warning, not a hard failure) if
+from here (same conclusion as the classic-VNC bypass's own dead end). Skipped entirely (with a warning, not a hard failure) if
 no SSH password is given, or if SSH isn't reachable/enabled on the host -
 this is a best-effort recovery attempt, not a hard requirement to
 acquire a ticket.

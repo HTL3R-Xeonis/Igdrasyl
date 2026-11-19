@@ -11,8 +11,8 @@ our own backend" shape as app/console.py, just with a WebSocket-to-
 WebSocket bridge instead of TCP-to-WebSocket, since WebMKS's own
 transport already is a WebSocket carrying raw RFB (VNC) protocol bytes.
 
-Historically a dead end on this project's real infrastructure (see
-HANDOFF.md's full investigation): WebMKS and classic VNC both hit the
+Historically a dead end on this project's real infrastructure (after a
+full investigation): WebMKS and classic VNC both hit the
 exact same "accepted then instantly closed, zero bytes" failure,
 traced to what looked like a genuine build-level bug in vmx's own mks
 subsystem - concluded as infrastructure work beyond this project's own

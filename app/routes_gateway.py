@@ -8,8 +8,7 @@ app/settings_profiles.py/app/connection_settings.py/app/ova_templates.py
 code those two modules already called, just reached through the
 gateway now.
 
-What moved and why, one line each (the full reasoning for each is in
-the gateway design in TopologyBuilder/handoff/plans/PLAN_login_multiserver.md):
+What moved and why, one line each (the gateway design in deploy/README.md):
 - user accounts and AI configuration: shared across every
   backend, so there is exactly one place to manage them - here.
 - settings-profile CRUD, connection settings, host-config create/preview/

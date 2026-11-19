@@ -242,3 +242,15 @@ def test_create_users_bulk_applies_the_shared_role_and_allowed_hosts():
     )
     assert all(r["allowed_hosts"] == ["lab-a.yml"] for r in results)
     assert all(r["role"] == "admin" for r in results)
+
+
+def test_ensure_bootstrap_admin_uses_a_password_from_the_environment_and_never_returns_it(
+    monkeypatch,
+):
+    monkeypatch.setenv(users.BOOTSTRAP_PASSWORD_ENV_VAR, "chosen-by-the-installer")
+
+    assert (
+        users.ensure_bootstrap_admin() is None
+    )  # nothing to log: the value is not the default
+    assert users.authenticate("admin", "chosen-by-the-installer") == "admin"
+    assert users.authenticate("admin", "admin") is None

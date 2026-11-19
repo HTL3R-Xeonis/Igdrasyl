@@ -109,7 +109,7 @@ def _download_dir() -> str:
     """
     Where an OVA is staged before the import. OVAs are several GB, so this must
     be a real disk: the system temp dir is often a RAM-backed /tmp of a
-    gigabyte (testbox: 968 MB) - set TOPOLOGYOPERATOR_DOWNLOAD_DIR to a
+    gigabyte (968 MB on a small lab machine) - set TOPOLOGYOPERATOR_DOWNLOAD_DIR to a
     directory on a big disk there.
     """
     directory = os.getenv(_DOWNLOAD_DIR_ENV_VAR) or tempfile.gettempdir()

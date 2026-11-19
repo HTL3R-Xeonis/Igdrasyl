@@ -7,11 +7,21 @@ from pathlib import Path
 from app.version import __version__
 
 ROOT = Path(__file__).resolve().parent.parent
-SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+# SemVer 2.0 without build metadata: X.Y.Z, or X.Y.Z-rc.N for a release candidate (the release tag must equal it).
+SEMVER = re.compile(
+    r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(-(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?"
+)
 
 
-def test_the_version_is_major_minor_patch():
-    assert SEMVER.match(__version__)
+def test_the_version_is_semver():
+    assert SEMVER.fullmatch(__version__)
+
+
+def test_the_semver_pattern_takes_release_candidates_and_refuses_the_rest():
+    assert SEMVER.fullmatch("1.3.0-rc.1")
+    for bad in ("1.3", "v1.3.0", "01.3.0", "1.3.0-", "1.3.0-rc..1", "1.3.0 "):
+        assert not SEMVER.fullmatch(bad), bad
 
 
 def test_the_version_file_is_a_plain_assignment_setuptools_can_read_statically():
@@ -35,7 +45,7 @@ def test_pyproject_takes_the_version_from_app_version():
 
 def test_backend_health_carries_the_version(client, app_state):
     version = client.get("/health").json()["version"]
-    assert version == __version__ and SEMVER.match(version)
+    assert version == __version__ and SEMVER.fullmatch(version)
 
 
 def test_gateway_health_carries_the_version(gateway_client):

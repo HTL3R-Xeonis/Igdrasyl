@@ -69,8 +69,7 @@ def _fetch_gns3_templates() -> list[dict]:
 
     Deliberately tolerant of the Template-API server being unreachable,
     slow, or returning a differently-shaped body (that exact server has
-    had a real outage this project already hit and diagnosed - see
-    HANDOFF.md) - any failure here just means the frontend falls back to
+    had a real outage this project already hit and diagnosed) - any failure here just means the frontend falls back to
     guessing (categories) or free text (ports) for every GNS3 template,
     a degraded UI, not a broken /templates endpoint.
     """
