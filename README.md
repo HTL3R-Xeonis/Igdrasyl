@@ -381,6 +381,9 @@ settings for, so it still fails loudly.
 
 ## Running it
 
+The Mjonyr library is installed from the `dev` branch of the repository currently named `TopologyBuilder`.
+The dependency URL in `pyproject.toml` follows that repository name until its GitHub rename is complete.
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
