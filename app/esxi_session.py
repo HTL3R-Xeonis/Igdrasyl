@@ -82,6 +82,9 @@ class LazyESXiConnection:
         self._connection: Any = None
         self._failed_at: float | None = None
         self._attempt: _Attempt | None = None
+        self._health_attempt: _Attempt | None = None
+        self._health_checked_at = float("-inf")
+        self._health_ok = False
 
     @property
     def connected(self) -> bool:
@@ -149,3 +152,25 @@ class LazyESXiConnection:
         if name.startswith("__"):
             raise AttributeError(name)
         return getattr(self.connection(), name)
+
+    def check_host(self) -> bool:
+        """Bounded, shared read-only API probe. A pending probe is reused by every browser."""
+        with self._lock:
+            if self._clock() - self._health_checked_at < 10:
+                return self._health_ok
+            if self._health_attempt is None:
+                self._health_attempt = _Attempt(self._probe_host, self._clock())
+            attempt = self._health_attempt
+        attempt.done.wait(2)
+        with self._lock:
+            if not attempt.done.is_set():
+                return False
+            if self._health_attempt is attempt:
+                self._health_ok = attempt.error is None
+                self._health_checked_at = self._clock()
+                self._health_attempt = None
+            return self._health_ok
+
+    def _probe_host(self) -> None:
+        connection = self.connection()
+        connection._call_with_reconnect(lambda: connection.connection.CurrentTime())

@@ -81,7 +81,14 @@
     if (backend.ok && backend.json) {
       out.backend = "ok";
       out.hostAddress = backend.json.esxi_ip || null;
-      out.host = out.hostAddress ? "ok" : "unknown";
+      if (out.hostAddress) {
+        const host = await env.get("/connection/host");
+        if (host.status === 401) {
+          out.session = false;
+          return out;
+        }
+        out.host = host.ok && host.json && host.json.status === "ok" ? "ok" : "fail";
+      }
       if (out.singleProcess) out.version = backend.json.version || null;
       return out;
     }
@@ -100,7 +107,7 @@
   }
 
   function isHealthy(result) {
-    return result.browser === "ok" && result.session && result.gateway !== "fail" && result.backend === "ok";
+    return result.browser === "ok" && result.session && result.gateway !== "fail" && result.backend === "ok" && result.host !== "fail";
   }
 
   // The title, the one plain sentence and the four layers for what runChecks found.
@@ -111,6 +118,9 @@
     if (result.browser === "fail") {
       title = "No network connection";
       message = "This computer has no network connection to the Ginnungagap server.";
+    } else if (result.backend === "ok" && result.host === "fail") {
+      title = `Connection to host ${result.hostAddress} lost`;
+      message = "The ESXi host is not answering or its session was refused. Check the host connection and saved credentials. A deployment may have stopped partway through. Check its result before starting it again.";
     } else if (result.gateway === "ok" && result.backend === "fail") {
       if (result.backendState === "starting") {
         title = `The server for ${name} is starting`;

@@ -65,7 +65,24 @@ const down = { ok: false, status: 0, json: null, contentType: "", error: "TypeEr
 const healthy = () => ({
   "/gateway/health": ok({ status: "ok", version: "1.1.0" }),
   "/health": ok({ esxi_ip: "10.0.0.5" }),
+  "/connection/host": ok({ host: "10.0.0.5", status: "ok" }),
   "/gateway/status": ok({ selected: "lab.yml", backend: "running", host: "10.0.0.5" }),
+});
+
+test("an ESXi outage is detected while the gateway and backend still answer", async () => {
+  const w = world({ ...healthy(), "/connection/host": ok({ host: "10.0.0.5", status: "unreachable" }) });
+  const monitor = m.createMonitor(w.env);
+  monitor.start();
+  await w.advance(4000);
+  assert.equal(monitor.state, "lost");
+  const result = await m.runChecks(w.env);
+  assert.equal(result.backend, "ok");
+  assert.equal(result.host, "fail");
+  assert.equal(m.isHealthy(result), false);
+  assert.equal(m.describeSituation(result).title, "Connection to host 10.0.0.5 lost");
+  w.state.answers["/connection/host"] = ok({ host: "10.0.0.5", status: "ok" });
+  await w.advance(5000);
+  assert.equal(monitor.state, "ok");
 });
 
 test("the back-off is 2 s, 4 s, 8 s and then 15 s for every further try", () => {

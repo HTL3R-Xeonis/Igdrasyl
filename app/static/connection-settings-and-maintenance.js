@@ -241,7 +241,19 @@ function closeConnectionSettings() {
 }
 document.getElementById("connection-close").addEventListener("click", closeConnectionSettings);
 connectionDialog.addEventListener("cancel", event => { event.preventDefault(); if (!connectionBusy) closeConnectionSettings(); });
-connectionApply.addEventListener("click", async () => { connectionDialog.close(); await enterHost(connectionFilename, false); });
+connectionApply.addEventListener("click", async () => {
+  connectionDialog.close();
+  try {
+    if (await isGatewayMode()) {
+      await settingsRequest(`/settings-profiles/${encodeURIComponent(connectionFilename)}/restart`, { method: "POST" });
+      await switchGatewayHost(connectionFilename);
+      return;
+    }
+    await enterHost(connectionFilename, false);
+  } catch (error) {
+    await showAlert(`Applying host settings failed: ${error.message}`, { title: "Host settings" });
+  }
+});
 
 // Opens the live canvas of the active host (the host's own banner shows what is missing: no project, host down, ...).
 async function openLiveCanvas() {

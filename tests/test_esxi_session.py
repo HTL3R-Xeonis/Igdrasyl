@@ -227,3 +227,71 @@ def test_a_connect_that_fails_late_is_recorded_as_a_failure():
     with pytest.raises(EsxiUnavailable, match="can't be reached"):
         lazy.get_vm("VM1")
     assert not lazy.connected
+
+
+def test_host_check_uses_the_api_and_caches_its_result():
+    real = MagicMock()
+    real._call_with_reconnect.side_effect = lambda fn: fn()
+    clock = _Clock()
+    lazy = _lazy(lambda: real, clock)
+    assert lazy.check_host()
+    assert lazy.check_host()
+    real.connection.CurrentTime.assert_called_once()
+    clock.now += 11
+    real.connection.CurrentTime.side_effect = OSError("host went away")
+    assert not lazy.check_host()
+    clock.now += 11
+    real.connection.CurrentTime.side_effect = None
+    assert lazy.check_host()
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_host_status_reports_the_api_probe(client, app_state, monkeypatch, available):
+    from app.routes import system
+
+    monkeypatch.setattr(system, "active_host_filename", lambda: "host.yml")
+    monkeypatch.setattr(system.Settings.ESXI, "IP", "10.9.9.9")
+    app_state.esxi_connection = MagicMock()
+    app_state.esxi_connection.check_host.return_value = available
+    response = client.get("/connection/host")
+    assert response.status_code == 200
+    assert response.json() == {
+        "host": "10.9.9.9",
+        "status": "ok" if available else "unreachable",
+    }
+    app_state.esxi_connection.check_host.assert_called_once()
+
+
+def test_host_status_without_a_selection_does_not_connect(
+    client, app_state, monkeypatch
+):
+    from app.routes import system
+
+    monkeypatch.setattr(system, "active_host_filename", lambda: None)
+    app_state.esxi_connection = MagicMock()
+    assert client.get("/connection/host").json() == {
+        "host": None,
+        "status": "not_selected",
+    }
+    app_state.esxi_connection.check_host.assert_not_called()
+
+
+def test_a_pending_host_check_is_reused_after_a_timeout():
+    real = MagicMock()
+    release = threading.Event()
+    entered = threading.Event()
+
+    def probe(fn):
+        entered.set()
+        release.wait(10)
+        return fn()
+
+    real._call_with_reconnect.side_effect = probe
+    lazy = _lazy(lambda: real)
+    try:
+        assert not lazy.check_host()
+        assert entered.is_set()
+        assert not lazy.check_host()
+        real._call_with_reconnect.assert_called_once()
+    finally:
+        release.set()

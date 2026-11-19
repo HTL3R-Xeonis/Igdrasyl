@@ -463,7 +463,7 @@ do not authenticate or run generation/deployment. GNS3 is skipped until its VM
 address is known for the selected host.
 
 **Save settings** retains unexposed YAML settings but removes YAML comments.
-**Apply / restart** activates the saved profile through the existing restart flow;
+**Apply / restart** restarts the selected profile's backend and activates it. This reloads saved credentials in gateway mode;
 open consoles disconnect. The active settings file is included even when it
 lives outside the uploaded profiles directory.
 
@@ -586,7 +586,10 @@ Server (the selected host's backend, as systemd sees it through `GET /gateway/st
 answered by the gateway itself) and Host - shows since when, retries after 2, 4, 8 and then every 15 seconds with a
 countdown, offers "Retry now", "Choose another server" and "Sign out", and disappears by itself (a green "Connected again"
 for 3 seconds, the canvas is reloaded in place, or the page reloads once if the server version changed). Problems of a
-reachable server (a host or template service that is down) stay in their own banners. A session that ended goes to
+reachable template services stay in their own banners. The host layer uses `GET /connection/host` to make a read-only
+ESXi API call, with a bounded wait and one shared probe per backend. A lost host connection opens the overlay even while
+the gateway and backend are healthy. It warns that deployment may have stopped partway and asks the user to check its result.
+A session that ended goes to
 `/login?next=...`, and the sign-in page returns to that same-origin path. A browser navigation or reload during an outage
 gets the same card from the gateway (`error_pages.unavailable_html`) instead of the raw proxy error. A single-process
 install without a gateway has no `/gateway/health` and shows three layers.

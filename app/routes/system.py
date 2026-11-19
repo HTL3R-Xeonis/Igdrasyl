@@ -44,6 +44,16 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/connection/host")
+def host_connection() -> dict[str, Any]:
+    """Check the selected ESXi API session without loading a project or changing host state."""
+    host = Settings.ESXI.IP if active_host_filename() else None
+    status = "not_selected"
+    if host:
+        status = "ok" if app.state.esxi_connection.check_host() else "unreachable"
+    return {"host": host, "status": status}
+
+
 @app.post("/reload")
 def reload_startup_state() -> dict[str, Any]:
     """
