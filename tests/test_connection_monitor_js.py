@@ -13,8 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_connection_monitor_logic_passes_its_node_tests():
+    # Name the files: older node versions (the CI runner's) do not accept a directory for --test.
+    files = sorted(str(path) for path in (ROOT / "tests" / "js").glob("*.test.js"))
+    assert files, "no node test files found"
     result = subprocess.run(
-        ["node", "--test", str(ROOT / "tests" / "js")],
+        ["node", "--test", *files],
         capture_output=True,
         text=True,
         timeout=120,
