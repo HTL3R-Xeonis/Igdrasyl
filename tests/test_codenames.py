@@ -33,9 +33,10 @@ TEXT_SUFFIXES = {
     ".example",
 }
 SKIPPED_PARTS = {"vendor", "node_modules", ".venv", "venv", "__pycache__"}
+# Repository names that no longer exist. TopologyBuilder is not one of them: the Builder's repository keeps that name,
+# only the component is called Mjonyr.
 OLD_NAMES = (
     "TopologyOperator",
-    "TopologyBuilder",
     "TopologyGenerator",
     "Docker-Server-Files",
 )

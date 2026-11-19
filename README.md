@@ -7,13 +7,13 @@ environment variables, the import root `app`, the systemd unit names and every s
 purpose). In Norse myth Ginnungagap is the void between ice and fire from which the world arises - here, the empty canvas
 from which a lab arises.
 
-The other components: [Mjonyr](https://github.com/HTL3R-Xeonis/Mjonyr) (formerly TopologyBuilder; the deploy library and
+The other components: [Mjonyr](https://github.com/HTL3R-Xeonis/TopologyBuilder) (repository TopologyBuilder; the deploy library and
 CLI this app is built on), Mimyr (formerly Topology Generator; the LLM topology and config-draft service), Hugyn and Munyn
 (formerly Docker-Server-Files; the ESXi and GNS3 template services), Idynoun (the updater, `ginnungagap update`) and
 Haymdal (the connection and health watchman, see "Connection lost" below).
 
 A GUI tool for *operating* topologies already deployed by
-[Mjonyr (formerly TopologyBuilder)](https://github.com/HTL3R-Xeonis/Mjonyr): a
+[Mjonyr (repository TopologyBuilder)](https://github.com/HTL3R-Xeonis/TopologyBuilder): a
 GNS3-like canvas, in-window access to each device's console/screen,
 automated per-device configuration push from a second config file, and
 a portable `.topoproj` bundle format for exporting/importing a whole

@@ -20,7 +20,7 @@ check them again when a dependency is updated.
 ## Python dependencies (installed, not copied)
 
 Pinned in `pyproject.toml`: FastAPI (MIT), Starlette (BSD-3-Clause), uvicorn (BSD-3-Clause), netmiko (MIT),
-python-multipart (Apache-2.0), websockets (BSD-3-Clause), Mjonyr, formerly TopologyBuilder (GPL-3.0) and, through them, among others:
+python-multipart (Apache-2.0), websockets (BSD-3-Clause), Mjonyr, repository TopologyBuilder (GPL-3.0) and, through them, among others:
 paramiko (LGPL-2.1) and scp (LGPL), certifi (MPL-2.0), pyvmomi (Apache-2.0), cryptography (Apache-2.0 or BSD-3-Clause),
 requests (Apache-2.0), PyYAML (MIT). None of them is incompatible with GPL-3.0; the LGPL libraries are used as unmodified
 libraries.

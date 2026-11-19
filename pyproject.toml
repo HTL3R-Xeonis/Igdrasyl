@@ -10,10 +10,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
 dependencies = [
-    # dev, not main - Mjonyr's (formerly TopologyBuilder) main branch is permanently not
+    # the branch Mjonyr, not main - Mjonyr's repository is TopologyBuilder; its main branch is permanently not
     # merged into (standing project decision, unrelated to code quality).
-    # The repository is still named TopologyBuilder until the planned GitHub rename.
-    "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@dev",
+    "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@Mjonyr",
     "fastapi==0.121.2",
     "uvicorn[standard]==0.38.0",
     "netmiko==4.7.0",
