@@ -92,6 +92,33 @@ def port_group_of(node: Any, interface: str) -> str:
     return f"{node.name}_{interface.replace('/', '-')}"
 
 
+def _tools_mac(vm: Any, port_group: str) -> str | None:
+    """
+    The MAC that VMware Tools reports for the NIC on `port_group`, i.e. the one the RUNNING guest really has. It differs
+    from the MAC in the VM's configuration while a vCenter has just switched the generated MACs (00:0c:29 -> 00:50:56)
+    and the guest has not been rebooted since: the join over the configured MAC then finds nothing. The two are tied
+    together by the virtual device key. None when anything of this cannot be read.
+    """
+    try:
+        from pyVmomi import vim
+
+        key = next(
+            device.key
+            for device in vm.config.hardware.device
+            if isinstance(device, vim.vm.device.VirtualEthernetCard)
+            and getattr(device.backing, "deviceName", None) == port_group
+        )
+        for nic in vm.guest.net or []:
+            mac = getattr(nic, "macAddress", None)
+            if nic.deviceConfigId == key and isinstance(mac, str) and mac.strip():
+                return normalize_mac(mac)
+    except (
+        Exception
+    ):  # only a second chance to find the NIC, never a failure of its own
+        return None
+    return None
+
+
 def _guest_read(esxi: Any, vm: Any, image: str, windows: bool) -> str:
     """The guest's own NIC list (text). Raises RuntimeError with a reason that never contains a credential."""
     from pyVmomi import vim
@@ -172,6 +199,12 @@ def _resolve(
     unresolved: list[str] = []
     for interface in interfaces:
         candidates = guest.get(macs.get(interface, ""), [])
+        if not candidates and interface in macs:
+            # the configured MAC is not in the guest (vCenter switched the MACs, the guest keeps the old ones until its
+            # next reboot): ask VMware Tools which MAC the guest has on that NIC
+            tools_mac = _tools_mac(vm, port_group_of(node, interface))
+            if tools_mac is not None:
+                candidates = guest.get(tools_mac, [])
         if len(candidates) == 1:
             resolved[interface] = candidates[0]
         else:

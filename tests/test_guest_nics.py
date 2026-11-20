@@ -170,6 +170,57 @@ def test_a_mac_that_the_guest_does_not_list_falls_back_with_a_warning(guest):
     assert result.warnings == [guest_nics.FALLBACK_WARNING]
 
 
+def test_a_mac_switched_by_vcenter_is_found_through_the_mac_vmware_tools_reports(
+    guest, monkeypatch
+):
+    """The configuration says 00:0c:29:.. (vCenter changed it), the running guest still has its old MAC."""
+    stale = dict(_MACS)
+    stale["eth0"] = "00:0c:29:ff:ff:01"  # not in the guest's list
+    esxi = _Esxi(_vm(), _port_groups(stale))
+    monkeypatch.setattr(
+        guest_nics,
+        "_tools_mac",
+        lambda vm, group: _MACS["eth0"] if group == "web1_eth0" else None,
+    )
+    result = guest_nics.resolve(_app(esxi), _node(), ["eth0", "eth1"])
+    assert result.names["eth0"] == "ens192"
+    assert result.names["eth1"] == "ens224"
+    assert result.warnings == []
+
+
+def test_without_a_tools_mac_the_unmatched_nic_still_falls_back(guest, monkeypatch):
+    stale = dict(_MACS)
+    stale["eth0"] = "00:0c:29:ff:ff:01"
+    esxi = _Esxi(_vm(), _port_groups(stale))
+    monkeypatch.setattr(guest_nics, "_tools_mac", lambda vm, group: None)
+    result = guest_nics.resolve(_app(esxi), _node(), ["eth0", "eth1"])
+    assert "eth0" not in result.names
+    assert result.names["eth1"] == "ens224"
+    assert result.warnings and "eth0" in result.warnings[0]
+
+
+def test_tools_mac_ties_the_configured_nic_to_the_guest_nic_by_device_key():
+    from pyVmomi import vim
+
+    card = vim.vm.device.VirtualVmxnet3()
+    card.key = 4000
+    card.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+        deviceName="web1_eth0"
+    )
+    vm = SimpleNamespace(
+        config=SimpleNamespace(hardware=SimpleNamespace(device=[card])),
+        guest=SimpleNamespace(
+            net=[
+                SimpleNamespace(deviceConfigId=4001, macAddress="00:50:56:00:00:09"),
+                SimpleNamespace(deviceConfigId=4000, macAddress="00:0C:29:AA:BB:CC"),
+            ]
+        ),
+    )
+    assert guest_nics._tools_mac(vm, "web1_eth0") == "00:0c:29:aa:bb:cc"
+    assert guest_nics._tools_mac(vm, "web1_eth9") is None
+    assert guest_nics._tools_mac(SimpleNamespace(), "web1_eth0") is None
+
+
 def test_only_the_interfaces_that_could_not_be_matched_keep_their_topology_name(guest):
     macs = {"eth0": _MACS["eth0"], "eth1": "00:50:56:ff:ff:ff"}
     esxi = _Esxi(_vm(), _port_groups(macs))
