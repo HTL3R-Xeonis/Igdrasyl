@@ -12,6 +12,7 @@ from app import (
     connection_settings,
     ova_templates,
     profile_secrets,
+    profile_state,
     project_selection,
     settings_profiles,
     users,
@@ -161,6 +162,8 @@ def delete_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str]:
     try:
         settings_profiles.delete_profile(filename)
         profile_secrets.delete(filename)
+        profile_state.delete(filename)
+        project_selection.forget(filename)
     except settings_profiles.InvalidProfileName as exc:
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:

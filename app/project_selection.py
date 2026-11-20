@@ -69,6 +69,39 @@ def save_selection(filename, project_name, project_id=None):
     return selection
 
 
+def remember_opened(filename, project_id):
+    """
+    Makes the project that was just opened on this host the host's selection, so entering the host again opens the
+    project that was open last (until now only "Save selection" in the project dialog wrote it). The name of the GNS3
+    project stays as it was when the same project is already selected.
+    :raises FileNotFoundError: no such profile or project.
+    """
+    project = project_library.get(project_id)
+    current = _selection_for_name(filename)
+    keep = current["project_id"] == project_id and current["project_name"]
+    return save_selection(
+        filename, current["project_name"] if keep else project["name"], project_id
+    )
+
+
+def forget(filename):
+    """Drops the selection of a deleted profile."""
+    with _LOCK:
+        saved = _read()
+        if filename not in saved:
+            return
+        del saved[filename]
+        store = _store()
+        fd, temporary = tempfile.mkstemp(dir=store.parent, prefix=".project-selection-")
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(saved, stream, indent=2)
+            os.replace(temporary, store)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
 def initialise(settings_path):
     filename = Path(settings_path).name if settings_path else None
     selection = _selection_for_name(filename) if filename else {}

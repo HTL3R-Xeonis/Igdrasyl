@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Annotated, Any
 
 import requests
 from fastapi import File, Form, HTTPException, Response, UploadFile
+from loguru import logger
 from pydantic import BaseModel
 
 from app import (
@@ -18,13 +21,16 @@ from app import (
     node_notes,
     project_bundle,
     project_library,
+    project_selection,
     project_snapshots,
     public_text,
+    settings_profiles,
     template_health,
     topology_write,
 )
 from app.application import app
 from app.routes.common import (
+    SETTINGS_ENV_VAR,
     settings_call,
 )
 from app.routes.models import (
@@ -293,7 +299,24 @@ def open_library_project(project_id: str) -> dict[str, Any]:
         app.state.design = state
     app.state.design_project_id = project_id
     design_store.save(state)
+    _remember_for_this_host(project_id)
     return {"project": settings_call(project_library.get, project_id)}
+
+
+def _remember_for_this_host(project_id: str) -> None:
+    """The project opened last becomes this host's selection; a failure here never fails the open."""
+    active = os.getenv(SETTINGS_ENV_VAR)
+    if not active:
+        return
+    try:
+        project_selection.remember_opened(Path(active).name, project_id)
+    except (
+        FileNotFoundError,
+        OSError,
+        ValueError,
+        settings_profiles.InvalidProfileName,
+    ) as exc:
+        logger.warning(f"Could not remember the opened project for this host: {exc}")
 
 
 class SaveDesignAs(BaseModel):

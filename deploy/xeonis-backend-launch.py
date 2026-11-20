@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,6 +26,33 @@ def _profile_filename(stem: str, profiles_dir: Path) -> str:
         if (profiles_dir / f"{stem}{suffix}").exists():
             return f"{stem}{suffix}"
     sys.exit(f"xeonis-backend-launch: no {stem}.yml or {stem}.yaml in {profiles_dir}")
+
+
+# What the user sees on one host's canvas lives in files of its own (environment variable -> default file name). The names
+# are the same as in app/profile_state.py, which cannot be imported here; tests/test_profile_state.py keeps them equal.
+PER_PROFILE_FILES = {
+    "TOPOLOGYOPERATOR_DESIGN_FILE": "design_state.json",
+    "TOPOLOGYOPERATOR_HOLDS_FILE": "holds.json",
+    "TOPOLOGYOPERATOR_LABELS_FILE": "label_layout.json",
+    "TOPOLOGYOPERATOR_LAYOUT_FILE": "layout.json",
+    "TOPOLOGYOPERATOR_NOTES_FILE": "node_notes.json",
+}
+
+
+def point_state_files_at_the_profile(profiles_dir: Path, filename: str) -> None:
+    """
+    Gives this backend its own copy of those files in `<profiles dir>/.state/<profile file>/`. The first time a profile
+    starts, a file of the shared set (the path the variable had, or the default in the working directory) is COPIED
+    there; the shared file stays untouched, so nothing is lost and other profiles still find it for their first start.
+    """
+    state = profiles_dir / ".state" / filename
+    state.mkdir(parents=True, exist_ok=True)
+    for variable, default_name in PER_PROFILE_FILES.items():
+        target = state / default_name
+        shared = Path(os.environ.get(variable, default_name))
+        if not target.exists() and shared.is_file() and shared != target:
+            shutil.copy2(shared, target)
+        os.environ[variable] = str(target)
 
 
 def main() -> None:
@@ -54,6 +82,7 @@ def main() -> None:
         )
 
     os.environ["TOPOLOGYOPERATOR_SETTINGS"] = str(profiles_dir / filename)
+    point_state_files_at_the_profile(profiles_dir, filename)
     os.environ["TOPOLOGYOPERATOR_GATEWAY_BACKEND"] = "1"
     uvicorn = str(Path(sys.executable).parent / "uvicorn")
     os.execv(
