@@ -8,6 +8,7 @@ user and only pushed after that review - see README, "Generate with AI".
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -656,6 +657,12 @@ def generate(app: FastAPI, request: GenerateRequest, owner: str) -> dict:
     }
 
 
+def _audit_note(owner: str, draft_id: str, commands: tuple[str, ...]) -> str:
+    """Who pushed which draft: the user, the draft id and a short hash of the commands (the commands themselves can hold secrets)."""
+    digest = hashlib.sha256("\n".join(commands).encode("utf-8")).hexdigest()[:12]
+    return f"AI snippet by {owner} (draft {draft_id[:8]}, {len(commands)} commands, sha256 {digest})"
+
+
 def push_draft(app: FastAPI, draft_id: str, owner: str) -> push_jobs.PushJob:
     with _DRAFT_LOCK:
         drafts = getattr(app.state, "ai_snippet_drafts", {})
@@ -682,7 +689,7 @@ def push_draft(app: FastAPI, draft_id: str, owner: str) -> push_jobs.PushJob:
                 )
             },
             wait_seconds=0,
-            audit_note="AI snippet",
+            audit_note=_audit_note(owner, draft_id, draft.commands),
             verify_target=verify_target,
         )
         del drafts[draft_id]

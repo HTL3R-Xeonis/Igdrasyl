@@ -166,7 +166,7 @@ def _finish(
         error=error,
         not_ready=not_ready,
         total_commands=total,
-        executed=len(results),
+        executed=0 if not_ready else len(results),
         truncated=truncated,
     )
 

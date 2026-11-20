@@ -1,3 +1,4 @@
+import re
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
@@ -111,9 +112,12 @@ def test_push_runs_only_after_confirmation_and_only_once(client, enable_ai):
     push.assert_called_once()
     spec = push.call_args.args[0]["SW1"]
     assert spec.commands == _COMMANDS and spec.native_shell is True
-    assert [row["note"] for row in client.get("/config-push/audit").json()] == [
-        "AI snippet"
-    ]
+    notes = [row["note"] for row in client.get("/config-push/audit").json()]
+    assert len(notes) == 1
+    assert re.fullmatch(
+        r"AI snippet by \S+ \(draft [0-9a-f]{8}, \d+ commands, sha256 [0-9a-f]{12}\)",
+        notes[0],
+    ), notes
 
 
 def test_the_pushed_draft_is_stored_as_plain_data_for_project_exports(
