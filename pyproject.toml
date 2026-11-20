@@ -14,11 +14,11 @@ dependencies = [
     # merged into (standing project decision, unrelated to code quality).
     "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@Mjonyr",
     "fastapi==0.163.1",
-    "uvicorn[standard]==0.38.0",
+    "uvicorn[standard]==0.54.0",
     "netmiko==4.8.0",
     # Needed for FastAPI's UploadFile (POST /project/import's .topoproj upload) -
     # FastAPI only parses multipart form bodies if this is installed.
-    "python-multipart==0.0.20",
+    "python-multipart==0.0.34",
     # WebSocket *client* (app/vm_screen.py's own outbound connection to
     # ESXi's WebMKS ticket endpoint) - distinct from FastAPI's own
     # built-in server-side WebSocket support, which only handles the
