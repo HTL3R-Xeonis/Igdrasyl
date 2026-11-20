@@ -23,7 +23,7 @@ dependencies = [
     # ESXi's WebMKS ticket endpoint) - distinct from FastAPI's own
     # built-in server-side WebSocket support, which only handles the
     # browser-facing side.
-    "websockets==17.1",
+    "websockets==17.4",
 ]
 
 [project.optional-dependencies]
