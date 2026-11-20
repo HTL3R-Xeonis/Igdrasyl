@@ -15,7 +15,7 @@ dependencies = [
     "topologybuilder @ git+https://github.com/HTL3R-Xeonis/TopologyBuilder.git@Mjonyr",
     "fastapi==0.121.2",
     "uvicorn[standard]==0.38.0",
-    "netmiko==4.7.0",
+    "netmiko==4.8.0",
     # Needed for FastAPI's UploadFile (POST /project/import's .topoproj upload) -
     # FastAPI only parses multipart form bodies if this is installed.
     "python-multipart==0.0.20",
