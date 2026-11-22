@@ -98,6 +98,11 @@ def test_an_unreachable_service_is_named_with_a_readable_reason():
             "Check whether ESXi is reachable",
         ),
         (
+            "no ESXi login for this host",
+            "Check the ESXi credentials",
+            "Check whether ESXi is reachable",
+        ),
+        (
             "Connection timed out",
             "Check whether ESXi is reachable",
             "Check the ESXi credentials",

@@ -88,6 +88,8 @@ def _gns3_server_problems(base_url: str, problems: list[str]) -> None:
                     "incorrect user name or password",
                     "invalidlogin",
                     "no esxi password stored",
+                    # what the collector reports when the Operator gave it no login for the host
+                    "no esxi login",
                 )
             ):
                 credentials_problem = True
