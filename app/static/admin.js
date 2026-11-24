@@ -338,7 +338,7 @@ async function showAbout() {
     }
     await loadProfiles();
     refreshCreationHostsControls();
-    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog(), loadTemplateShare(), loadUpdates()]);
+    await Promise.all([loadUsers(), loadAiConfig(), loadAuditLog(), loadTemplateShare(), loadUpdates(), loadImageBuilds()]);
   } catch {
     window.location.href = "/login";
   }

@@ -57,6 +57,13 @@
   #ap-ai-config-form label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
   .ap-status { color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 1em; }
   .ap-status.ap-error { color: var(--bad); }
+  .ap-images-row { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font-size: 15px; }
+  .ap-images-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--dim); flex: none; }
+  .ap-images-dot.ap-images-ok { background: var(--ok); }
+  .ap-images-dot.ap-images-attention { background: var(--bad); }
+  .ap-images-dot.ap-images-info { background: var(--warn); }
+  #ap-images-table tr.ap-images-bad td { color: var(--bad); }
+  #ap-images-actions { margin-top: 12px; }
   #ap-denied { display: none; color: var(--bad); margin-top: 40px; text-align: center; }
   .ap-hosts-cell { position: relative; }
   .ap-hosts-summary { cursor: pointer; text-decoration: underline dotted; }
@@ -137,6 +144,7 @@
       <a href="#logs" data-panel="logs">Logs</a>
       <a href="#templates" data-panel="templates">Template Share</a>
       <a href="#updates" data-panel="updates">Updates</a>
+      <a href="#images" data-panel="images">Images</a>
       <a href="#audit" data-panel="audit">Audit log</a>
     </nav>
     <div id="ap-panels">
@@ -285,6 +293,24 @@
       </dialog>
     </section>
 
+    <section id="ap-images-section" class="ap-panel" data-panel="images">
+      <h2 class="ap-panel-title">Images<span class="info-row inline"><button class="info-btn" type="button" aria-label="More information">i</button><span class="info-popover" hidden>How the automated build of the appliance images is doing. A separate build machine makes a new image for every signed release; this page only reads its status page and shows the last build, how long ago it ended and how it ended. It changes nothing and sends no alarm. Where the status page is not set up, this section says so.</span></span></h2>
+      <p id="ap-images-unavailable" class="ap-status" role="status"></p>
+      <div class="ap-card" id="ap-images-card" hidden>
+        <p class="ap-images-row"><span id="ap-images-dot" class="ap-images-dot" aria-hidden="true"></span><strong id="ap-images-headline"></strong></p>
+        <p class="ap-status" id="ap-images-detail" role="status"></p>
+        <div class="ap-scroll">
+        <table id="ap-images-table">
+          <thead><tr><th>Version</th><th>Result</th><th>Ended</th><th>Checks</th><th>Reason</th></tr></thead>
+          <tbody id="ap-images-body"></tbody>
+        </table>
+        </div>
+        <div id="ap-images-actions">
+          <button type="button" class="toolbar-btn" id="ap-images-refresh">Refresh</button>
+        </div>
+      </div>
+    </section>
+
     <section id="ap-audit-section" class="ap-panel" data-panel="audit">
       <h2 class="ap-panel-title">Audit log</h2>
       <div class="ap-card">
@@ -322,6 +348,7 @@
 <script src="/admin-nav.js?v=ginnungagap-67"></script>
 <script src="/admin-template-share.js?v=ginnungagap-67"></script>
 <script src="/admin-updates.js?v=ginnungagap-67"></script>
+<script src="/admin-images.js?v=ginnungagap-67"></script>
 <script src="/admin.js?v=ginnungagap-67"></script>
 </body>
 </html>

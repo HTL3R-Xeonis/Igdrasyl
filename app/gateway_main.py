@@ -43,6 +43,7 @@ from app import (
 from app.auth_middleware import AuthMiddleware
 from app.proxy import make_proxy_app
 from app.request_logging import RequestLoggingMiddleware
+from app.routes.image_builds import router as image_builds_router
 from app.routes.template_share import router as template_share_router
 from app.routes.updates import router as updates_router
 
@@ -86,6 +87,7 @@ app = FastAPI(title="Ginnungagap Gateway", lifespan=_lifespan)
 routes_gateway.register(app)
 app.include_router(template_share_router)
 app.include_router(updates_router)
+app.include_router(image_builds_router)
 
 
 def _serve_static(filename: str):
@@ -101,10 +103,13 @@ app.get("/gateway/host-deploy.js", include_in_schema=False)(
 )
 app.get("/admin.html", include_in_schema=False)(_serve_static("admin.html"))
 app.get("/admin.js", include_in_schema=False)(_serve_static("admin.js"))
+# The section navigation: without it the admin page shows no section at all while no host backend answers.
+app.get("/admin-nav.js", include_in_schema=False)(_serve_static("admin-nav.js"))
 app.get("/admin-template-share.js", include_in_schema=False)(
     _serve_static("admin-template-share.js")
 )
 app.get("/admin-updates.js", include_in_schema=False)(_serve_static("admin-updates.js"))
+app.get("/admin-images.js", include_in_schema=False)(_serve_static("admin-images.js"))
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestLoggingMiddleware)

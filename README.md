@@ -715,6 +715,29 @@ no Docker socket or root.
   The overlay and the landing page carry no code names; the Updates section is the place for them.
 * Tests: `tests/test_update_panel.py` (fake state and request folders, no network).
 
+## Images (the automated image build)
+
+The admin panel has a section **Images**: a read-only health row for the automated build of the appliance images (the build
+machine of the Ginnungagap-Appliance repository, `image/build/`). It shows the last build with its age and result (a coloured dot:
+green published, red failed, blocked or interrupted, amber while a build runs or builds are paused, grey when nothing has run yet),
+whether a build is running or paused, and a table of the last 20 builds (version, result, when it ended, checks passed, short
+reason). All explanatory text is behind the "i" icon. It changes nothing on the build machine and sends no alarm. The decision to
+have it was taken on 2026-11-24 as the one exception to "no monitoring" of the single-VM design: it is a status row, not a monitoring stack.
+
+* **Off by default.** The build machine has an optional status page (`status_http`, `GET /status.json`, schema 1). This section is
+  switched on by pointing the process that serves the admin panel (the gateway) at it:
+  `TOPOLOGYOPERATOR_IMAGE_BUILD_STATUS_URL=http://<build machine>:<port>` (a host, or the full `.../status.json`; no user name,
+  query or other path). Where the variable is not set the section says it is not set up and offers nothing.
+* **Admin only.** `GET /admin/image-builds` needs the admin role (`require_admin`; a regular or read-only user gets 403, a
+  signed-out one is sent to the login). It lives on the gateway because the build is a property of the whole installation, not of one host.
+* **Untrusted input.** The page asks the build machine from the server, never from the browser: one request, 3 seconds, no
+  redirects, at most 256 KB, the answer cached for 10 seconds. Only known fields are used, texts are cut to 200 characters and stripped
+  of control characters, versions must look like versions, and a machine that is down, slow or answering nonsense gives one plain
+  sentence ("cannot be reached", "did not answer in time", "answered with something unexpected"), never a stack trace and never the address.
+  The page refreshes itself once a minute, only while the section is on screen.
+* Files: `app/image_build_status.py`, `app/routes/image_builds.py`, `app/static/admin-images.js`; tests: `tests/test_image_build_status.py`
+  (a real local HTTP server plays the build machine: healthy, bad results, building, paused, down, slow, redirect, oversized, garbage).
+
 ## Device configs saved with the project
 
 The Config Push tab sends raw command lists per device (JSON: device name -> list of lines, sent verbatim; **up to 10 000
