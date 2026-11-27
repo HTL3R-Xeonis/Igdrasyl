@@ -16,6 +16,8 @@ from app import gateway_main, startup
 from app.routes.common import SETTINGS_ENV_VAR
 from app.startup import refresh_startup_state
 
+pytestmark = pytest.mark.usefixtures("empty_user_store")
+
 
 def _refresh(app_state, active_host: str | None, monkeypatch):
     if active_host is None:

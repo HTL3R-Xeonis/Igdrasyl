@@ -308,7 +308,15 @@ def test_palettes_hide_infrastructure_templates_and_their_metadata(
         "gns3": ["Cisco IOSv 15.6(1)T", "VPCS"],
         "esxi": ["debian", "gns3-vm-v2", "pfSense"],
         "gns3_categories": {"Cisco IOSv 15.6(1)T": "router", "VPCS": "guest"},
-        "gns3_port_specs": {},
+        # VPCS declares no ports in the template list; its single port "Ethernet0" comes from the built-in table
+        "gns3_port_specs": {
+            "VPCS": {
+                "adapters": 1,
+                "port_name_format": "Ethernet{0}",
+                "port_segment_size": 0,
+                "first_port_name": "",
+            }
+        },
     }
 
 
@@ -444,12 +452,14 @@ def test_gns3_template_port_specs_includes_templates_with_a_fixed_port_format(
 def test_gns3_template_port_specs_excludes_templates_with_no_fixed_format(app_state):
     from app import topology_write
 
-    # VPCS/Ethernet switch/Cloud/... and Docker-based templates all look
-    # like this on the real Template-API server - GNS3 names their ports
-    # dynamically, there's no fixed format to compute from.
+    # Cloud/NAT and Docker-based templates look like this on the real
+    # Template-API server - GNS3 names their ports dynamically, there's no
+    # fixed format to compute from. (VPCS, Ethernet switch and Ethernet hub
+    # look the same but have fixed port names, which the built-in table
+    # supplies - see test_builtin_gns3_nodes_get_their_fixed_port_names.)
     templates = [
-        {"name": "VPCS", "adapters": None, "port_name_format": None},
-        {"name": "Ethernet switch", "adapters": None, "port_name_format": None},
+        {"name": "Cloud", "adapters": None, "port_name_format": None},
+        {"name": "NAT", "adapters": None, "port_name_format": None},
         {"name": "alpine", "adapters": 1, "port_name_format": None},
     ]
 
@@ -525,3 +535,90 @@ def test_a_list_from_the_environment_is_matched_exactly(monkeypatch):
     hidden = topology_write._hidden_template_names()
     assert topology_write._is_hidden("debian", hidden)
     assert not topology_write._is_hidden("ginnungagap-appliance-v1.0.0", hidden)
+
+
+def test_builtin_gns3_nodes_get_their_fixed_port_names():
+    from app import topology_write
+
+    specs = topology_write._gns3_template_port_specs(
+        [
+            {"name": "Ethernet switch", "category": "switch"},
+            {"name": "Ethernet hub", "category": "switch"},
+            {"name": "VPCS", "category": "guest"},
+            {"name": "Cloud", "category": "guest"},
+            {"name": "NAT", "category": "guest"},
+        ]
+    )
+
+    assert specs["Ethernet switch"]["adapters"] == 8
+    assert specs["Ethernet switch"]["port_name_format"] == "Ethernet{0}"
+    assert specs["Ethernet hub"]["adapters"] == 8
+    assert specs["VPCS"]["adapters"] == 1
+    # Cloud and NAT name their ports on demand: no guess, the frontend asks for a typed name
+    assert "Cloud" not in specs and "NAT" not in specs
+
+
+def test_a_template_with_its_own_port_format_beats_the_builtin_table():
+    from app import topology_write
+
+    specs = topology_write._gns3_template_port_specs(
+        [
+            {
+                "name": "Ethernet switch",
+                "adapters": 16,
+                "port_name_format": "Port{0}",
+            }
+        ]
+    )
+
+    assert specs["Ethernet switch"]["adapters"] == 16
+    assert specs["Ethernet switch"]["port_name_format"] == "Port{0}"
+
+
+def test_templates_report_a_warning_when_the_gns3_template_service_failed(client):
+    from app import topology_write
+
+    with (
+        patch.object(topology_write.Settings.API, "LITERAL_API_VALUES", False),
+        patch(
+            "app.topology_write.APIHandler.get",
+            side_effect=TimeoutError("template server slow"),
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_gns3_template_names",
+            return_value={"Ethernet switch"},
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_esxi_template_names",
+            return_value={"debian"},
+        ),
+    ):
+        body = client.get("/templates").json()
+
+    assert body["gns3_port_specs"] == {}
+    assert len(body["warnings"]) == 1
+    assert "template service did not answer" in body["warnings"][0]
+    assert "template server slow" in body["warnings"][0]
+
+
+def test_templates_have_no_warning_while_the_service_answers(client):
+    from app import topology_write
+
+    with (
+        patch.object(topology_write.Settings.API, "LITERAL_API_VALUES", False),
+        patch(
+            "app.topology_write.APIHandler.get",
+            return_value={"templates": [{"name": "VPCS", "category": "guest"}]},
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_gns3_template_names",
+            return_value={"VPCS"},
+        ),
+        patch(
+            "app.topology_write.APIHandler.get_esxi_template_names",
+            return_value={"debian"},
+        ),
+    ):
+        body = client.get("/templates").json()
+
+    assert "warnings" not in body

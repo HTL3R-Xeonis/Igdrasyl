@@ -28,10 +28,18 @@ document.getElementById("stage-changes-btn").addEventListener("click", async () 
 
 document.getElementById("staging-count-text").addEventListener("click", openStagingDialog);
 
+// The staged topology as last read: the link form offers its nodes and their interfaces.
+let stagedNodes = [];
+
 async function renderStagingLists() {
   const resp = await fetch("/live/stage/topology");
-  if (!resp.ok) return;
+  if (!resp.ok) {
+    stagingStatus(`Could not read the staged topology: ${(await resp.json().catch(() => ({}))).detail || resp.status}`);
+    return;
+  }
   const nodes = await resp.json();
+  stagedNodes = nodes;
+  fillStagingLinkNodes();
 
   const nodesList = document.getElementById("staging-nodes-list");
   nodesList.innerHTML = "";
@@ -74,6 +82,91 @@ async function openStagingDialog() {
   document.getElementById("staging-dialog").showModal();
 }
 
+// --- Add node: the role decides which images can be chosen (the same split as the palette), nothing has to be typed ---
+
+const stagingRoleSelect = document.getElementById("staging-node-role");
+const stagingImageSelect = document.getElementById("staging-node-image");
+
+function setStagingImageOptions(placeholder, names, disabled) {
+  stagingImageSelect.replaceChildren();
+  const first = document.createElement("option");
+  first.value = "";
+  first.disabled = true;
+  first.selected = true;
+  first.textContent = placeholder;
+  stagingImageSelect.appendChild(first);
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = isUplinkImage(name) ? "NAT (Internet uplink)" : name;
+    stagingImageSelect.appendChild(option);
+  }
+  stagingImageSelect.disabled = disabled;
+}
+
+async function fillStagingImages() {
+  const role = stagingRoleSelect.value;
+  if (!role) {
+    setStagingImageOptions("Image - choose a role first", [], true);
+    return;
+  }
+  const templates = await ensureTemplatesLoaded();
+  if (templates._error) {
+    // no list to choose from: say why, rather than offering a field that cannot work
+    setStagingImageOptions("Templates unavailable", [], true);
+    stagingStatus(`Could not load the image templates: ${templates._error}`);
+    return;
+  }
+  const names = [];
+  for (const group of ["gns3", "esxi"]) {
+    for (const name of templates[group]) {
+      if ((classifyTemplateRole(name, group) || "PC") === role) names.push(name);
+    }
+  }
+  setStagingImageOptions(names.length ? "Image" : `No ${role} images available`, names, !names.length);
+  stagingStatus("");
+}
+
+stagingRoleSelect.addEventListener("change", fillStagingImages);
+
+// --- Add link: the nodes are chosen from the staged topology, the interface is suggested from what is known about the node ---
+
+function fillStagingLinkNodes() {
+  for (const id of ["staging-link-node1", "staging-link-node2"]) {
+    const select = document.getElementById(id);
+    const previous = select.value;
+    const placeholder = select.options[0];
+    select.replaceChildren(placeholder);
+    for (const node of stagedNodes) {
+      const option = document.createElement("option");
+      option.value = node.name;
+      option.textContent = node.name;
+      select.appendChild(option);
+    }
+    if (stagedNodes.some((n) => n.name === previous)) select.value = previous;
+  }
+  suggestStagingInterfaces(1);
+  suggestStagingInterfaces(2);
+}
+
+async function suggestStagingInterfaces(side) {
+  const list = document.getElementById(`staging-if${side}-options`);
+  list.replaceChildren();
+  const node = stagedNodes.find((n) => n.name === document.getElementById(`staging-link-node${side}`).value);
+  if (!node) return;
+  const templates = await ensureTemplatesLoaded();
+  const known = Object.fromEntries((node.links || []).map((link) => [link.interface, true]));
+  const { names, newAdapter } = computedInterfaceChoices(node.image, known, templates);
+  for (const name of [...names.filter((n) => !known[n]), ...(newAdapter ? [newAdapter] : [])]) {
+    const option = document.createElement("option");
+    option.value = name;
+    list.appendChild(option);
+  }
+}
+
+document.getElementById("staging-link-node1").addEventListener("change", () => suggestStagingInterfaces(1));
+document.getElementById("staging-link-node2").addEventListener("change", () => suggestStagingInterfaces(2));
+
 function stagingStatus(text) {
   document.getElementById("staging-dialog-status").textContent = text;
 }
@@ -94,6 +187,7 @@ document.getElementById("staging-add-node-form").addEventListener("submit", asyn
     return;
   }
   evt.target.reset();
+  setStagingImageOptions("Image - choose a role first", [], true);
   stagingStatus("");
   await renderStagingLists();
 });

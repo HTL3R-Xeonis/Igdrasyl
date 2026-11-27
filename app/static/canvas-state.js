@@ -336,6 +336,24 @@ const DESIGN_HEALTH_STUB = {
   incremental_deploy: true,
 };
 
+// Nodes whose VM or GNS3 node does not exist (never deployed, deleted on ESXi) are named as soon as the canvas shows them, not
+// only when a start runs into the error. Said once per set of nodes, so the periodic reload does not repeat it.
+let lastMissingInstancesNotice = "";
+function announceMissingInstances(nodesResult, health) {
+  // no live data at all (ESXi or the GNS3 VM unreachable, no project): the warning banner already says why
+  if (!nodesResult || health.warning) {
+    lastMissingInstancesNotice = "";
+    return;
+  }
+  const missing = nodesWithoutInstance(Object.keys(nodesData));
+  const key = missing.join("|");
+  if (key === lastMissingInstancesNotice) return;
+  lastMissingInstancesNotice = key;
+  if (missing.length) {
+    setMenubarMessage(`No instance on ESXi or GNS3 yet: ${missing.join(", ")}. Deploy the topology to create them - starting them would fail.`);
+  }
+}
+
 async function loadCanvas() {
   try {
     const [health, topology, nodesResult, positions] = designMode
@@ -348,7 +366,13 @@ async function loadCanvas() {
         // one thing the user sees instead of a generic "Failed to load".
         fetch("/topology").then(r => r.ok ? r.json() : []),
         fetch("/nodes").then(r => r.ok ? r.json() : null),
-        fetch("/layout").then(r => r.ok ? r.json() : {}),
+        fetch("/layout").then(async (r) => {
+          if (r.ok) return r.json();
+          // without saved positions every node would sit on the same spot - say why instead of showing that unexplained
+          const detail = (await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`;
+          setMenubarMessage(`Could not read the saved node positions: ${detail}`);
+          return {};
+        }),
       ]);
 
     document.getElementById("project-meta").textContent = designMode
@@ -394,6 +418,7 @@ async function loadCanvas() {
     }
     selectedNames = new Set([...selectedNames].filter((n) => nodesData[n]));
     if (selectedName && !nodesData[selectedName]) selectedName = null;
+    if (!designMode) announceMissingInstances(nodesResult, health);
     document.dispatchEvent(new CustomEvent("nodes-changed"));
     if (selectedNames.size < 2 && !document.getElementById("multi-actions").hidden) deselectNode();
     await refreshLiveLinks();

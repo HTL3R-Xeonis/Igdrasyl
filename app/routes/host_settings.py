@@ -14,6 +14,7 @@ from app import (
     profile_secrets,
     profile_state,
     project_selection,
+    required_settings,
     settings_profiles,
     users,
 )
@@ -38,7 +39,7 @@ def list_settings_profiles(user: AnyUser) -> list[dict[str, Any]]:
     is active - admins always see every profile.
     """
     username, role = user
-    record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+    record = users.get_user(username) or {"role": role, "allowed_hosts": []}
     return [
         profile
         for profile in settings_profiles.list_profiles()
@@ -180,8 +181,13 @@ def activate_settings_profile(filename: str, _admin: AdminUser) -> dict[str, str
     and why every open console/screen connection drops when it happens.
     """
     try:
+        # a profile that cannot start must be refused here: the restart replaces the running server
+        required_settings.check_activatable(settings_profiles.profile_path(filename))
         settings_profiles.restart_into_profile(filename)
-    except settings_profiles.InvalidProfileName as exc:
+    except (
+        settings_profiles.InvalidProfileName,
+        required_settings.MissingProfileSettings,
+    ) as exc:
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc

@@ -59,9 +59,10 @@ def test_status_without_a_selection_says_none(gateway_client):
 
 
 def _stored_admin():
+    """The account behind the fixtures' session (conftest creates it); named here because these tests read its stored record."""
     from app import users
 
-    users.create_user("test-admin", "a-long-enough-pass", "admin")
+    assert users.get_user("test-admin")["role"] == "admin"
 
 
 def test_status_reports_the_selected_servers_state(gateway_client, monkeypatch):

@@ -1880,7 +1880,8 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 10px;
   flex-shrink: 0;
 }
-#staging-add-node-form input, #staging-add-link-form input {
+#staging-add-node-form input, #staging-add-link-form input,
+#staging-add-node-form select, #staging-add-link-form select {
   flex: 1 1 100px;
   min-width: 90px;
   box-sizing: border-box;

@@ -242,6 +242,12 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"Couldn't restore saved design sketch, starting empty: {exc}")
         app.state.design = design.new_state()
+    problem = design_store.take_load_problem()
+    if problem:
+        # say so on screen, not only in the log: the sketch the user saved is not what they will see
+        app.state.startup_warning = "; ".join(
+            filter(None, [getattr(app.state, "startup_warning", None), problem])
+        )
     app.state.design_project_id = None
 
     # The live-edit staging draft (see app/staging.py) - None whenever no

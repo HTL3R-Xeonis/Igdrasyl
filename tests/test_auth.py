@@ -7,7 +7,7 @@ import time
 import pytest
 from fastapi import HTTPException
 
-from app import auth
+from app import auth, users
 
 
 @pytest.fixture(autouse=True)
@@ -72,8 +72,41 @@ def test_current_user_dependency_401s_without_a_cookie():
 
 
 def test_current_user_dependency_returns_the_user_with_a_valid_cookie():
+    users.create_user("alice", "a-long-enough-pass", "admin")
     token = auth.create_session_token("alice", "admin")
     assert auth.current_user(_FakeRequest(token)) == ("alice", "admin")
+
+
+# --- a token only counts for an account that still exists, with the role it has now -----------------------------------
+
+
+def test_a_token_of_a_deleted_account_is_refused():
+    users.create_user("alice", "a-long-enough-pass", "user")
+    token = auth.create_session_token("alice", "user")
+    assert auth.verify_account(token) == ("alice", "user")
+
+    users.delete_user("alice")
+
+    assert auth.verify_account(token) is None
+    with pytest.raises(HTTPException) as exc_info:
+        auth.current_user(_FakeRequest(token))
+    assert exc_info.value.status_code == 401
+
+
+def test_the_stored_role_wins_over_the_role_in_the_token():
+    users.create_user("alice", "a-long-enough-pass", "user")
+    # a token minted while alice was still an admin
+    old_admin_token = auth.create_session_token("alice", "admin")
+
+    assert auth.verify_account(old_admin_token) == ("alice", "user")
+    with pytest.raises(HTTPException) as exc_info:
+        auth.require_admin(auth.current_user(_FakeRequest(old_admin_token)))
+    assert exc_info.value.status_code == 403
+
+
+def test_a_forged_or_unknown_token_is_refused():
+    assert auth.verify_account("not-a-token") is None
+    assert auth.verify_account(auth.create_session_token("nobody", "admin")) is None
 
 
 def test_require_admin_403s_for_a_regular_user():

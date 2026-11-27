@@ -10,13 +10,21 @@ const PALETTE_CATEGORIES = [
 let paletteRoleFilter = "ALL";
 
 async function ensureTemplatesLoaded() {
-  if (availableTemplates) return availableTemplates;
+  if (availableTemplates && !availableTemplates._error) return availableTemplates;
   try {
     const resp = await fetch("/templates");
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      // the server says why (for example "ESXi could not be reached"): show that, not just the status code
+      const detail = (await resp.json().catch(() => ({}))).detail;
+      throw new Error(detail ? `${detail} (HTTP ${resp.status})` : `HTTP ${resp.status}`);
+    }
     availableTemplates = await resp.json();
+    // The backend names the reason when part of the catalog could not be read (for example the GNS3 template service did not
+    // answer): say so on screen, instead of leaving the user with a palette or port picker that is quietly poorer.
+    if (availableTemplates.warnings?.length) setMenubarMessage(availableTemplates.warnings.join(" "));
   } catch (err) {
-    availableTemplates = { gns3: [], esxi: [], gns3_categories: {}, _error: String(err) };
+    // kept so the palette can show the reason, but not for good: the next call asks again
+    availableTemplates = { gns3: [], esxi: [], gns3_categories: {}, _error: String(err.message || err) };
   }
   return availableTemplates;
 }

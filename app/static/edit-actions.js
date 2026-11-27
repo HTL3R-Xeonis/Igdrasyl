@@ -462,10 +462,34 @@ window.addEventListener("keydown", async (evt) => {
 
 // --- Actions on a multi-selection (and, for "Nodes > ... all", on every node) ---
 
+// A node has an instance when the live state reports a status for it. One without any status has none: an ESXi VM that was never
+// deployed or was deleted on ESXi, a GNS3 node that is not in the project. Starting, stopping or reloading it can only fail, so
+// this says so up front - for all of them at once - instead of after the first request has run into it.
+function nodesWithoutInstance(names) {
+  return names.filter((n) => nodesData[n] && !(nodesData[n].live && nodesData[n].live.status));
+}
+
+function describeMissingInstances(missing) {
+  const plural = missing.length === 1 ? "has" : "have";
+  return (
+    `${missing.length} of the selected nodes ${plural} no instance on ESXi or GNS3: ${missing.join(", ")}.\n` +
+    "A VM that was never deployed, or was deleted on ESXi, cannot be started - deploy the topology again to create it."
+  );
+}
+
 async function lifecycleMany(action, names) {
-  const live = names.filter((n) => nodesData[n] && nodesData[n].live);
-  if (!live.length) return;
   const label = { start: "Starting", stop: "Stopping", reload: "Reloading" }[action];
+  const missing = nodesWithoutInstance(names);
+  const live = names.filter((n) => nodesData[n] && !missing.includes(n));
+  if (missing.length) {
+    const why = describeMissingInstances(missing);
+    if (!live.length) {
+      await showAlert(why, { title: "Nodes" });
+      return;
+    }
+    const verb = action.charAt(0).toUpperCase() + action.slice(1);
+    if (!await showConfirm(`${why}\n\n${verb} the other ${live.length} node${live.length === 1 ? "" : "s"} anyway?`, { confirmLabel: verb })) return;
+  }
   const failures = [];
   for (const [index, name] of live.entries()) {
     setMenubarProgress(`${label} nodes…`, index, live.length);
@@ -486,8 +510,12 @@ async function lifecycleMany(action, names) {
 }
 
 async function confirmAndRunMany(action, names) {
-  const live = names.filter((n) => nodesData[n] && nodesData[n].live);
-  if (!live.length) { await showAlert("None of these nodes has a live instance.", { title: "Nodes" }); return; }
+  const live = names.filter((n) => nodesData[n] && nodesData[n].live && nodesData[n].live.status);
+  if (!live.length) {
+    const missing = nodesWithoutInstance(names);
+    await showAlert(missing.length ? describeMissingInstances(missing) : "None of these nodes has a live instance.", { title: "Nodes" });
+    return;
+  }
   if (action !== "start") {
     const verb = action === "stop" ? "Stop" : "Reload";
     const extra = action === "reload" ? " This restarts them from scratch." : "";
@@ -560,6 +588,31 @@ function computeGns3PortNames(spec) {
   return names;
 }
 
+// An ESXi VM has exactly the network adapters its links need: the Builder adds one (a port group "<node>_<interface>") for every
+// interface that gets linked, and VMware allows ten per VM. So the picker offers the interfaces the VM already has and ONE new
+// adapter - the next link adds it - instead of ten names for adapters that do not exist.
+const ESXI_MAX_ADAPTERS = 10;
+const CUSTOM_INTERFACE = "__custom_interface__";
+
+// The next unused eth<N> name, or null when the VM already has all ten adapters.
+function nextEsxiAdapterName(existing) {
+  if (existing.length >= ESXI_MAX_ADAPTERS) return null;
+  for (let i = 0; i < ESXI_MAX_ADAPTERS; i++) {
+    if (!existing.includes(`eth${i}`)) return `eth${i}`;
+  }
+  return null;
+}
+
+// The names Add Link can offer for a node without a live port list (a design node, an ESXi VM): the computed GNS3 port names,
+// the interfaces it already uses, and - for an ESXi VM - the one new adapter the next link would add.
+function computedInterfaceChoices(image, knownInterfaces, templates) {
+  const spec = image ? templates.gns3_port_specs?.[image] : null;
+  const isEsxiVm = !!image && (templates.esxi || []).includes(image);
+  const computed = spec ? computeGns3PortNames(spec) : [];
+  const names = Array.from(new Set([...computed, ...Object.keys(knownInterfaces || {})]));
+  return { names, newAdapter: !spec && isEsxiVm ? nextEsxiAdapterName(names) : null };
+}
+
 async function promptForInterface(nodeName, anchor) {
   // The Internet uplink has exactly one port - nothing to choose.
   if (nodesData[nodeName] && isUplinkImage(nodesData[nodeName].image)) {
@@ -572,9 +625,18 @@ async function promptForInterface(nodeName, anchor) {
   let ports = null;
   try {
     const resp = await fetch(apiPath(`/nodes/${encodeURIComponent(nodeName)}/ports`));
-    if (resp.ok) ports = await resp.json();
+    if (resp.ok) {
+      ports = await resp.json();
+    } else if (resp.status !== 404) {
+      // 404 is the expected "no live port list" (an ESXi VM, a design node): the computed list below applies. Anything else is a
+      // real failure (GNS3 does not answer, ...), and a computed list could offer ports that are taken or do not exist.
+      const detail = (await resp.json().catch(() => ({}))).detail || `HTTP ${resp.status}`;
+      await showAlert(`Could not read the ports of ${nodeName}: ${detail}`, { title: "Interface" });
+      return null;
+    }
   } catch (err) {
-    // fall through to the fallbacks below
+    await showAlert(`Could not read the ports of ${nodeName}: ${err}`, { title: "Interface" });
+    return null;
   }
 
   let options, defaultValue;
@@ -590,21 +652,30 @@ async function promptForInterface(nodeName, anchor) {
       disabled: taken(p),
     }));
     defaultValue = free.length ? free[0].name : undefined;
+    // An ESXi VM's list is the adapters it has now: the next link adds one more, and the name stays the user's to choose.
+    const templates = await ensureTemplatesLoaded();
+    if ((templates.esxi || []).includes(nodesData[nodeName]?.image)) {
+      const newAdapter = nextEsxiAdapterName(ports.map((p) => p.name));
+      if (newAdapter) {
+        options.push({ value: newAdapter, label: `${newAdapter} (new adapter)` });
+        if (defaultValue === undefined) defaultValue = newAdapter;
+      }
+      options.push({ value: CUSTOM_INTERFACE, label: "Other name…" });
+    }
   } else {
     const node = nodesData[nodeName];
     const knownInterfaces = node?.interfaces || {};
     const templates = await ensureTemplatesLoaded();
-    const spec = node ? templates.gns3_port_specs?.[node.image] : null;
-    // Every port GNS3 would actually create for this image (computed,
-    // never deployed - see computeGns3PortNames), with any already-
-    // linked interface folded in and marked in-use even if it somehow
-    // isn't one of the computed names (a link made before this image's
-    // spec was available, or a spec that's since changed upstream).
-    const names = spec
-      ? Array.from(new Set([...computeGns3PortNames(spec), ...Object.keys(knownInterfaces)]))
-      : Object.keys(knownInterfaces);
-    if (!names.length) {
-      return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
+    // Every port GNS3 would actually create for this image (computed, never deployed - see computeGns3PortNames), with any
+    // already-linked interface folded in and marked in-use even if it somehow isn't one of the computed names (a link made
+    // before this image's spec was available, or a spec that's since changed upstream). An ESXi VM has no live port list
+    // either: it has the interfaces its links already use, and a new link adds one more (see nextEsxiAdapterName).
+    const { names, newAdapter } = computedInterfaceChoices(node?.image, knownInterfaces, templates);
+    if (!names.length && !newAdapter) {
+      // Nothing is known about this image (for example a GNS3 Cloud or a Docker node, whose ports GNS3 names on demand):
+      // the name has to be typed. If the template service did not answer, that is the reason - say so.
+      const reason = templates.warnings?.length ? " (the template service did not answer, so no port list is available)" : "";
+      return showTextPrompt(`Interface name on ${nodeName}${reason}:`, { title: "Interface" });
     }
     const inUse = (n) => knownInterfaces[n];
     const free = names.filter((n) => !inUse(n));
@@ -613,9 +684,19 @@ async function promptForInterface(nodeName, anchor) {
       label: `${n}${inUse(n) ? " (in use)" : ""}`,
       disabled: !!inUse(n),
     }));
+    if (newAdapter) {
+      options.push({ value: newAdapter, label: `${newAdapter} (new adapter)` });
+      free.push(newAdapter);
+    }
+    // The list is computed, not read from a deployed node, so a name it does not contain stays possible.
+    options.push({ value: CUSTOM_INTERFACE, label: "Other name…" });
     defaultValue = free.length ? free[0] : undefined;
   }
-  return showInlineDropdown(options, { title: `Interface on ${nodeName}`, anchor, defaultValue });
+  const chosen = await showInlineDropdown(options, { title: `Interface on ${nodeName}`, anchor, defaultValue });
+  if (chosen === CUSTOM_INTERFACE) {
+    return showTextPrompt(`Interface name on ${nodeName}:`, { title: "Interface" });
+  }
+  return chosen;
 }
 
 async function handleLinkModeClick(name, anchor) {

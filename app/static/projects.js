@@ -320,7 +320,13 @@ async function restartIntoProject(preview) {
     window.location.reload();
     return;
   }
-  try { await fetch(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, {method:"POST"}); } catch (error) {}
+  try {
+    await settingsRequest(`/settings-profiles/${encodeURIComponent(preview.host.filename)}/activate`, { method: "POST" });
+  } catch (error) {
+    // A refusal (the profile is invalid, not found, ...) carries its reason and is shown. Only a dropped connection - the server
+    // restarting under this very request - is expected here.
+    if (!(error instanceof TypeError)) throw error;
+  }
   if (await connectionMonitor.waitUntilBack(30000)) { window.location.reload(); return; }
   throw new Error("Server did not return after restart");
 }

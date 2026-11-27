@@ -60,6 +60,11 @@ def get_or_create_backend(app: FastAPI) -> TopologyBackend:
     return backend
 
 
+# Why the last GNS3 template fetch failed (None while it works). list_templates reports it to the frontend as a warning,
+# so the missing port lists and categories are explained on screen and not only in the log.
+_template_detail_error: str | None = None
+
+
 def _fetch_gns3_templates() -> list[dict]:
     """
     Raw template list from the GNS3 Template-API server (see
@@ -73,10 +78,12 @@ def _fetch_gns3_templates() -> list[dict]:
     guessing (categories) or free text (ports) for every GNS3 template,
     a degraded UI, not a broken /templates endpoint.
     """
+    global _template_detail_error
     if Settings.API.LITERAL_API_VALUES:
         return []
     try:
         data = APIHandler.get(f"{Settings.API.GNS3_TEMPLATE_SERVER_URL}/api/templates")
+        _template_detail_error = None
         return data.get("templates", [])
     except (
         requests.exceptions.RequestException,
@@ -87,6 +94,7 @@ def _fetch_gns3_templates() -> list[dict]:
         logger.warning(
             f"Couldn't fetch GNS3 template details, frontend will fall back to guessing/free text: {exc}"
         )
+        _template_detail_error = f"{type(exc).__name__}: {exc}"
         return []
 
 
@@ -123,12 +131,12 @@ def _gns3_template_port_specs(templates: list[dict]) -> dict[str, dict[str, Any]
     just port_name_format.format(i, 0) - except index 0 uses
     first_port_name verbatim when the template gives one.
 
-    A template missing "adapters" or "port_name_format" (GNS3's own
-    builtin infra nodes - Cloud/NAT/VPCS/Ethernet switch|hub/Frame Relay
-    switch/ATM switch - and Docker-based ones, all of which GNS3 names
-    dynamically/on demand rather than declaring a fixed format) simply
-    has no entry here; the frontend already falls back to free text for
-    any image with none.
+    A template missing "adapters" or "port_name_format" has no entry here
+    unless it is one of the built-in nodes with fixed port names
+    (_BUILTIN_PORT_SPECS: Ethernet switch, Ethernet hub, VPCS). The others
+    (Cloud, NAT, Frame Relay/ATM switch, Docker-based ones) GNS3 names
+    dynamically; the frontend offers a free-text field for those, and the
+    ESXi images get the adapter names eth0..eth9 (see promptForInterface).
     :param templates: _fetch_gns3_templates()'s own result
     """
     specs = {}
@@ -143,7 +151,35 @@ def _gns3_template_port_specs(templates: list[dict]) -> dict[str, dict[str, Any]
                 "port_segment_size": template.get("port_segment_size") or 0,
                 "first_port_name": template.get("first_port_name") or "",
             }
+        elif name in _BUILTIN_PORT_SPECS:
+            specs[name] = dict(_BUILTIN_PORT_SPECS[name])
     return specs
+
+
+# GNS3's own simple infrastructure nodes declare no port format in the template list, but GNS3 creates their ports with
+# fixed names when the node is deployed (the Ethernet switch and hub with eight ports "Ethernet0".."Ethernet7", VPCS with
+# one). The offline design canvas has no deployed node to ask, so Add Link is given the same names from here. The Builder
+# matches an interface to a GNS3 port by name, by the only port, or by the trailing number, so these names always resolve.
+_BUILTIN_PORT_SPECS: dict[str, dict[str, Any]] = {
+    "Ethernet switch": {
+        "adapters": 8,
+        "port_name_format": "Ethernet{0}",
+        "port_segment_size": 0,
+        "first_port_name": "",
+    },
+    "Ethernet hub": {
+        "adapters": 8,
+        "port_name_format": "Ethernet{0}",
+        "port_segment_size": 0,
+        "first_port_name": "",
+    },
+    "VPCS": {
+        "adapters": 1,
+        "port_name_format": "Ethernet{0}",
+        "port_segment_size": 0,
+        "first_port_name": "",
+    },
+}
 
 
 _HIDDEN_TEMPLATE_NAMES = frozenset({"gns3-vm", "ginnungagap-appliance"})
@@ -184,7 +220,7 @@ def list_templates() -> dict[str, Any]:
         for template in _fetch_gns3_templates()
         if not _is_hidden(template.get("name", ""), hidden)
     ]
-    return {
+    result: dict[str, Any] = {
         "gns3": sorted(
             name
             for name in APIHandler.get_gns3_template_names()
@@ -198,6 +234,14 @@ def list_templates() -> dict[str, Any]:
         "gns3_categories": _gns3_template_categories(gns3_templates),
         "gns3_port_specs": _gns3_template_port_specs(gns3_templates),
     }
+    if _template_detail_error:
+        result["warnings"] = [
+            (
+                "The GNS3 template service did not answer, so device categories and port lists are not available "
+                f"({_template_detail_error})."
+            )
+        ]
+    return result
 
 
 _PENDING_NAMES: set[str] = set()  # lower-cased names of nodes being added right now

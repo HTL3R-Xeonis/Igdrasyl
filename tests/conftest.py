@@ -24,7 +24,7 @@ from src.settings import Settings
 
 import app.gateway_main as gateway_module
 import app.main as main_module
-from app import auth, design
+from app import auth, design, users
 from app.routes import common
 from app.topology import load_graph, resolve_project_name
 
@@ -91,6 +91,17 @@ def _push_storage(tmp_path, monkeypatch):
     )
 
 
+_TEST_PASSWORD_HASH: str | None = None
+
+
+@pytest.fixture
+def empty_user_store():
+    """For tests about accounts themselves (first boot, "last admin" rules): start without the fixtures' standard accounts."""
+    store = users._store()
+    if store.exists():
+        store.unlink()
+
+
 @pytest.fixture(autouse=True)
 def _auth_storage_tmp_file(tmp_path, monkeypatch):
     """
@@ -112,6 +123,27 @@ def _auth_storage_tmp_file(tmp_path, monkeypatch):
         str(tmp_path / "ai_config.json"),
     )
     monkeypatch.setattr(auth, "_cached_secret", None)
+    # A session token only counts for an account that still exists (auth.verify_account): the fixtures' standard callers need
+    # one. Written straight into the store with one password hash made once - hashing three passwords for every one of the
+    # ~1500 tests would take most of the run (PBKDF2 is slow on purpose).
+    global _TEST_PASSWORD_HASH
+    if _TEST_PASSWORD_HASH is None:
+        _TEST_PASSWORD_HASH = users.hash_password("correct-horse-battery")
+    users._write(
+        {
+            name: {
+                "password_hash": _TEST_PASSWORD_HASH,
+                "role": role,
+                "created_at": 0.0,
+                "allowed_hosts": "ALL",
+            }
+            for name, role in (
+                ("test-admin", "admin"),
+                ("test-user", "user"),
+                ("test-readonly", "readonly"),
+            )
+        }
+    )
 
 
 @pytest.fixture

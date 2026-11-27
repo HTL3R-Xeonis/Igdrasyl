@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from app.auth import SESSION_COOKIE, verify_session_token
+from app.auth import SESSION_COOKIE, verify_account
 
 _ALLOWED_PATHS = frozenset(
     {
@@ -88,7 +88,7 @@ class AuthMiddleware:
             return
 
         token = _cookie(scope, SESSION_COOKIE)
-        user = verify_session_token(token) if token else None
+        user = verify_account(token) if token else None
         if user is None:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})

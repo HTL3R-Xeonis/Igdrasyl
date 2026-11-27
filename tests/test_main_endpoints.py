@@ -367,11 +367,40 @@ def test_node_ports_returns_real_interfaces_for_gns3_node(client, app_state):
     assert resp.json() == [{"name": "gi0/0", "in_use": False}]
 
 
-def test_node_ports_404_for_esxi_node(client, app_state):
-    app_state.project_id = "proj-1"
-    with patch("app.gns3_state.GNS3Connection.list_project_nodes", return_value=[]):
-        resp = client.get("/nodes/VM1/ports")
+def test_node_ports_404_for_an_esxi_vm_that_is_not_on_esxi(client, app_state):
+    app_state.esxi_connection.get_vm.return_value = None
+    resp = client.get("/nodes/VM1/ports")
     assert resp.status_code == 404
+    assert "not found on ESXi" in resp.json()["detail"]
+
+
+def test_node_ports_of_an_esxi_vm_come_from_its_adapters(client, app_state):
+    from types import SimpleNamespace
+
+    from pyVmomi import vim
+
+    nic = MagicMock(spec=vim.vm.device.VirtualVmxnet3)
+    nic.backing = SimpleNamespace(deviceName="VM1_eth0")
+    nic.macAddress = "00:50:56:00:00:01"
+    vm = MagicMock()
+    vm.config.hardware.device = [nic]
+    app_state.esxi_connection.get_vm.return_value = vm
+
+    resp = client.get("/nodes/VM1/ports")
+
+    assert resp.status_code == 200
+    assert [(p["name"], p["mac"]) for p in resp.json()] == [
+        ("eth0", "00:50:56:00:00:01")
+    ]
+
+
+def test_node_ports_report_an_unreachable_esxi_instead_of_falling_back(
+    client, app_state
+):
+    app_state.esxi_connection.get_vm.side_effect = TimeoutError("ESXi is slow")
+    resp = client.get("/nodes/VM1/ports")
+    assert resp.status_code == 503
+    assert "ESXi is slow" in resp.json()["detail"]
 
 
 def test_nodes_resolves_esxi_power_state_independent_of_gns3_project(client, app_state):

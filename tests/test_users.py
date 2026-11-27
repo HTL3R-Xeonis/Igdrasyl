@@ -6,6 +6,8 @@ import pytest
 
 from app import users
 
+pytestmark = pytest.mark.usefixtures("empty_user_store")
+
 
 @pytest.fixture(autouse=True)
 def _users_dir(tmp_path, monkeypatch):

@@ -21,6 +21,8 @@ from threading import Lock
 
 from fastapi import Depends, HTTPException, Request
 
+from app import users
+
 SESSION_COOKIE = "xeonis_session"
 _SESSION_SECONDS = 12 * 60 * 60
 _REMEMBER_SECONDS = 30 * 24 * 60 * 60
@@ -83,10 +85,25 @@ def verify_session_token(token: str) -> tuple[str, str] | None:
     return username, role
 
 
+def verify_account(token: str) -> tuple[str, str] | None:
+    """
+    verify_session_token plus: the account must still exist, and its stored role is the one that counts. A signed token stays
+    valid for up to 30 days; without this a deleted account kept working with the role it had when it logged in, and a demoted
+    admin stayed an admin. Never raises.
+    """
+    result = verify_session_token(token)
+    if result is None:
+        return None
+    record = users.get_user(result[0])
+    if record is None:
+        return None
+    return result[0], record["role"]
+
+
 def current_user(request: Request) -> tuple[str, str]:
     """FastAPI dependency: the (username, role) of the logged-in caller. :raises HTTPException: 401 if not logged in."""
     token = request.cookies.get(SESSION_COOKIE)
-    result = verify_session_token(token) if token else None
+    result = verify_account(token) if token else None
     if result is None:
         raise HTTPException(401, "Not logged in")
     return result

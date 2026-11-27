@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -32,8 +33,24 @@ def _design_path() -> Path:
     return Path(os.getenv(_DESIGN_FILE_ENV_VAR, _DEFAULT_DESIGN_FILE))
 
 
+_load_problem: str | None = None
+
+
+def take_load_problem() -> str | None:
+    """What went wrong with the last load() (and where the file went), once - for the startup warning; None if nothing."""
+    global _load_problem
+    problem, _load_problem = _load_problem, None
+    return problem
+
+
 def load() -> design.DesignState | None:
-    """None if there's no saved sketch, or the file can't be read/parsed - the caller falls back to design.new_state()."""
+    """
+    None if there's no saved sketch, or the file can't be read/parsed - the caller falls back to design.new_state().
+
+    An unreadable file is moved aside (design_state.json.corrupt-<time>) instead of being left where the next save would
+    overwrite it: the sketch it holds may still be recoverable by hand. take_load_problem() says so.
+    """
+    global _load_problem
     path = _design_path()
     if not path.exists():
         return None
@@ -41,9 +58,16 @@ def load() -> design.DesignState | None:
         with open(path) as f:
             return design.from_dict(json.load(f))
     except (OSError, ValueError, KeyError) as exc:
-        logger.warning(
-            f"Couldn't parse saved design sketch at {path}, ignoring it: {exc}"
+        aside = path.with_name(
+            f"{path.name}.corrupt-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         )
+        try:
+            path.rename(aside)
+            kept = f"kept as {aside.name}"
+        except OSError as rename_exc:
+            kept = f"could not be moved aside ({rename_exc}) and will be overwritten by the next save"
+        _load_problem = f"The saved design sketch {path.name} was unreadable ({exc}); {kept}. Starting with an empty sketch."
+        logger.warning(_load_problem)
         return None
 
 

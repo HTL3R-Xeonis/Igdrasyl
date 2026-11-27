@@ -13,6 +13,7 @@ from src.graph.environment import Environment
 from app import (
     capture,
     design,
+    esxi_ports,
     esxi_serial,
     label_layout,
     lifecycle,
@@ -139,15 +140,21 @@ def nodes() -> list[dict[str, Any]]:
 @app.get("/nodes/{name}/ports")
 def node_ports(name: str) -> list[dict[str, Any]]:
     """
-    Real, live interface names for a GNS3 node - Add Link's own picker
-    uses this instead of free text. ESXi VM interfaces have no
-    equivalent live source, so those 404 here and the frontend falls
-    back to free text for them.
+    Real, live interface names for a node - Add Link's own picker uses this instead of free text. A GNS3 node's come from GNS3;
+    an ESXi VM's from its own network adapters (app/esxi_ports.py: no VMware Tools needed). A node with no live instance 404s,
+    and the frontend then offers the computed list (design nodes, a VM that was never deployed).
     """
+    node = app.state.graph.nodes.get(name) if app.state.graph is not None else None
     try:
+        if node is not None and node.env == Environment.ON_ESXI:
+            return esxi_ports.list_esxi_node_ports(app, name)
         return list_node_ports(app, name)
     except (ValueError, NoLiveProject) as exc:
         raise HTTPException(404, str(exc)) from exc
+    except LIVE_READ_ERRORS as exc:
+        raise HTTPException(
+            503, f"The ports of {name!r} could not be read: {exc}"
+        ) from exc
 
 
 @app.get("/layout")

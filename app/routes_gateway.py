@@ -64,7 +64,7 @@ from app import (
     settings_profiles,
     users,
 )
-from app.auth import SESSION_COOKIE, current_user, require_admin, verify_session_token
+from app.auth import SESSION_COOKIE, current_user, require_admin, verify_account
 from app.routes import auth as auth_routes
 from app.routes.common import settings_call
 from app.routes.models import ConnectionSettingsUpdate
@@ -105,7 +105,7 @@ def _caller_username(scope) -> str | None:
     raw = _cookie(scope, SESSION_COOKIE)
     if not raw:
         return None
-    user = verify_session_token(raw)
+    user = verify_account(raw)
     return user[0] if user else None
 
 
@@ -190,7 +190,7 @@ def _pick_backend_page(
     user: tuple[str, str], error: str | None = None, host: str | None = None
 ) -> str:
     username, role = user
-    record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+    record = users.get_user(username) or {"role": role, "allowed_hosts": []}
     tiles = ""
     for profile in settings_profiles.list_profiles():
         filename = profile["filename"]
@@ -247,7 +247,7 @@ def _pick_backend_page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ginnungagap - Choose a server</title>
 <link rel="icon" type="image/svg+xml" href="/ginnungagap-mark.svg">
-<link rel="stylesheet" href="/styles.css?v=ginnungagap-67">
+<link rel="stylesheet" href="/styles.css?v=ginnungagap-71">
 <style>
   body {{ display: block; padding: 0 16px; }}
   main.backend-picker {{ display: block; width: 100%; max-width: 640px; margin: 0 auto; padding: 56px 0 40px; }}
@@ -520,7 +520,7 @@ def register(app: FastAPI) -> None:
     @app.get("/settings-profiles")
     def list_settings_profiles(request: Request, user: AnyUser) -> list[dict[str, Any]]:
         username, role = user
-        record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+        record = users.get_user(username) or {"role": role, "allowed_hosts": []}
         selected = selected_backend(request.scope)
         return [
             {**profile, "active": profile["filename"] == selected}
@@ -708,10 +708,10 @@ def register(app: FastAPI) -> None:
         except FileNotFoundError as exc:
             return refuse(404, "not_found", str(exc))
         username, role = user
-        record = users.get_user(username) or {"role": role, "allowed_hosts": "ALL"}
+        record = users.get_user(username) or {"role": role, "allowed_hosts": []}
         if not users.can_access_host(record, filename):
             return refuse(403, "forbidden", f"Not allowed to use host {filename!r}")
-        missing = required_settings.missing_api_settings(
+        missing = required_settings.missing_settings(
             settings_profiles.profile_path(filename)
         )
         if missing:

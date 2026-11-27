@@ -338,7 +338,7 @@ reason until it is reachable, and the app connects by itself afterwards (10 s be
 
 Replaces the configured GNS3 VM with a freshly imported one from its own
 OVA (`src.gns3_vm_deploy.deploy_fresh_gns3_vm`, in Mjonyr) -
-available two ways. The new VM always gets **4 vCPUs and 8 GB RAM** (set after the
+available two ways. The new VM always gets **8 vCPUs and 16 GB RAM** (at most the host's logical processors and half of its memory) (set after the
 import, before it is powered on), whatever the OVA declares - the stock OVA's
 1 vCPU / 2 GB cannot boot a handful of IOSv nodes:
 
